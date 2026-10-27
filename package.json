@@ -1,0 +1,15 @@
+{
+  "name": "meshlet-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A from-scratch WebGPU and WebAssembly meshlet rendering benchmark",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "start": "node scripts/serve.mjs",
+    "build:wasm": "node wasm/build-bounds.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "npm run build:wasm && npm test"
+  },
+  "engines": { "node": ">=20" }
+}

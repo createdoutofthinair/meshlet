@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080d13">
+  <title>Meshlet — WebGPU Engine Lab</title>
+  <link rel="stylesheet" href="./src/ui/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><span class="brand-icon" aria-hidden="true">✳</span><div><strong>MESHLET</strong><small>ENGINE LAB <span> / </span> 001</small></div></div>
+      <div class="header-center"><span class="status-dot"></span><span id="device-status">INITIALIZING WEBGPU</span></div>
+      <div class="header-meta">FROM SCRATCH <span>·</span> WEBGPU + WASM</div>
+    </header>
+    <main>
+      <section class="viewport" aria-label="Interactive 3D meshlet scene">
+        <canvas id="view" aria-label="3D meshlet benchmark scene"></canvas>
+        <div class="view-heading"><div class="eyebrow"><span class="eyebrow-mark"></span> REAL-TIME GEOMETRY</div><h1>See the invisible<br><em>work less.</em></h1><p>Detailed geometry. GPU-driven visibility.<br>One indirect draw.</p></div>
+        <div class="viewport-corner"><div class="corner-line"></div><span>PROCEDURAL FIELD <b>/ 01</b></span></div>
+        <div class="view-hint"><span>↖</span> DRAG TO ORBIT <i></i> SCROLL TO ZOOM</div>
+        <div class="view-badge"><span class="pulse"></span><span id="view-label">PREPARING SCENE</span></div>
+        <div id="loading" class="loading"><div class="spinner"></div><strong id="loading-title">Waking up the GPU</strong><span id="loading-detail">Preparing the engine and geometry</span></div>
+        <div id="error" class="error" hidden><strong>Unable to start the engine</strong><p id="error-message"></p><a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API#browser_compatibility" target="_blank" rel="noopener">Check WebGPU browser support ↗</a></div>
+      </section>
+      <aside class="panel">
+        <div class="panel-head"><div><span class="kicker">LIVE TELEMETRY</span><h2>Performance</h2></div><span class="live"><span></span> LIVE</span></div>
+        <div class="frame-metrics"><div><span class="metric-label">FRAME RATE</span><div class="metric-large"><span id="fps">—</span><small>FPS</small></div></div><div class="frame-time"><span class="metric-label">FRAME TIME</span><strong id="frame-ms">—</strong><small>ms</small></div></div>
+        <div class="bar"><span id="fps-bar"></span></div><p class="metric-note">Frame rate can be limited by display refresh.</p>
+        <div class="section-title"><span>GPU VISIBILITY</span><span>01 / 03</span></div>
+        <div class="stat-row"><span>Visible meshlets</span><strong id="visible">—</strong></div>
+        <div class="stat-row"><span>Candidate meshlets</span><strong id="candidates">—</strong></div>
+        <div class="stat-row"><span>Visible triangles</span><strong id="triangles">—</strong></div>
+        <div class="visibility-track"><span id="visibility-bar"></span></div><div class="track-labels"><span>VISIBLE</span><span id="visibility-percent">—</span></div>
+        <div class="section-title"><span>FRAME COST</span><span>02 / 03</span></div>
+        <div class="stat-row"><span>CPU encode + submit</span><strong id="cpu-ms">—</strong></div>
+        <div class="stat-row"><span>GPU visibility</span><strong id="gpu-cull">—</strong></div>
+        <div class="stat-row"><span>GPU render</span><strong id="gpu-render">—</strong></div>
+        <p class="metric-note" id="timing-note">Checking timestamp support…</p>
+        <div class="section-title"><span>BENCHMARK</span><span>03 / 03</span></div>
+        <p class="bench-copy">2s warm-up, then a 10s capture of frame times and available GPU timings.</p>
+        <button id="benchmark" class="run-button" disabled><span>RUN BENCHMARK</span><b>↗</b></button>
+        <div id="bench-result" class="bench-result" hidden></div>
+        <button id="export" class="export-button" hidden>↓ &nbsp; EXPORT RESULTS AS JSON</button>
+      </aside>
+    </main>
+    <section class="control-bar" aria-label="Benchmark controls">
+      <div class="control-intro"><span class="kicker">SCENE CONTROLS</span><strong>Make it work.</strong></div>
+      <label class="control"><span>OBJECT GRID</span><select id="grid"><option value="4">4 × 4</option><option value="8" selected>8 × 8</option><option value="12">12 × 12</option><option value="16">16 × 16</option><option value="24">24 × 24</option></select></label>
+      <label class="control"><span>MESH DETAIL</span><select id="detail"><option value="24">24 / LOW</option><option value="36" selected>36 / MEDIUM</option><option value="48">48 / HIGH</option><option value="96">96 / EXTREME</option></select></label>
+      <label class="control"><span>RENDER SCALE</span><select id="resolution"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></label>
+      <label class="toggle-control"><span>FRUSTUM CULLING<small>GPU compute</small></span><input id="culling" type="checkbox" checked><i></i></label>
+      <label class="toggle-control"><span>MESHLET COLORS<small>Debug view</small></span><input id="colors" type="checkbox"><i></i></label>
+      <button class="reset-button" id="reset" title="Reset camera">↺ <span>RESET VIEW</span></button>
+    </section>
+    <footer><span>WEBGPU COMPUTE <b>→</b> MESHLET COMPACTION <b>→</b> INDIRECT RENDER</span><span id="setup-info">BUILDING GEOMETRY</span></footer>
+  </div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

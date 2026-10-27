@@ -1,0 +1,17 @@
+name: Engine checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm run check
+      - name: Verify committed WASM is reproducible
+        run: git diff --exit-code -- src/geometry/bounds.wasm
