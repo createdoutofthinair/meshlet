@@ -1,0 +1,67 @@
+@group(0) @binding(0) var<uniform> frame:PlanetFrame;
+@group(0) @binding(1) var<storage,read> patches:array<Patch>;
+@group(0) @binding(2) var<storage,read> vertices:array<PlanetVertex>;
+@group(0) @binding(3) var<storage,read> visible:array<u32>;
+struct Output {
+ @builtin(position) position:vec4<f32>,
+ @location(0) normal:vec3<f32>,
+ @location(1) direction:vec3<f32>,
+ @location(2) relative:vec3<f32>,
+ @location(3) height:f32,
+ @location(4) @interpolate(flat) level:u32,
+ @location(5) @interpolate(linear) bary:vec3<f32>,
+ @location(6) @interpolate(flat) edgeMask:u32,
+ @location(7) cavity:f32,
+};
+fn onPatchEdge(a:vec2<u32>,b:vec2<u32>)->bool {
+ return (a.x==b.x && (a.x==0u || a.x==CELLS)) || (a.y==b.y && (a.y==0u || a.y==CELLS));
+}
+@vertex
+fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->Output {
+ let entry=visible[instance];let slot=entry>>4u;let meshlet=entry&15u;let tile=patches[slot];
+ let cell=vertex/6u;let corner=vertex%6u;
+ let offsets=array<vec2<u32>,6>(vec2<u32>(0u,0u),vec2<u32>(1u,0u),vec2<u32>(0u,1u),vec2<u32>(1u,0u),vec2<u32>(1u,1u),vec2<u32>(0u,1u));
+ let cellOrigin=vec2<u32>((meshlet%4u)*4u+cell%4u,(meshlet/4u)*4u+cell/4u);
+ let triBase=(corner/3u)*3u;
+ let a=cellOrigin+offsets[triBase];let b=cellOrigin+offsets[triBase+1u];let c=cellOrigin+offsets[triBase+2u];
+ var coord=cellOrigin+offsets[corner];let stitch=tile.details.z;
+ if(coord.x==0u && (stitch&1u)!=0u && coord.y%2u!=0u){coord.y-=1u;}
+ if(coord.x==CELLS && (stitch&2u)!=0u && coord.y%2u!=0u){coord.y-=1u;}
+ if(coord.y==0u && (stitch&4u)!=0u && coord.x%2u!=0u){coord.x-=1u;}
+ if(coord.y==CELLS && (stitch&8u)!=0u && coord.x%2u!=0u){coord.x-=1u;}
+ let vert=vertices[slot*GRID_COUNT+(coord.y+1u)*GRID+coord.x+1u];
+ let relative=tile.relative.xyz+vert.position.xyz;
+ var mask=0u;
+ if((frame.counts.w & 8u)!=0u){if(onPatchEdge(b,c)){mask|=1u;}if(onPatchEdge(c,a)){mask|=2u;}if(onPatchEdge(a,b)){mask|=4u;}}
+ var bary=vec3<f32>(0.0,0.0,1.0);if(corner%3u==0u){bary=vec3<f32>(1.0,0.0,0.0);}else if(corner%3u==1u){bary=vec3<f32>(0.0,1.0,0.0);}
+ var out:Output;out.position=frame.viewProjection*vec4<f32>(relative,1.0);out.normal=vert.normal.xyz;
+ out.direction=normalize(tile.centerDirection.xyz+vert.position.xyz/frame.settings.x);out.relative=relative;out.height=vert.position.w;
+ out.level=tile.details.y;out.bary=bary;out.edgeMask=mask;out.cavity=vert.normal.w;return out;
+}
+fn levelColor(level:u32)->vec3<f32>{
+ let palette=array<vec3<f32>,6>(vec3<f32>(0.12,0.66,0.80),vec3<f32>(0.23,0.75,0.48),vec3<f32>(0.85,0.67,0.20),vec3<f32>(0.90,0.36,0.20),vec3<f32>(0.73,0.27,0.68),vec3<f32>(0.36,0.37,0.90));
+ return palette[level%6u];
+}
+@fragment
+fn fs(in:Output)->@location(0) vec4<f32> {
+ let n=normalize(in.normal);let radial=normalize(in.direction);let light=normalize(frame.sun.xyz);
+ let slope=1.0-clamp(dot(n,radial),0.0,1.0);let h=in.height;
+ let deep=vec3<f32>(0.012,0.055,0.092);let ocean=vec3<f32>(0.025,0.17,0.23);
+ let lowland=vec3<f32>(0.25,0.31,0.20);let upland=vec3<f32>(0.30,0.28,0.22);
+ let rock=vec3<f32>(0.34,0.34,0.32);let snow=vec3<f32>(0.78,0.84,0.85);
+ var base=mix(lowland,upland,smoothstep(.4,2.2,h));base=mix(base,rock,smoothstep(.006,.12,slope));
+ base=mix(base,snow,smoothstep(7.0,9.3,h)*(1.0-smoothstep(.5,.85,slope)*.5));
+ if(h<0.0){base=mix(deep,ocean,smoothstep(-4.0,0.0,h));}
+ if((frame.counts.w&2u)!=0u){base=levelColor(in.level);}
+ let diffuse=max(dot(n,light),0.0);let fill=.22+.10*max(n.y,0.0);
+ var color=base*(fill+diffuse*.95)*(1.0-in.cavity*.30);
+ let view=normalize(-in.relative);let rim=pow(1.0-clamp(dot(radial,view),0.0,1.0),4.0)*.055;
+ color+=vec3<f32>(.10,.38,.58)*rim;
+ color=pow(max(color,vec3<f32>(0.0)),vec3<f32>(1.0/2.2));
+ if((frame.counts.w&12u)!=0u){
+  let edge=vec3<f32>(1.0)-smoothstep(vec3<f32>(.55),vec3<f32>(1.7),in.bary/max(fwidth(in.bary),vec3<f32>(.00001)));
+  if((frame.counts.w&4u)!=0u){color=mix(color,vec3<f32>(.02,.03,.04),max(edge.x,max(edge.y,edge.z))*.75);}
+  if((frame.counts.w&8u)!=0u){var e=0.0;if((in.edgeMask&1u)!=0u){e=max(e,edge.x);}if((in.edgeMask&2u)!=0u){e=max(e,edge.y);}if((in.edgeMask&4u)!=0u){e=max(e,edge.z);}color=mix(color,vec3<f32>(.9,.98,1.0),e*.85);}
+ }
+ return vec4<f32>(color,1.0);
+}

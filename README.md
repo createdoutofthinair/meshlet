@@ -20,6 +20,12 @@ Run **Run benchmark** for a two-second warm-up and ten-second capture. Export do
 
 If timestamp queries are unavailable, GPU timing is shown as unavailable; frame, CPU and visibility measurements still work. Add `?noTimestamps=1` to disable timestamp queries for troubleshooting. Adapter information may be limited by browser privacy settings.
 
+## Procedural Planet Lab
+
+Open [Planet Lab](https://createdoutofthinair.github.io/meshlet/planet.html) from the navigation, or run `npm run dev` and visit <http://localhost:4173/planet.html>. Enter a seed or generate one randomly, then use **Find Highlands** to sample the seeded terrain on the GPU and move the camera to an elevated region. Drag to travel, scroll to change surface clearance, and hold Shift while dragging in flyover mode to change the view direction. The seed is included in the page URL.
+
+The planet uses a balanced cube-sphere quadtree, GPU-generated terrain patches, 16 meshlets per patch and an indirect draw. The terrain uses seeded plate-inspired masks, warped continental fields, multi-scale ridges and directional detail; elevation coloring and a flat ocean are procedural, with no image textures. LOD colors, patch boundaries and triangle wireframe are available in the side panel. The terrain is an experimental procedural baseline, not a physical erosion simulation or a finished photorealistic Earth. See [planet-terrain-research.md](docs/planet-terrain-research.md) for sources, design choices and limitations.
+
 ## Architecture
 
 1. **Geometry preparation:** JavaScript builds a deterministic, detailed, deformed spherical surface in a worker. Each 6 × 6 spatial patch has three index ranges with 72, 18, or 8 triangles, sharing a vertex buffer. WebAssembly scans the high-detail range and stores an AABB-derived conservative bounding sphere that also contains the lower levels. The UI reports JS generation and WASM preparation separately.
@@ -36,7 +42,7 @@ Source layout:
 - `wasm/` — deterministic dependency-free WASM builder and kernel explanation.
 - `src/math.js` — matrices, orbit camera and WebGPU frustum planes.
 - `src/main.js`, `src/ui/` — benchmark, controls and interface.
-- `tests/` — geometry, bounds and frustum tests plus an offscreen WebGPU smoke test.
+- `tests/` — geometry, bounds and frustum tests plus offscreen WebGPU smoke tests.
 
 ## Verification
 
@@ -44,7 +50,7 @@ Source layout:
 npm run check
 ```
 
-This rebuilds the WASM binary and runs the dependency-free Node tests, including verifying every generated meshlet's bounds and all six frustum planes. To test actual GPU compute and rendering, run the server and open <http://localhost:4173/tests/webgpu-smoke.html>. It renders to an offscreen GPU texture, verifies indirect counts, checks that culling preserves the image, validates all forced and automatic LODs, and exercises color, geometry edges, and projected-bounds overlays. Its result appears on the page and in `window.__webgpuSmokeDone`. This is a correctness check, not a hardware performance benchmark. In CI the reproducible WASM and Node tests run automatically; GPU hardware and a real browser remain necessary for representative performance and presentation checks.
+This rebuilds the WASM binary and runs the dependency-free Node tests, including verifying every generated meshlet's bounds and all six frustum planes. To test actual GPU compute and rendering, run the server and open <http://localhost:4173/tests/webgpu-smoke.html>. It renders to an offscreen GPU texture, verifies indirect counts, checks that culling preserves the image, validates all forced and automatic LODs, and exercises color, geometry edges, and projected-bounds overlays. Its result appears on the page and in `window.__webgpuSmokeDone`. Open <http://localhost:4173/tests/planet-smoke.html> for the planet GPU test, which also checks deterministic seeds, culling and generated shared-edge positions. This is a correctness check, not a hardware performance benchmark. In CI the reproducible WASM and Node tests run automatically; GPU hardware and a real browser remain necessary for representative performance and presentation checks.
 
 ## Suggested next experiments
 

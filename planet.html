@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#080d13"><title>Planet Lab — Meshlet Engine</title><link rel="stylesheet" href="./src/ui/style.css"><link rel="stylesheet" href="./src/planet/style.css"></head>
+<body class="planet-lab">
+<div class="app">
+ <header class="topbar">
+  <div class="brand"><span class="brand-icon" aria-hidden="true">✳</span><div><strong>MESHLET</strong><small>ENGINE LAB <span> / </span> 002</small></div></div>
+  <nav class="lab-nav" aria-label="Labs"><a href="./index.html">Meshlet Lab</a><a class="current" href="./planet.html">Planet Lab</a></nav>
+  <div class="header-center"><span class="status-dot"></span><span id="device-status">INITIALIZING WEBGPU</span></div><div class="header-meta">SEEDED PLANET <span>·</span> GPU TERRAIN</div>
+ </header>
+ <main>
+  <section class="viewport planet-viewport" aria-label="Procedural planet view">
+   <canvas id="view" aria-label="Procedurally generated planet"></canvas>
+   <div class="planet-heading"><span class="kicker"><i></i> WORLD GENERATOR / 01</span><h1>Worlds from<br><em>one seed.</em></h1><p>Continents, mountain belts and ridges.<br>Generated as geometry on the GPU.</p></div>
+   <div class="planet-readout"><span>CAMERA CLEARANCE</span><strong id="altitude-overlay">—</strong><small>above sampled surface near ground</small></div>
+   <div class="planet-hint">DRAG TO TRAVEL <i></i> SCROLL TO CHANGE ALTITUDE <i></i> SHIFT + DRAG TO LOOK</div>
+   <div id="loading" class="loading"><div class="spinner"></div><strong id="loading-title">Creating your world</strong><span id="loading-detail">Compiling shaders and generating terrain</span></div>
+   <div id="error" class="error" hidden><strong>Unable to start the planet lab</strong><p id="error-message"></p><a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API#browser_compatibility" target="_blank" rel="noopener">Check WebGPU browser support ↗</a></div>
+  </section>
+  <aside class="panel planet-panel">
+   <div class="panel-head"><div><span class="kicker">PROCEDURAL PLANET</span><h2>World controls</h2></div><span class="live"><span></span> LIVE</span></div>
+   <div class="section-title"><span>WORLD SEED</span><span>01 / 04</span></div>
+   <form id="seed-form" class="seed-form"><label class="sr-only" for="seed">World seed</label><input id="seed" value="918273" maxlength="64" autocomplete="off"><button type="submit">GENERATE</button><button type="button" id="random" title="Generate a random seed" aria-label="Generate a random seed">⟳</button></form>
+   <p class="metric-note">The same seed recreates the same terrain. No terrain textures are used.</p>
+   <div class="planet-actions"><button id="orbit">ORBIT</button><button id="highlands" class="accent">FIND HIGHLANDS ↗</button></div>
+   <div class="section-title"><span>CAMERA &amp; TERRAIN</span><span>02 / 04</span></div>
+   <label class="planet-field"><span>VIEW</span><select id="mode"><option value="orbit">Orbit / top-down</option><option value="flyover">Flyover / horizon</option></select></label>
+   <label class="planet-slider"><span>ALTITUDE ABOVE SURFACE <strong id="altitude">—</strong></span><input id="altitude-range" type="range" min="0" max="1000" value="880"></label>
+   <label class="planet-slider"><span>RELIEF <strong id="relief-value">1.00×</strong></span><input id="relief" type="range" min="50" max="160" value="100"></label>
+   <div class="debug-toggles planet-toggles"><label><input id="ocean" type="checkbox" checked><span>Flat ocean surface</span></label><label><input id="sun-follow" type="checkbox" checked><span>Sun follows the view</span></label></div>
+   <div class="section-title"><span>DETAIL &amp; DEBUG</span><span>03 / 04</span></div>
+   <label class="planet-field"><span>PATCH BUDGET</span><select id="quality"><option value="120">Fast · 120 patches</option><option value="240" selected>Balanced · 240 patches</option><option value="384">High · 384 patches</option><option value="512">Extreme · 512 patches</option></select></label>
+   <label class="planet-field"><span>RENDER SCALE</span><select id="render-scale"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></label>
+   <div class="debug-toggles planet-toggles"><label><input id="culling" type="checkbox" checked><span>GPU meshlet frustum culling</span></label><label><input id="lod-colors" type="checkbox"><span>Color quadtree levels</span></label><label><input id="patch-lines" type="checkbox"><span>Patch boundaries</span></label><label><input id="wireframe" type="checkbox"><span>Triangle wireframe</span></label></div>
+   <p class="metric-note">The quadtree refines near the camera within the patch budget. LOD colors repeat every six levels.</p>
+   <div class="section-title"><span>LIVE PERFORMANCE</span><span>04 / 04</span></div>
+   <div class="planet-stats"><div><span>FRAME RATE</span><strong><b id="fps">—</b> <small>FPS</small></strong></div><div><span>FRAME TIME</span><strong><b id="frame-ms">—</b> <small>ms</small></strong></div></div>
+   <div class="stat-row"><span>Visible patches</span><strong id="patches">—</strong></div><div class="stat-row"><span>Quadtree levels</span><strong id="depth">—</strong></div><div class="stat-row"><span>Visible meshlets</span><strong id="meshlets">—</strong></div><div class="stat-row"><span>Submitted triangles</span><strong id="triangles">—</strong></div><div class="stat-row"><span>CPU patch selection</span><strong id="selection-ms">—</strong></div><div class="stat-row"><span id="compute-label">GPU visibility</span><strong id="compute-ms">—</strong></div><div class="stat-row"><span>GPU rendering</span><strong id="render-ms">—</strong></div>
+   <p class="metric-note" id="timing-note">Checking GPU timestamp support…</p>
+  </aside>
+ </main>
+ <footer><span>SEEDED LANDFORMS <b>→</b> GPU TERRAIN <b>→</b> CULLED MESHLETS</span><span id="generation-status">PREPARING PLANET</span></footer>
+</div>
+<script type="module" src="./src/planet/app.js"></script>
+</body></html>
