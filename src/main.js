@@ -1,8 +1,8 @@
 import { Renderer } from './gpu/renderer.js';
-import { MAX_TRIANGLES } from './geometry/meshlets.js';
+import { LOD_TRIANGLES } from './geometry/meshlets.js';
 
 const $=id=>document.getElementById(id);
-const el=Object.fromEntries(['view','loading','loading-title','loading-detail','error','error-message','device-status','view-label','setup-info','fps','frame-ms','fps-bar','visible','candidates','triangles','visibility-bar','visibility-percent','cpu-ms','gpu-cull','gpu-render','timing-note','benchmark','bench-result','export','grid','detail','resolution','culling','colors','reset'].map(id=>[id,$(id)]));
+const el=Object.fromEntries(['view','loading','loading-title','loading-detail','error','error-message','device-status','view-label','setup-info','fps','frame-ms','fps-bar','visible','candidates','triangles','visibility-bar','visibility-percent','cpu-ms','gpu-cull','gpu-render','timing-note','benchmark','bench-result','export','grid','detail','resolution','culling','lod-mode','color-mode','meshlet-edges','triangle-edges','projected-bounds','projection-scope','projection-options','lod0','lod1','lod2','view-lod-key','reset'].map(id=>[id,$(id)]));
 const fmt=n=>Math.round(n).toLocaleString('en-US');
 const ms=n=>n==null?'Unavailable':`${n.toFixed(2)} ms`;
 let renderer,mesh,worker,requestId=0,previous=0,frames=[],cpuFrames=[],bench=null,lastResult=null,geometryInfo=null;
@@ -20,7 +20,8 @@ function applyScene(reset=true) {
   if(reset)renderer.resetCamera();
   el.candidates.textContent=fmt(renderer.scene.candidates);
   el.visible.textContent='—';el.triangles.textContent='—';el['visibility-percent'].textContent='—';
-  el['view-label'].textContent=`${fmt(renderer.grid*renderer.grid)} OBJECTS · ${fmt(mesh.triangles)} TRIANGLES EACH`;
+  for(const id of ['lod0','lod1','lod2'])el[id].textContent='—';
+  el['view-label'].textContent=`${fmt(renderer.grid*renderer.grid)} OBJECTS · UP TO ${fmt(mesh.triangles)} TRIS EACH`;
   el['setup-info'].textContent=`JS GEOMETRY ${geometryInfo.geometryMs.toFixed(0)} MS · WASM BOUNDS ${geometryInfo.boundsMs.toFixed(1)} MS`;
   el.benchmark.disabled=false;
  } catch(error){fail(error.message);}
@@ -32,9 +33,10 @@ function prepareGeometry() {
 }
 function updateTelemetry() {
  if(!renderer?.scene)return;
- const {visible,gpuComputeMs,gpuRenderMs}=renderer.latest;
+ const {visible,lodCounts,gpuComputeMs,gpuRenderMs}=renderer.latest;
  if(visible!=null){
-  el.visible.textContent=fmt(visible);el.triangles.textContent=fmt(visible*MAX_TRIANGLES);
+  el.visible.textContent=fmt(visible);el.triangles.textContent=fmt(lodCounts.reduce((sum,count,i)=>sum+count*LOD_TRIANGLES[i],0));
+  lodCounts.forEach((count,i)=>el[`lod${i}`].textContent=fmt(count));
   const percent=100*visible/renderer.scene.candidates;
   el['visibility-percent'].textContent=`${percent.toFixed(1)}%`;el['visibility-bar'].style.width=`${percent}%`;
  }
@@ -46,7 +48,7 @@ function finishBenchmark() {
  const current=bench;
  const frameAverage=average(current.frameTimes);
  const gpuCull=average(current.gpuCull),gpuRender=average(current.gpuRender);
- lastResult={schemaVersion:1,createdAt:new Date().toISOString(),configuration:{grid:renderer.grid,objects:renderer.grid**2,detail:mesh.detail,meshletsPerObject:mesh.meshletCount,candidateMeshlets:renderer.scene.candidates,trianglesPerObject:mesh.triangles,frustumCulling:renderer.culling,meshletColors:renderer.colorMeshlets,renderScale:renderer.resolution,canvasPixels:[renderer.canvas.width,renderer.canvas.height],camera:{yaw:renderer.yaw,pitch:renderer.pitch,distance:renderer.distance}},environment:{userAgent:navigator.userAgent,adapter:{vendor:renderer.adapter.info?.vendor||null,architecture:renderer.adapter.info?.architecture||null,device:renderer.adapter.info?.device||null,description:renderer.adapter.info?.description||null},timestampQuery:renderer.timing},measurement:{warmupSeconds:2,captureSeconds:10,sampledFrames:current.frameTimes.length,averageFps:frameAverage?1000/frameAverage:null,meanFrameMs:frameAverage,p95FrameMs:percentile(current.frameTimes,.95),p99FrameMs:percentile(current.frameTimes,.99),meanCpuEncodeSubmitMs:average(current.cpu),meanGpuVisibilityMs:gpuCull,meanGpuRenderMs:gpuRender,gpuSamples:current.gpuCull.length,visibleMeshlets:renderer.latest.visible},preparation:geometryInfo,notes:['Frame timing follows requestAnimationFrame and may be capped by the display refresh rate.','GPU timings are optional timestamp-query pass durations, sampled asynchronously.','Visible triangles are submitted triangle slots, including any degenerate geometry.','A software adapter is useful for correctness, not representative of hardware GPU performance.']};
+ lastResult={schemaVersion:2,createdAt:new Date().toISOString(),configuration:{grid:renderer.grid,objects:renderer.grid**2,detail:mesh.detail,meshletsPerObject:mesh.meshletCount,candidateMeshlets:renderer.scene.candidates,trianglesPerObject:mesh.triangles,frustumCulling:renderer.culling,lodMode:['auto','high','medium','low'][renderer.lodMode],lodTriangles:LOD_TRIANGLES,debug:{colorMode:['shaded','meshlet IDs','LOD levels'][renderer.colorMode],meshletOutlines:renderer.meshletEdges,triangleWireframe:renderer.triangleEdges,projectedBounds:renderer.projectedBounds,projectionScope:renderer.projectionScope===0?'center object':'all visible objects'},renderScale:renderer.resolution,canvasPixels:[renderer.canvas.width,renderer.canvas.height],camera:{yaw:renderer.yaw,pitch:renderer.pitch,distance:renderer.distance}},environment:{userAgent:navigator.userAgent,adapter:{vendor:renderer.adapter.info?.vendor||null,architecture:renderer.adapter.info?.architecture||null,device:renderer.adapter.info?.device||null,description:renderer.adapter.info?.description||null},timestampQuery:renderer.timing},measurement:{warmupSeconds:2,captureSeconds:10,sampledFrames:current.frameTimes.length,averageFps:frameAverage?1000/frameAverage:null,meanFrameMs:frameAverage,p95FrameMs:percentile(current.frameTimes,.95),p99FrameMs:percentile(current.frameTimes,.99),meanCpuEncodeSubmitMs:average(current.cpu),meanGpuVisibilityMs:gpuCull,meanGpuRenderMs:gpuRender,gpuSamples:current.gpuCull.length,visibleMeshlets:renderer.latest.visible,visibleMeshletsByLod:renderer.latest.lodCounts,visibleTriangles:renderer.latest.lodCounts?.reduce((sum,count,i)=>sum+count*LOD_TRIANGLES[i],0)??null},preparation:geometryInfo,notes:['Frame timing follows requestAnimationFrame and may be capped by the display refresh rate.','GPU timings are optional timestamp-query pass durations, sampled asynchronously.','Visible triangles are submitted triangles at the selected LOD, including any degenerate geometry. Debug overlays affect GPU render time.','A software adapter is useful for correctness, not representative of hardware GPU performance.']};
  el['bench-result'].hidden=false;
  const result=lastResult.measurement;
  el['bench-result'].innerHTML=`<strong>${result.averageFps?.toFixed(1) ?? '—'} FPS average</strong> · p95 ${result.p95FrameMs?.toFixed(1) ?? '—'} ms<br>CPU ${result.meanCpuEncodeSubmitMs?.toFixed(2) ?? '—'} ms · GPU render ${result.meanGpuRenderMs?.toFixed(2) ?? 'unavailable'}${result.meanGpuRenderMs==null?'':' ms'}`;
@@ -88,7 +90,8 @@ async function start() {
  try {
   renderer=await Renderer.create(el.view,fail);
   renderer.resolution=Number(el.resolution.value);
-  renderer.culling=el.culling.checked;renderer.colorMeshlets=el.colors.checked;
+  renderer.culling=el.culling.checked;renderer.lodMode=Number(el['lod-mode'].value);renderer.colorMode=Number(el['color-mode'].value);
+  renderer.meshletEdges=el['meshlet-edges'].checked;renderer.triangleEdges=el['triangle-edges'].checked;renderer.projectedBounds=el['projected-bounds'].checked;renderer.projectionScope=Number(el['projection-scope'].value);
   const info=renderer.adapter.info;
   const device=[info?.vendor,info?.architecture,info?.description].filter(Boolean).join(' · ');
   el['device-status'].textContent=device?`WEBGPU / ${device.toUpperCase()}`:'WEBGPU READY';
@@ -101,7 +104,9 @@ el.detail.addEventListener('change',prepareGeometry);
 el.grid.addEventListener('change',()=>{cancelBenchmark();applyScene();});
 el.resolution.addEventListener('change',()=>{cancelBenchmark();if(renderer)renderer.resolution=Number(el.resolution.value);});
 el.culling.addEventListener('change',()=>{cancelBenchmark();if(renderer)renderer.culling=el.culling.checked;});
-el.colors.addEventListener('change',()=>{cancelBenchmark();if(renderer)renderer.colorMeshlets=el.colors.checked;});
+for(const [id,key,type] of [['lod-mode','lodMode','number'],['color-mode','colorMode','number'],['meshlet-edges','meshletEdges','check'],['triangle-edges','triangleEdges','check'],['projected-bounds','projectedBounds','check'],['projection-scope','projectionScope','number']]) {
+ el[id].addEventListener('change',()=>{cancelBenchmark();if(renderer)renderer[key]=type==='number'?Number(el[id].value):el[id].checked;if(id==='color-mode')el['view-lod-key'].hidden=el[id].value!=='2';if(id==='projected-bounds')el['projection-options'].hidden=!el[id].checked;});
+}
 el.reset.addEventListener('click',()=>{cancelBenchmark();renderer?.resetCamera();});
 el.benchmark.addEventListener('click',()=>{if(!renderer?.scene)return;el['bench-result'].hidden=true;el.export.hidden=true;el.benchmark.disabled=true;bench={start:performance.now(),frameTimes:[],cpu:[],gpuCull:[],gpuRender:[],lastSample:null,canvasSize:[renderer.canvas.width,renderer.canvas.height]};});
 el.export.addEventListener('click',()=>{if(!lastResult)return;const url=URL.createObjectURL(new Blob([JSON.stringify(lastResult,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`meshlet-benchmark-${new Date().toISOString().replaceAll(':','-')}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});

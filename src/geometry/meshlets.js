@@ -1,5 +1,7 @@
 export const PATCH = 6;
-export const MAX_TRIANGLES = PATCH * PATCH * 2;
+export const LOD_STEPS = [1, 2, 3];
+export const LOD_TRIANGLES = LOD_STEPS.map(step => (PATCH / step) ** 2 * 2);
+export const MAX_TRIANGLES = LOD_TRIANGLES[0];
 export const VERTEX_FLOATS = 8;
 export const MESHLET_BYTES = 32;
 
@@ -14,8 +16,8 @@ function surface(theta, phi) {
 function cross(a,b) { return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]; }
 function sub(a,b) { return [a[0]-b[0],a[1]-b[1],a[2]-b[2]]; }
 
-// Each spatial patch is one meshlet: at most 49 unique vertices and 72
-// triangles. Vertex data is shared across patches; indices are contiguous.
+// Each patch owns three index ranges (72, 18 and 8 triangles). All levels
+// share the high-detail vertices and the same conservative bounds.
 export function generateMesh(detail = 48) {
   if (!Number.isInteger(detail) || detail < PATCH || detail % PATCH !== 0 || detail > 192) {
     throw new Error('Detail must be a multiple of 6 between 6 and 192.');
@@ -33,23 +35,24 @@ export function generateMesh(detail = 48) {
     const offset=(y*width+x)*VERTEX_FLOATS;
     vertices.set([p[0],p[1],p[2],1,n[0]/len,n[1]/len,n[2]/len,0],offset);
   }
-  const indices = new Uint32Array(lat*lon*6);
   const meshletCount=(lat/PATCH)*(lon/PATCH);
+  const indices=new Uint32Array(meshletCount*LOD_TRIANGLES.reduce((a,b)=>a+b,0)*3);
   const meshlets=new ArrayBuffer(meshletCount*MESHLET_BYTES);
   const metadata=new DataView(meshlets);
   let index=0,m=0;
   for(let y0=0;y0<lat;y0+=PATCH) for(let x0=0;x0<lon;x0+=PATCH) {
-    const start=index;
-    for(let y=y0;y<y0+PATCH;y++) for(let x=x0;x<x0+PATCH;x++) {
-      const a=y*width+x,b=a+1,c=a+width,d=c+1;
-      indices[index++]=a; indices[index++]=b; indices[index++]=c;
-      indices[index++]=b; indices[index++]=d; indices[index++]=c;
+    for(let lod=0;lod<LOD_STEPS.length;lod++) {
+      const step=LOD_STEPS[lod];
+      metadata.setUint32(m*MESHLET_BYTES+16+lod*4,index,true);
+      for(let y=y0;y<y0+PATCH;y+=step) for(let x=x0;x<x0+PATCH;x+=step) {
+        const a=y*width+x,b=a+step,c=a+width*step,d=c+step;
+        indices[index++]=a; indices[index++]=b; indices[index++]=c;
+        indices[index++]=b; indices[index++]=d; indices[index++]=c;
+      }
     }
-    metadata.setUint32(m*MESHLET_BYTES+16,start,true);
-    metadata.setUint32(m*MESHLET_BYTES+20,(index-start)/3,true);
     m++;
   }
-  return { vertices,indices,meshlets,meshletCount,triangles:indices.length/3,detail };
+  return {vertices,indices,meshlets,meshletCount,triangles:meshletCount*MAX_TRIANGLES,detail};
 }
 
 export async function calculateBounds(mesh, wasmBytes) {
@@ -64,8 +67,8 @@ export async function calculateBounds(mesh, wasmBytes) {
   const metadata=new DataView(memory.buffer,metadataOffset,mesh.meshlets.byteLength);
   for(let m=0;m<mesh.meshletCount;m++) {
     const base=m*MESHLET_BYTES;
-    const start=metadata.getUint32(base+16,true), triangles=metadata.getUint32(base+20,true);
-    instance.exports.build_bounds(vertexOffset,indexOffset+start*4,triangles*3,metadataOffset+base);
+    const start=metadata.getUint32(base+16,true);
+    instance.exports.build_bounds(vertexOffset,indexOffset+start*4,MAX_TRIANGLES*3,metadataOffset+base);
   }
   new Uint8Array(mesh.meshlets).set(new Uint8Array(memory.buffer,metadataOffset,mesh.meshlets.byteLength));
   return mesh;
