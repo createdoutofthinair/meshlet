@@ -90,3 +90,18 @@ test('close orbit detail covers the view, not only the center point',()=>{
  }
  levels.sort((a,b)=>a-b);assert.ok(levels[12]>=20,`median level: ${levels[12]}`);
 });
+test('LOD hysteresis reduces patch churn during small repeated camera movements',()=>{
+ const options={budget:180,maxDepth:16,pixelSize:12};let previous=null,stableLast=null,freshLast=null,stableChanges=0,freshChanges=0;
+ for(let i=0;i<8;i++){
+  const camera=planetCamera({altitude:1000*(1+(i%2)*.02),mode:'orbit',longitude:.8+(i%2)*.01,latitude:.4},960,600);
+  const stable=selectPatches(camera,{...options,previousSplits:previous}),fresh=selectPatches(camera,options);
+  const stableKeys=new Set(stable.visible.map(n=>n.key)),freshKeys=new Set(fresh.visible.map(n=>n.key));
+  if(stableLast)for(const key of stableKeys)if(!stableLast.has(key))stableChanges++;
+  if(freshLast)for(const key of freshKeys)if(!freshLast.has(key))freshChanges++;
+  assert.ok(stable.leaves.length<=options.budget);
+  const leaves=new Map(stable.leaves.map(n=>[n.key,n]));
+  for(const node of stable.leaves)for(let edge=0;edge<4;edge++)for(const other of neighbors(leaves,node,edge,options.maxDepth))assert.ok(Math.abs(node.level-other.level)<=1);
+  previous=stable.splits;stableLast=stableKeys;freshLast=freshKeys;
+ }
+ assert.ok(freshChanges>0&&stableChanges<freshChanges,`hysteresis ${stableChanges}, fresh ${freshChanges}`);
+});

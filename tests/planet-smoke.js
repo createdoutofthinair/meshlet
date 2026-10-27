@@ -26,13 +26,13 @@ try{
  if(uncull.count!==uncull.patches*16 || first.count>uncull.count)throw new Error(`Invalid meshlet culling counts: ${first.count} / ${uncull.count}`);
  const cullingChanged=difference(first,uncull);if(cullingChanged>width*height*.02)throw new Error(`Culling changed ${cullingChanged} pixels`);
  // Check GPU-generated positions on the edges where different cube faces meet.
- const roots=renderer.patches.filter(node=>node.level===0),rootChunk=441*32;
+ const roots=renderer.patches.filter(node=>node.level===0),rootChunk=441*48;
  const rootBuffer=device.createBuffer({size:roots.length*rootChunk,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),rootEncoder=device.createCommandEncoder();
  roots.forEach((node,i)=>rootEncoder.copyBufferToBuffer(renderer.vertices,node.slot*rootChunk,rootBuffer,i*rootChunk,rootChunk));device.queue.submit([rootEncoder.finish()]);await rootBuffer.mapAsync(GPUMapMode.READ);
  const rootData=new Float32Array(rootBuffer.getMappedRange()),edges=new Map();let crossMatches=0,crossMaxKm=0;
  roots.forEach((node,i)=>{for(let y=0;y<=16;y++)for(let x=0;x<=16;x++){
   if(x!==0&&x!==16&&y!==0&&y!==16)continue;
-  const direction=faceDirection(node.face,-1+x/8,-1+y/8),key=direction.map(v=>v.toFixed(6)).join(','),base=i*441*8+((y+2)*21+x+2)*8;
+  const direction=faceDirection(node.face,-1+x/8,-1+y/8),key=direction.map(v=>v.toFixed(6)).join(','),base=i*441*12+((y+2)*21+x+2)*12;
   const position=direction.map((_,k)=>node.direction[k]*6371+rootData[base+k]);
   if(edges.has(key)){const previous=edges.get(key);if(previous.face!==node.face){crossMatches++;crossMaxKm=Math.max(crossMaxKm,Math.hypot(...position.map((v,k)=>v-previous.position[k])));}}
   else edges.set(key,{face:node.face,position});
@@ -45,8 +45,8 @@ try{
  await renderer.sampleTerrain(highland.direction);
  // The extra detail is geometry, including at scales smaller than a float32
  // unit-vector coordinate can represent without the high/low decomposition.
- const [common,generator]=await Promise.all(['common.wgsl','generate.wgsl'].map(p=>fetch(`../src/planet/${p}`).then(r=>r.text())));
- const detailModule=device.createShaderModule({code:common+'\n'+generator+`
+ const [common,terrainCore,riverCurve,worldField,generator]=await Promise.all(['common.wgsl','terrain-core.wgsl','river-curve.wgsl','world-field.wgsl','generate.wgsl'].map(p=>fetch(`../src/planet/${p}`).then(r=>r.text())));
+ const detailModule=device.createShaderModule({code:common+'\n'+terrainCore+'\n'+riverCurve+'\n'+worldField+'\n'+generator+`
  @compute @workgroup_size(1) fn detailCheck(){
   let direction=normalize(probe.direction.xyz);let tangent=normalize(cross(direction,vec3<f32>(0.0,1.0,0.0)));
   let zero=vec3<f32>(0.0);let seed=frame.counts.z;let base=terrain(direction,seed);
@@ -67,7 +67,7 @@ try{
   samples[n]=vec4<f32>(max(error.x,max(error.y,error.z)),abs(center-along),abs(center-across),abs(g.x-noise3(p,seed)));
  }`});
  const detailPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'detailCheck'}});
- const detailBind=device.createBindGroup({layout:detailPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.uniform}},{binding:4,resource:{buffer:renderer.plates}},{binding:5,resource:{buffer:renderer.sampleBuffer}},{binding:6,resource:{buffer:renderer.probeInput}}]});
+ const detailBind=device.createBindGroup({layout:detailPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.uniform}},{binding:4,resource:{buffer:renderer.plates}},{binding:5,resource:{buffer:renderer.sampleBuffer}},{binding:6,resource:{buffer:renderer.probeInput}},{binding:7,resource:{buffer:renderer.world}},{binding:8,resource:{buffer:renderer.worldDirections}},{binding:9,resource:{buffer:renderer.worldNeighbors}},{binding:10,resource:{buffer:renderer.worldFaces}}]});
  const detailBuffer=device.createBuffer({size:16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),detailEncoder=device.createCommandEncoder(),detailPass=detailEncoder.beginComputePass();
  detailPass.setPipeline(detailPipe);detailPass.setBindGroup(0,detailBind);detailPass.dispatchWorkgroups(1);detailPass.end();detailEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,detailBuffer,0,16);device.queue.submit([detailEncoder.finish()]);
  await detailBuffer.mapAsync(GPUMapMode.READ);const detail=new Float32Array(detailBuffer.getMappedRange().slice(0));detailBuffer.unmap();detailBuffer.destroy();
@@ -93,8 +93,8 @@ try{
   renderer.valleys=strength;renderer.invalidateTerrain();renderer.cameraState.surfaceHeight=valley.height;renderer.lastSelection=0;await capture();
   const p=directionToFace(valley.direction),node=renderer.patches.find(n=>n.face===p.face&&Math.abs(p.u-n.u)<=n.span/2&&Math.abs(p.v-n.v)<=n.span/2);
   if(!node)throw new Error('Valley view did not select its focal patch');
-  const read=device.createBuffer({size:441*32,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),encoder=device.createCommandEncoder();encoder.copyBufferToBuffer(renderer.vertices,node.slot*441*32,read,0,441*32);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
-  const data=new Float32Array(read.getMappedRange()),heights=[];for(let y=0;y<=16;y++)for(let x=0;x<=16;x++)heights.push(data[((y+2)*21+x+2)*8+3]);read.unmap();read.destroy();return {key:node.key,heights};
+  const read=device.createBuffer({size:441*48,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),encoder=device.createCommandEncoder();encoder.copyBufferToBuffer(renderer.vertices,node.slot*441*48,read,0,441*48);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
+  const data=new Float32Array(read.getMappedRange()),heights=[];for(let y=0;y<=16;y++)for(let x=0;x<=16;x++)heights.push(data[((y+2)*21+x+2)*12+3]);read.unmap();read.destroy();return {key:node.key,heights};
  }
  const verticesOff=await valleyVertices(0),verticesOn=await valleyVertices(1);
  if(verticesOff.key!==verticesOn.key)throw new Error('Valley comparison did not use the same patch');
@@ -114,11 +114,11 @@ try{
  Object.assign(renderer.cameraState,{mode:'orbit',altitude:100,surfaceHeight:0,longitude:Math.atan2(seaDirection[2],seaDirection[0]),latitude:Math.asin(seaDirection[1])});
  renderer.budget=180;renderer.pixelSize=10;renderer.ocean=true;renderer.invalidateTerrain();renderer.lastSelection=0;await capture();
  async function inspectOcean(){
-  const nodes=renderer.patches,chunk=441*32,read=device.createBuffer({size:nodes.length*chunk,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),encoder=device.createCommandEncoder();
+  const nodes=renderer.patches,chunk=441*48,read=device.createBuffer({size:nodes.length*chunk,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),encoder=device.createCommandEncoder();
   nodes.forEach((node,i)=>encoder.copyBufferToBuffer(renderer.vertices,node.slot*chunk,read,i*chunk,chunk));device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
   const data=new Float32Array(read.getMappedRange());let count=0,maxCavity=0,maxNormalAngle=0;
   for(let i=0;i<nodes.length;i++)for(let y=0;y<=16;y++)for(let x=0;x<=16;x++){
-   const off=i*441*8+((y+2)*21+x+2)*8;if(data[off+3]>=-.1)continue;
+   const off=i*441*12+((y+2)*21+x+2)*12;if(data[off+3]>=-.1)continue;
    const node=nodes[i],radial=faceDirection(node.face,node.u+(x-8)*node.span/16,node.v+(y-8)*node.span/16);
    const d=radial[0]*data[off+4]+radial[1]*data[off+5]+radial[2]*data[off+6];
    maxNormalAngle=Math.max(maxNormalAngle,Math.acos(Math.max(-1,Math.min(1,d)))*180/Math.PI);
@@ -142,11 +142,11 @@ try{
  if(!(near.count>0 && near.count<nearUnculled.count && nearUnculled.count===near.patches*16))throw new Error(`Refined culling counts are incorrect: ${near.count}/${nearUnculled.count}`);
  const nearChanged=difference(near,nearUnculled);if(nearChanged>width*height*.02)throw new Error(`Refined culling changed ${nearChanged} pixels`);
  async function inspectSeams(){
- const nodes=renderer.patches,chunk=441*32,buffer=device.createBuffer({size:nodes.length*chunk,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),copy=device.createCommandEncoder();
+ const nodes=renderer.patches,chunk=441*48,buffer=device.createBuffer({size:nodes.length*chunk,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),copy=device.createCommandEncoder();
  nodes.forEach((node,i)=>copy.copyBufferToBuffer(renderer.vertices,node.slot*chunk,buffer,i*chunk,chunk));device.queue.submit([copy.finish()]);await buffer.mapAsync(GPUMapMode.READ);
  const data=new Float32Array(buffer.getMappedRange());let maxSeamKm=0,matched=0,mixed=0,maxNormal=0,deepMatched=0,deepMaxKm=0,deepMaxNormal=0;
- const pointAt=(node,index,x,y)=>{const offset=index*441*8+((y+2)*21+(x+2))*8;return [0,1,2].map(k=>node.direction[k]*6371+data[offset+k]);};
- const normalAt=(index,x,y)=>{const offset=index*441*8+((y+2)*21+(x+2))*8+4;return [data[offset],data[offset+1],data[offset+2]];};
+ const pointAt=(node,index,x,y)=>{const offset=index*441*12+((y+2)*21+(x+2))*12;return [0,1,2].map(k=>node.direction[k]*6371+data[offset+k]);};
+ const normalAt=(index,x,y)=>{const offset=index*441*12+((y+2)*21+(x+2))*12+4;return [data[offset],data[offset+1],data[offset+2]];};
  for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++){
   const a=nodes[i],b=nodes[j];if(a.face!==b.face)continue;
   for(const axis of ['u','v']){const otherAxis=axis==='u'?'v':'u';let first=a,second=b,firstIndex=i,secondIndex=j;
@@ -190,9 +190,18 @@ try{
  const foreground=difference(first,background);if(foreground<2000)throw new Error(`Planet render is empty: ${foreground} foreground pixels`);
  renderer.invalidateTerrain();const repeat=await capture();const repeatChanged=difference(first,repeat);if(repeatChanged>10)throw new Error(`Same seed did not reproduce terrain: ${repeatChanged} pixels`);
  renderer.seed=31829;renderer.invalidateTerrain();const other=await capture();const seedChanged=difference(first,other);if(seedChanged<1000)throw new Error(`Different seed did not change the planet: ${seedChanged} pixels`);
+ renderer.biomes=false;const plainColors=await capture();renderer.biomes=true;const biomeChanged=difference(other,plainColors);if(biomeChanged<100)throw new Error('Climate colors did not affect the image');
  renderer.lodColors=true;const levels=await capture();const lodChanged=difference(other,levels);if(lodChanged<1000)throw new Error('LOD colors did not affect the image');
  renderer.lodColors=false;renderer.patchLines=true;const patchLines=await capture();const patchChanged=difference(other,patchLines);if(patchChanged<100)throw new Error('Patch boundaries did not affect the image');
  renderer.patchLines=false;renderer.wireframe=true;const wire=await capture();const wireChanged=difference(other,wire);if(wireChanged<100)throw new Error('Triangle wireframe did not affect the image');renderer.wireframe=false;
+ // Find a connected river on the seeded world, render it, then disable surface
+ // water at the same camera position and check that the image really changes.
+ renderer.seed=918273;renderer.rivers=true;renderer.invalidateTerrain();const river=await renderer.findRivers();
+ if(!river||river.flow<3)throw new Error(`River search failed: ${JSON.stringify(river)}`);
+ Object.assign(renderer.cameraState,{mode:'orbit',altitude:25,surfaceHeight:river.height,longitude:Math.atan2(river.direction[2],river.direction[0]),latitude:Math.asin(river.direction[1])});
+ renderer.budget=180;renderer.pixelSize=14;renderer.lastSelection=0;const riversOn=await capture();
+ renderer.rivers=false;renderer.invalidateTerrain();renderer.cameraState.surfaceHeight=river.height;renderer.lastSelection=0;const riversOff=await capture();
+ const riverChanged=difference(riversOn,riversOff);if(riverChanged<20)throw new Error(`River control did not affect the image: ${riverChanged} pixels`);
  if(errors.length)throw new Error(errors.join('; '));
  const canvas=document.querySelector('#preview');canvas.width=width;canvas.height=height;const ctx=canvas.getContext('2d'),image=ctx.createImageData(width,height);
  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
@@ -200,5 +209,5 @@ try{
   if(renderer.format.startsWith('bgra')){image.data[o]=first.pixels[i+2];image.data[o+1]=first.pixels[i+1];image.data[o+2]=first.pixels[i];}else image.data.set(first.pixels.subarray(i,i+3),o);image.data[o+3]=255;
  }
  ctx.putImageData(image,0,0);
- const result={ok:true,patches:first.patches,meshlets:first.count,foregroundPixels:foreground,cullingChanged,nearChanged,water,coastalWater,exposedSeafloor,seams,deepSeams,reusedChanges,detail:[...detail],valleyChanges,maxValleyKm,geometryChange,maxOceanChange,maxRepeat,gradientError,alongDifference,acrossDifference,valleyIncision:valley.incision,crossMatches,crossMaxKm,highlandHeight:highland.height,repeatChanged,seedChanged,lodChanged,patchChanged,wireChanged};status.textContent=JSON.stringify(result);window.__planetSmokeDone=result;
+ const result={ok:true,patches:first.patches,meshlets:first.count,foregroundPixels:foreground,cullingChanged,nearChanged,water,coastalWater,exposedSeafloor,seams,deepSeams,reusedChanges,detail:[...detail],valleyChanges,maxValleyKm,geometryChange,maxOceanChange,maxRepeat,gradientError,alongDifference,acrossDifference,valleyIncision:valley.incision,crossMatches,crossMaxKm,highlandHeight:highland.height,repeatChanged,seedChanged,biomeChanged,riverChanged,lodChanged,patchChanged,wireChanged};status.textContent=JSON.stringify(result);window.__planetSmokeDone=result;
 }catch(error){status.textContent=error.stack;window.__planetSmokeDone={ok:false,error:error.stack};}

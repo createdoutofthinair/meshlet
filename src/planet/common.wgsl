@@ -5,6 +5,7 @@ struct PlanetFrame {
   settings: vec4<f32>, // radius km, relief multiplier, ocean 0/1, valley detail
   counts: vec4<u32>, // active patches, new patches, seed, debug flags
   queueCounts: vec4<u32>, // patches whose normals require updating
+  hydrology: vec4<f32>, // erosion strength, rivers enabled, reserved, reserved
 };
 struct Patch {
   cube: vec4<f32>, // unnormalized cube-face center, face-space span
@@ -16,10 +17,24 @@ struct Patch {
   details: vec4<u32>, // face, level, geometry stitch mask, normal stitch mask
   coarseNeighbors: vec4<u32>, // slots, or 0xffffffff when not active
 };
-struct PlanetVertex { position: vec4<f32>, normal: vec4<f32> };
+struct PlanetVertex { position: vec4<f32>, normal: vec4<f32>, surface: vec4<f32> };
+struct HydroCell {
+  profile: vec4<f32>, // original height, current height, runoff, deposited sediment
+  route: vec4<u32>, // downhill node, or 0xffffffff for an outlet/sink
+  process: vec4<f32>, // erosion, deposition fraction, rainfall, downhill slope
+};
+struct HydroStorage {
+  cells: array<HydroCell,24578>,
+  paths: array<vec4<f32>,417826>,
+  riverPresence: array<u32,24578>,
+};
 struct Bound { sphere: vec4<f32> };
 const CELLS:u32=16u;
 const GRID:u32=21u; // 17 interior vertices plus a two-vertex normal apron
 const GRID_COUNT:u32=441u;
 const INNER_COUNT:u32=289u;
 const MESHLETS_PER_PATCH:u32=16u;
+const WORLD_RES:u32=64u;
+const WORLD_WIDTH:u32=65u;
+const WORLD_COUNT:u32=24578u;
+const RIVER_SAMPLES:u32=17u;

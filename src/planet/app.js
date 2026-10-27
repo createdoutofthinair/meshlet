@@ -1,6 +1,6 @@
 import {PlanetRenderer} from './renderer.js';
 const $=id=>document.getElementById(id);
-const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','generation-status','seed-form','seed','random','orbit','highlands','find-valleys','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','ocean','sun-follow','quality','render-scale','culling','lod-colors','patch-lines','wireframe','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','timing-note'];
+const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','generation-status','seed-form','seed','random','orbit','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','biomes','ocean','sun-follow','quality','render-scale','culling','lod-colors','patch-lines','wireframe','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','timing-note'];
 const el=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const MIN_ALT=.03,MAX_ALT=30000;
 const fmt=n=>Math.round(n).toLocaleString('en-US');
@@ -82,12 +82,28 @@ el['find-valleys'].addEventListener('click',async()=>{
   renderer.cameraState.surfaceHeight=renderer.ocean?Math.max(0,point.height):point.height;renderer.lastProbeKey='';renderer.needsSelection=true;
  }catch(error){fail(error.message);}finally{findBusy=false;el['find-valleys'].disabled=false;el['find-valleys'].textContent='VALLEYS';}
 });
+el['find-rivers'].addEventListener('click',async()=>{
+ if(!renderer||findBusy)return;findBusy=true;el['find-rivers'].disabled=true;el['find-rivers'].textContent='SEARCHING…';
+ try{
+  let rebuild=!renderer.rivers;
+  if(renderer.erosion===0){renderer.erosion=1;el.erosion.value='100';el['erosion-value'].textContent='1.00×';rebuild=true;}
+  renderer.rivers=true;el.rivers.checked=true;if(rebuild){renderer.invalidateTerrain();ready=false;loading(true,'Shaping the world');}
+  const point=await renderer.findRivers();if(!point)return;
+  const d=point.direction;renderer.cameraState.longitude=Math.atan2(d[2],d[0]);renderer.cameraState.latitude=Math.asin(Math.max(-1,Math.min(1,d[1])));
+  renderer.cameraState.mode='orbit';el.mode.value='orbit';setAltitude(25);
+  renderer.cameraState.surfaceHeight=renderer.ocean?Math.max(0,point.height):point.height;renderer.lastProbeKey='';renderer.needsSelection=true;
+ }catch(error){fail(error.message);}finally{findBusy=false;el['find-rivers'].disabled=false;el['find-rivers'].textContent='RIVERS';}
+});
 el.mode.addEventListener('change',()=>setMode(el.mode.value));
 el['altitude-range'].addEventListener('input',()=>setAltitude(fromSlider(el['altitude-range'].value)));
 el.relief.addEventListener('input',()=>{const value=Number(el.relief.value)/100;el['relief-value'].textContent=`${value.toFixed(2)}×`;});
 el.relief.addEventListener('change',()=>{if(!renderer)return;renderer.relief=Number(el.relief.value)/100;renderer.invalidateTerrain();ready=false;loading(true,'Updating relief');});
 el.valleys.addEventListener('input',()=>{el['valleys-value'].textContent=`${(Number(el.valleys.value)/100).toFixed(2)}×`;});
 el.valleys.addEventListener('change',()=>{if(!renderer)return;renderer.valleys=Number(el.valleys.value)/100;renderer.invalidateTerrain();ready=false;loading(true,'Shaping valleys');});
+el.erosion.addEventListener('input',()=>{el['erosion-value'].textContent=`${(Number(el.erosion.value)/100).toFixed(2)}×`;});
+el.erosion.addEventListener('change',()=>{if(!renderer)return;renderer.erosion=Number(el.erosion.value)/100;renderer.invalidateTerrain();ready=false;loading(true,'Updating erosion');});
+el.rivers.addEventListener('change',()=>{if(!renderer)return;renderer.rivers=el.rivers.checked;renderer.invalidateTerrain();ready=false;loading(true,'Updating surface water');});
+el.biomes.addEventListener('change',()=>{if(renderer)renderer.biomes=el.biomes.checked;});
 el.ocean.addEventListener('change',()=>{if(!renderer)return;renderer.ocean=el.ocean.checked;renderer.invalidateTerrain();ready=false;loading(true,'Updating the surface');});
 el['sun-follow'].addEventListener('change',()=>{if(renderer)renderer.followSun=el['sun-follow'].checked;});
 el.quality.addEventListener('change',()=>{if(renderer){renderer.budget=Number(el.quality.value);renderer.needsSelection=true;}});

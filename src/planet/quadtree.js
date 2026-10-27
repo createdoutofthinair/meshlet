@@ -87,15 +87,16 @@ function score(node,camera,pixelSize=10) {
  }
  return projected*localFocus*viewPriority;
 }
-export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10}={}) {
+export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10,previousSplits=null,hysteresis=.1}={}) {
  budget=Math.max(6,Math.floor(budget));maxDepth=Math.min(MAX_DEPTH,Math.max(0,maxDepth));
  camera={...camera,facing:directionToFace(camera.eye),focus:directionToFace(camera.focusDirection||camera.eye)};
  const leaves=new Map();for(let face=0;face<6;face++){const n=makeTile(face,0,0,0);leaves.set(n.key,n);}
- // Refine most visible/highest projected cell size first; rebuilding from a
- // deterministic state avoids stale nodes and keeps budget behavior explicit.
+ // Rebuild the covering tree on every selection, but give already-split nodes
+ // a small priority margin. This reduces churn at refinement thresholds without
+ // time-based fading, stale coverage, or exceeding the patch budget.
  for(let iteration=0;iteration<budget;iteration++){
   let best=null,bestScore=pixelSize;
-  for(const node of leaves.values())if(node.level<maxDepth){const s=score(node,camera,pixelSize);if(s>bestScore){best=node;bestScore=s;}}
+  for(const node of leaves.values())if(node.level<maxDepth){const s=score(node,camera,pixelSize)*(previousSplits?.has(node.key)?1+hysteresis:1);if(s>bestScore){best=node;bestScore=s;}}
   if(!best || leaves.size+3>budget || !splitBalanced(leaves,best,budget,maxDepth))break;
  }
  const all=[...leaves.values()];
@@ -118,5 +119,9 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
   }
   visible.push({...node,stitch,normalStitch:stitch|corners,coarseKeys});
  }
- return {leaves:all,visible,deepest:Math.max(...visible.map(x=>x.level),0)};
+ const splits=new Set();
+ for(const node of all)for(let level=0;level<node.level;level++){
+  const scale=2**(node.level-level);splits.add(`${node.face}/${level}/${Math.floor(node.x/scale)}/${Math.floor(node.y/scale)}`);
+ }
+ return {leaves:all,visible,splits,deepest:Math.max(...visible.map(x=>x.level),0)};
 }
