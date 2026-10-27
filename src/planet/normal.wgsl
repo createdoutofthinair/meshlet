@@ -7,13 +7,22 @@ fn normalAt(base:u32,step:u32,radial:vec3<f32>)->vec3<f32>{
  let dv=vertices[base+GRID*step].position.xyz-vertices[base-GRID*step].position.xyz;
  var n=normalize(cross(du,dv));if(dot(n,radial)<0.0){n=-n;}return n;
 }
+fn visibleHeight(height:f32)->f32{
+ return select(height,max(height,0.0),frame.settings.z>.5);
+}
 fn cavityAt(base:u32,step:u32,cellSize:f32)->f32{
- let avg=(vertices[base-step].position.w+vertices[base+step].position.w+vertices[base-GRID*step].position.w+vertices[base+GRID*step].position.w)*.25;
- return clamp(max(0.0,avg-vertices[base].position.w)/(cellSize*f32(step))*3.0,0.0,1.0);
+ let avg=(visibleHeight(vertices[base-step].position.w)+visibleHeight(vertices[base+step].position.w)+visibleHeight(vertices[base-GRID*step].position.w)+visibleHeight(vertices[base+GRID*step].position.w))*.25;
+ return clamp(max(0.0,avg-visibleHeight(vertices[base].position.w))/(cellSize*f32(step))*3.0,0.0,1.0);
 }
 fn sampleNormal(slot:u32,gx:u32,gy:u32)->vec4<f32>{
  let base=slot*GRID_COUNT+(gy+2u)*GRID+gx+2u;
  let tile=patches[slot];let stitch=tile.details.w;let cellSize=max(.00001,tile.cube.w*frame.settings.x/f32(CELLS));
+ // The seabed height is retained for color and for the ocean-off mode, but
+ // the displayed water is a smooth sphere. Never shade its hidden cavities.
+ if(frame.settings.z>.5 && vertices[base].position.w<0.0){
+  let radial=normalize(tile.centerDirection.xyz+(tile.centerLow.xyz+vertices[base].position.xyz/frame.settings.x));
+  return vec4<f32>(radial,0.0);
+ }
  let nFine=normalAt(base,1u,tile.centerDirection.xyz);let cFine=cavityAt(base,1u,cellSize);
  // At a shared edge use the coarser neighbor's sample spacing, and blend that
  // result into a two-cell border. Same world samples give continuous shading.
@@ -36,6 +45,7 @@ fn main(@builtin(global_invocation_id) gid:vec3<u32>) {
  let slot=queue[index/INNER_COUNT];let v=index%INNER_COUNT;
  let gx=v%17u;let gy=v/17u;let base=slot*GRID_COUNT+(gy+2u)*GRID+gx+2u;
  let tile=patches[slot];var result=sampleNormal(slot,gx,gy);var edge=4u;
+ if(frame.settings.z>.5 && vertices[base].position.w<0.0){vertices[base].normal=result;return;}
  if(gx==0u && gy%2u==0u && (tile.details.z&1u)!=0u){edge=0u;}
  if(gx==CELLS && gy%2u==0u && (tile.details.z&2u)!=0u){edge=1u;}
  if(gy==0u && gx%2u==0u && (tile.details.z&4u)!=0u){edge=2u;}

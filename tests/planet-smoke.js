@@ -59,6 +59,36 @@ try{
  detailPass.setPipeline(detailPipe);detailPass.setBindGroup(0,detailBind);detailPass.dispatchWorkgroups(1);detailPass.end();detailEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,detailBuffer,0,16);device.queue.submit([detailEncoder.finish()]);
  await detailBuffer.mapAsync(GPUMapMode.READ);const detail=new Float32Array(detailBuffer.getMappedRange().slice(0));detailBuffer.unmap();detailBuffer.destroy();
  if(!detail.every(Number.isFinite)||Math.abs(detail[0]-detail[1])<.000001||Math.abs(detail[2]-detail[3])<.001)throw new Error(`Fine terrain samples did not vary with position: ${[...detail]}`);
+ // A flat ocean must shade the rendered sea surface, not cavities and slopes
+ // in the hidden seafloor. Exercise many patches near an actual coastline.
+ const oceanCamera={...renderer.cameraState},oceanSamples=await renderer.sampleTerrain();let sea=0;
+ for(let i=0;i<oceanSamples.length;i+=4)if(oceanSamples[i+3]<-.1&&Math.abs(oceanSamples[i+3]+.6)<Math.abs(oceanSamples[sea+3]+.6))sea=i;
+ const seaDirection=[oceanSamples[sea],oceanSamples[sea+1],oceanSamples[sea+2]];
+ Object.assign(renderer.cameraState,{mode:'orbit',altitude:100,surfaceHeight:0,longitude:Math.atan2(seaDirection[2],seaDirection[0]),latitude:Math.asin(seaDirection[1])});
+ renderer.budget=180;renderer.pixelSize=10;renderer.ocean=true;renderer.invalidateTerrain();renderer.lastSelection=0;await capture();
+ async function inspectOcean(){
+  const nodes=renderer.patches,chunk=441*32,read=device.createBuffer({size:nodes.length*chunk,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),encoder=device.createCommandEncoder();
+  nodes.forEach((node,i)=>encoder.copyBufferToBuffer(renderer.vertices,node.slot*chunk,read,i*chunk,chunk));device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
+  const data=new Float32Array(read.getMappedRange());let count=0,maxCavity=0,maxNormalAngle=0;
+  for(let i=0;i<nodes.length;i++)for(let y=0;y<=16;y++)for(let x=0;x<=16;x++){
+   const off=i*441*8+((y+2)*21+x+2)*8;if(data[off+3]>=-.1)continue;
+   const node=nodes[i],radial=faceDirection(node.face,node.u+(x-8)*node.span/16,node.v+(y-8)*node.span/16);
+   const d=radial[0]*data[off+4]+radial[1]*data[off+5]+radial[2]*data[off+6];
+   maxNormalAngle=Math.max(maxNormalAngle,Math.acos(Math.max(-1,Math.min(1,d)))*180/Math.PI);
+   maxCavity=Math.max(maxCavity,data[off+7]);count++;
+  }
+  read.unmap();read.destroy();return {count,maxCavity,maxNormalAngle};
+ }
+ const water=await inspectOcean();
+ if(water.count<100||water.maxCavity>1e-6||water.maxNormalAngle>.1)throw new Error(`Flat water has seabed shading: ${JSON.stringify(water)}`);
+ // Include a rugged coastal region where the old seafloor derivatives made
+ // water normals diverge by several degrees at a patch boundary.
+ Object.assign(renderer.cameraState,{longitude:.806671507128508,latitude:.4727325707272136});renderer.needsSelection=true;renderer.lastSelection=0;await capture();
+ const coastalWater=await inspectOcean();
+ if(coastalWater.count<100||coastalWater.maxCavity>1e-6||coastalWater.maxNormalAngle>.1)throw new Error(`Coastal water has seabed shading: ${JSON.stringify(coastalWater)}`);
+ renderer.ocean=false;renderer.invalidateTerrain();renderer.lastSelection=0;await capture();const exposedSeafloor=await inspectOcean();
+ if(exposedSeafloor.count<100||exposedSeafloor.maxCavity<.001)throw new Error(`Exposed seafloor lost terrain shading: ${JSON.stringify(exposedSeafloor)}`);
+ renderer.ocean=true;Object.assign(renderer.cameraState,oceanCamera);renderer.budget=36;renderer.pixelSize=24;renderer.invalidateTerrain();renderer.lastSelection=0;await capture();
  // Exercise culling and exact shared vertices in a refined, mixed-LOD view.
  const original={...renderer.cameraState};renderer.budget=180;renderer.pixelSize=10;renderer.cameraState.altitude=100;renderer.invalidateTerrain();
  const near=await capture();renderer.culling=false;const nearUnculled=await capture();renderer.culling=true;
@@ -123,5 +153,5 @@ try{
   if(renderer.format.startsWith('bgra')){image.data[o]=first.pixels[i+2];image.data[o+1]=first.pixels[i+1];image.data[o+2]=first.pixels[i];}else image.data.set(first.pixels.subarray(i,i+3),o);image.data[o+3]=255;
  }
  ctx.putImageData(image,0,0);
- const result={ok:true,patches:first.patches,meshlets:first.count,foregroundPixels:foreground,cullingChanged,nearChanged,seams,deepSeams,reusedChanges,detail:[...detail],crossMatches,crossMaxKm,highlandHeight:highland.height,repeatChanged,seedChanged,lodChanged,patchChanged,wireChanged};status.textContent=JSON.stringify(result);window.__planetSmokeDone=result;
+ const result={ok:true,patches:first.patches,meshlets:first.count,foregroundPixels:foreground,cullingChanged,nearChanged,water,coastalWater,exposedSeafloor,seams,deepSeams,reusedChanges,detail:[...detail],crossMatches,crossMaxKm,highlandHeight:highland.height,repeatChanged,seedChanged,lodChanged,patchChanged,wireChanged};status.textContent=JSON.stringify(result);window.__planetSmokeDone=result;
 }catch(error){status.textContent=error.stack;window.__planetSmokeDone={ok:false,error:error.stack};}
