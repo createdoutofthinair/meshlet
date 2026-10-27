@@ -19,6 +19,29 @@ fn worldProfile(s:WorldSample)->vec4<f32>{
  let a=mix(world.cells[s.corners.x].profile,world.cells[s.corners.y].profile,s.blend.x);
  let b=mix(world.cells[s.corners.z].profile,world.cells[s.corners.w].profile,s.blend.x);return mix(a,b,s.blend.y);
 }
+fn worldSlope(s:WorldSample)->f32{
+ let a=mix(world.cells[s.corners.x].process.w,world.cells[s.corners.y].process.w,s.blend.x);
+ let b=mix(world.cells[s.corners.z].process.w,world.cells[s.corners.w].process.w,s.blend.x);
+ return max(0.0,mix(a,b,s.blend.y));
+}
+// Interpolate the direction of the cached coarse drainage graph. The graph's
+// vertices are shared at cube edges, so this field is continuous at the face
+// boundary and independent of the terrain patch/LOD using it.
+fn worldDrainage(s:WorldSample,direction:vec3<f32>)->vec4<f32>{
+ let weights=vec4<f32>((1.0-s.blend.x)*(1.0-s.blend.y),s.blend.x*(1.0-s.blend.y),(1.0-s.blend.x)*s.blend.y,s.blend.x*s.blend.y);
+ var flow=vec3<f32>(0.0);var strength=0.0;
+ for(var k=0u;k<4u;k++){
+  let id=s.corners[k];let cell=world.cells[id];let next=cell.route.x;
+  if(next==NO_NODE){continue;}
+  let raw=worldDirections[next].xyz-worldDirections[id].xyz;
+  let tangent=raw-direction*dot(direction,raw);let magnitude=length(tangent);
+  if(magnitude>.000001){flow+=tangent/magnitude*weights[k];strength+=weights[k];}
+ }
+ let magnitude=length(flow);if(magnitude<.0001){return vec4<f32>(0.0);}
+ // Opposing coarse routes can cancel near a watershed divide. Fade their
+ // influence with directional agreement instead of flipping the detail.
+ return vec4<f32>(flow/magnitude,min(clamp(strength,0.0,1.0),clamp(magnitude*2.0,0.0,1.0)));
+}
 fn hasRivers(s:WorldSample)->bool{
  return (world.riverPresence[s.corners.x]|world.riverPresence[s.corners.y]|world.riverPresence[s.corners.z]|world.riverPresence[s.corners.w])!=0u;
 }

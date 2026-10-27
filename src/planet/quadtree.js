@@ -42,7 +42,7 @@ function splitBalanced(leaves,node,budget,maxDepth,seen=new Set()) {
  if(leaves.size+3>budget)return false;
  split(leaves,node);return true;
 }
-function score(node,camera,pixelSize=10) {
+function score(node,camera,pixelSize=10,errorEstimates=null) {
  const center=node.direction.map(x=>x*RADIUS_KM);
  const relative=sub(center,camera.eye);
  // Cube-to-sphere is at most 1-Lipschitz in the face coordinates. This loose
@@ -56,7 +56,9 @@ function score(node,camera,pixelSize=10) {
   const horizon=Math.acos(Math.min(1,inner/eyeLength))+Math.acos(inner/outer);
   if(angle>horizon+Math.min(Math.PI,node.span*1.5))return 0;
  }
- // Projected cell size is a refinement heuristic, not a geometric-error bound.
+ // Projected cell size remains a coverage floor, especially while a patch has
+ // not yet been measured by the GPU. A measured residual can add priority for
+ // rough terrain whose visual error is large at the current distance.
  const facing=camera.facing;
  let distance=length(relative);
  if(facing.face===node.face){
@@ -85,9 +87,15 @@ function score(node,camera,pixelSize=10) {
   const outside=Math.max(0,-z0-tightRadius,Math.abs(x0)-z0*camera.tanX-tightRadius,Math.abs(y0)-z0*camera.tanY-tightRadius);
   viewPriority=1/(1+outside/Math.max(.001,camera.clearance)*32);
  }
- return projected*localFocus*viewPriority;
+ const residual=errorEstimates?.get(node.key);
+ // A residual compares this patch against its coarser representation; use
+ // half as a heuristic for the next finer split. Bound its priority influence
+ // to avoid a large patch reshuffle when a measurement first arrives.
+ const projectedError=Number.isFinite(residual)?residual*.5*camera.focalPixels/distance:0;
+ const errorPriority=projectedError*pixelSize;
+ return Math.max(projected,Math.min(errorPriority,projected*1.2))*localFocus*viewPriority;
 }
-export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10,previousSplits=null,hysteresis=.1}={}) {
+export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10,previousSplits=null,hysteresis=.1,errorEstimates=null}={}) {
  budget=Math.max(6,Math.floor(budget));maxDepth=Math.min(MAX_DEPTH,Math.max(0,maxDepth));
  camera={...camera,facing:directionToFace(camera.eye),focus:directionToFace(camera.focusDirection||camera.eye)};
  const leaves=new Map();for(let face=0;face<6;face++){const n=makeTile(face,0,0,0);leaves.set(n.key,n);}
@@ -96,28 +104,33 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
  // time-based fading, stale coverage, or exceeding the patch budget.
  for(let iteration=0;iteration<budget;iteration++){
   let best=null,bestScore=pixelSize;
-  for(const node of leaves.values())if(node.level<maxDepth){const s=score(node,camera,pixelSize)*(previousSplits?.has(node.key)?1+hysteresis:1);if(s>bestScore){best=node;bestScore=s;}}
+  for(const node of leaves.values())if(node.level<maxDepth){const s=score(node,camera,pixelSize,errorEstimates)*(previousSplits?.has(node.key)?1+hysteresis:1);if(s>bestScore){best=node;bestScore=s;}}
   if(!best || leaves.size+3>budget || !splitBalanced(leaves,best,budget,maxDepth))break;
  }
  const all=[...leaves.values()];
  const visible=[];
  for(const node of all){
   if(!score(node,camera))continue;
-  let stitch=0,corners=0;const coarseKeys=[null,null,null,null];
+  let stitch=0,corners=0;const coarseKeys=[null,null,null,null],edgeKeys=[null,null,null,null],adjacentEdges=[];
   for(let edge=0;edge<4;edge++){
-   const coarse=neighbors(leaves,node,edge,maxDepth).find(other=>other.level<node.level);
-   if(coarse){stitch|=1<<edge;coarseKeys[edge]=coarse.key;}
+   const adjacent=neighbors(leaves,node,edge,maxDepth);adjacentEdges.push(adjacent);
+   const coarse=adjacent.find(other=>other.level<node.level);
+   if(coarse){stitch|=1<<edge;coarseKeys[edge]=coarse.key;edgeKeys[edge]=coarse.key;}
+   else{const peer=adjacent.find(other=>other.level===node.level);if(peer)edgeKeys[edge]=peer.key;}
   }
   // A coarse tile may meet this tile only diagonally at a shared corner. Its
   // derivative scale still needs to reach both same-level tiles at that corner.
-  const half=node.span/2,eps=node.span*1e-6;
+  const half=node.span/2,eps=node.span*1e-6,cornerKeys=[];
   for(let corner=0;corner<4;corner++){
    const sx=corner&1?1:-1,sy=corner&2?1:-1;
    const f=directionToFace(faceCube(node.face,node.u+sx*(half+eps),node.v+sy*(half+eps)));
    const diagonal=tileAt(leaves,f.face,f.u,f.v,maxDepth);
    if(diagonal && diagonal.level<node.level)corners|=1<<(corner+4);
+   const around=[...adjacentEdges[sx<0?0:1],...adjacentEdges[sy<0?2:3]];
+   if(diagonal)around.push(diagonal);
+   cornerKeys.push([...new Set(around.filter(other=>other.key!==node.key).map(other=>other.key))].sort());
   }
-  visible.push({...node,stitch,normalStitch:stitch|corners,coarseKeys});
+  visible.push({...node,stitch,normalStitch:stitch|corners,coarseKeys,edgeKeys,cornerKeys});
  }
  const splits=new Set();
  for(const node of all)for(let level=0;level<node.level;level++){

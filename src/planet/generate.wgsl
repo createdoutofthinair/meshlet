@@ -6,6 +6,32 @@ const HEIGHT_LIMIT:f32=10.0;
 @group(0) @binding(4) var<storage,read> plates: array<vec4<f32>>;
 @group(0) @binding(11) var<storage,read> riverMasks:array<vec2<f32>>;
 struct SurfaceData {height:f32,lake:f32,humidity:f32};
+// A world-space, slope-oriented procedural approximation of fluvial detail.
+// Sampling in 3D, rather than per patch, preserves shared vertices across LODs
+// and cube faces. This augments the coarse simulation; it is not a new local
+// hydraulic simulation and cannot guarantee downhill flow at the fine scale.
+fn flowChannel(high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,flow:vec3<f32>,frequency:f32,seed:u32)->f32{
+ let shift=flow*(.9/frequency);
+ let n=localNoise(high,low,delta,frequency,seed)*.5
+  +(localNoise(high,low,delta+shift,frequency,seed)+localNoise(high,low,delta-shift,frequency,seed))*.25;
+ let channel=1.0-smoothstep(.035,.30,abs(n));return channel*channel;
+}
+fn regionalIncision(s:WorldSample,profile:vec4<f32>,direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,height:f32,seed:u32)->f32{
+ if(frame.settings.w<=0.0 || frame.hydrology.x<=0.0 || height<=.03){return 0.0;}
+ let drain=worldDrainage(s,direction);if(drain.w<.001){return 0.0;}
+ // Tie the regional incision to the coarse catchment's slope and discharge,
+ // suppressing it in flat basins and at drainage divides.
+ let streamPower=smoothstep(.0001,.012,worldSlope(s))*mix(.5,1.0,smoothstep(1.0,12.0,profile.z));
+ let terrainMask=smoothstep(.03,.5,height)*smoothstep(.15,.8,profile.y)*drain.w*streamPower;
+ if(terrainMask<.001){return 0.0;}
+ // Powers of two preserve the high/low split through floating-point scaling.
+ let primary=flowChannel(high,low,delta,drain.xyz,2048.0,seed+1201u);
+ let secondary=flowChannel(high,low,delta,drain.xyz,8192.0,seed+1213u);
+ let fine=flowChannel(high,low,delta,drain.xyz,32768.0,seed+1223u);
+ let close=flowChannel(high,low,delta,drain.xyz,131072.0,seed+1231u);
+ let nested=primary*.075+secondary*(.2+.8*primary)*.026+fine*(.15+.85*secondary)*.006+close*(.15+.85*fine)*.003;
+ return nested*terrainMask*frame.settings.w*frame.hydrology.x;
+}
 fn surfaceBase(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32)->SurfaceData {
  let base=terrain(direction,seed);
  // Independent, seeded bands produce real vertex relief from tens of meters
@@ -16,6 +42,7 @@ fn surfaceBase(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,
           +localNoise(high,low,delta,8388608.0,seed+421u)*.00005;
  let s=worldSample(direction);let profile=worldProfile(s);
  var ground=base+micro*smoothstep(-.05,.25,base)+(profile.y-profile.x)*frame.hydrology.x;
+ ground-=regionalIncision(s,profile,direction,high,low,delta,ground,seed);
  var lake=0.0;
  if(frame.hydrology.y>.5 && frame.hydrology.x>0.0 && ground>.0){
   let spill=worldSpill(s);let basin=max(0.0,spill-profile.y)*frame.hydrology.x;

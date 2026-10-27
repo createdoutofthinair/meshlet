@@ -38,6 +38,12 @@ test('bounded quadtree remains 2:1 balanced across visible and hidden cube edges
   const map=new Map(result.leaves.map(n=>[n.key,n]));
   for(const node of result.leaves)for(let edge=0;edge<4;edge++)for(const other of neighbors(map,node,edge,16))assert.ok(Math.abs(node.level-other.level)<=1,`${node.key} vs ${other.key}`);
   assert.ok(result.visible.every(n=>n.stitch>=0&&n.stitch<16));
+  for(const node of result.visible)for(let edge=0;edge<4;edge++)if(node.edgeKeys[edge]){
+   const other=map.get(node.edgeKeys[edge]);assert.ok(other);
+   assert.ok(neighbors(map,node,edge,16).some(n=>n.key===other.key));
+   if(node.stitch&(1<<edge)){assert.equal(node.coarseKeys[edge],other.key);assert.ok(other.level<node.level);}
+   else assert.equal(other.level,node.level);
+  }
  }
 });
 test('visible selection conservatively retains sampled front-facing terrain',()=>{
@@ -104,4 +110,15 @@ test('LOD hysteresis reduces patch churn during small repeated camera movements'
   previous=stable.splits;stableLast=stableKeys;freshLast=freshKeys;
  }
  assert.ok(freshChanges>0&&stableChanges<freshChanges,`hysteresis ${stableChanges}, fresh ${freshChanges}`);
+});
+test('measured terrain error can prioritize refinement without exceeding the budget or breaking edge balance',()=>{
+ const options={budget:180,maxDepth:16,pixelSize:12};
+ const camera=planetCamera({altitude:1000,mode:'orbit',longitude:.8,latitude:.4},960,600);
+ const baseline=selectPatches(camera,options),candidate=baseline.visible[1];
+ const refined=selectPatches(camera,{...options,errorEstimates:new Map([[candidate.key,50]])});
+ const children=refined.leaves.filter(n=>n.face===candidate.face&&n.level===candidate.level+1&&Math.floor(n.x/2)===candidate.x&&Math.floor(n.y/2)===candidate.y);
+ assert.equal(children.length,4,'high projected residual should refine the selected patch');
+ assert.ok(refined.leaves.length<=options.budget);
+ const leaves=new Map(refined.leaves.map(n=>[n.key,n]));
+ for(const node of refined.leaves)for(let edge=0;edge<4;edge++)for(const other of neighbors(leaves,node,edge,options.maxDepth))assert.ok(Math.abs(node.level-other.level)<=1);
 });

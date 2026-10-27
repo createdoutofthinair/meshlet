@@ -15,7 +15,7 @@ struct Patch {
   centerLow: vec4<f32>, // residual, for sub-meter procedural sampling
   relative: vec4<f32>, // spherical tile center relative to camera, in km
   details: vec4<u32>, // face, level, geometry stitch mask, normal stitch mask
-  coarseNeighbors: vec4<u32>, // slots, or 0xffffffff when not active
+  coarseNeighbors: vec4<u32>, // coarser or same-level neighboring slots, else 0xffffffff
 };
 struct PlanetVertex { position: vec4<f32>, normal: vec4<f32>, surface: vec4<f32> };
 struct HydroCell {

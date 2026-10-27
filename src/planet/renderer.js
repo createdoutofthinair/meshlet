@@ -24,7 +24,7 @@ export class PlanetRenderer {
   this.budget=384;this.pixelSize=14;this.resolution=1;this.maxDepth=20;
   this.patchBytes=new ArrayBuffer(CAPACITY*PATCH_BYTES);this.patchFloats=new Float32Array(this.patchBytes);this.patchUints=new Uint32Array(this.patchBytes);
   this.slotByKey=new Map();this.stitchByKey=new Map();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.patches=[];this.pending=[];this.normalPending=[];
-  this.needsSelection=true;this.lastSelection=0;this.previousSplits=null;this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
+  this.needsSelection=true;this.lastSelection=0;this.previousSplits=null;this.lodErrors=new Map();this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
   this.lastSample=0;this.pendingRead=false;this.generation=0;this.inFlight=0;this.probePending=false;this.lastProbeKey='';this.lastProbeTime=0;this.stats={leaves:0,visiblePatches:0,deepest:0,selectionMs:0,generated:0};
   this.hydrologySeed=null;
  }
@@ -33,16 +33,18 @@ export class PlanetRenderer {
   d.lost.then(info=>this.onError?.(`WebGPU device lost: ${info.message||info.reason}. Reload to retry.`));
   this.context.configure({device:d,format:this.format,alphaMode:'opaque'});
   const fetchText=async p=>{const r=await fetch(new URL(p,import.meta.url));if(!r.ok)throw new Error(`Failed to load ${p}`);return r.text();};
-  const [common,terrainCore,riverCurve,hydrologySource,worldField,riverDetailSource,...sources]=await Promise.all(['./common.wgsl','./terrain-core.wgsl','./river-curve.wgsl','./hydrology.wgsl','./world-field.wgsl','./river-detail.wgsl','./generate.wgsl','./normal.wgsl','./bounds.wgsl','./cull.wgsl','./render.wgsl'].map(fetchText));
-  const labels=['Terrain generation','Terrain normals','Meshlet bounds','Meshlet culling','Planet rendering'];
+  const [common,terrainCore,riverCurve,hydrologySource,worldField,riverDetailSource,...sources]=await Promise.all(['./common.wgsl','./terrain-core.wgsl','./river-curve.wgsl','./hydrology.wgsl','./world-field.wgsl','./river-detail.wgsl','./generate.wgsl','./normal.wgsl','./bounds.wgsl','./cull.wgsl','./render.wgsl','./lod-error.wgsl'].map(fetchText));
+  const labels=['Terrain generation','Terrain normals','Meshlet bounds','Meshlet culling','Planet rendering','Terrain LOD residual'];
   const modules=await Promise.all(sources.map((s,i)=>shader(d,common+'\n'+(i===0?terrainCore+'\n'+riverCurve+'\n'+worldField+'\n':'')+s,labels[i])));
   [this.generatePipe,this.normalPipe,this.boundsPipe,this.cullPipe]=await Promise.all(modules.slice(0,4).map(module=>d.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}})));
+  this.lodErrorPipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:modules[5],entryPoint:'main'}});
   [this.highlandsPipe,this.pointPipe,this.valleyPipe,this.riverPipe]=await Promise.all(['highlands','point','valleyCandidates','riverCandidates'].map(entryPoint=>d.createComputePipelineAsync({layout:'auto',compute:{module:modules[0],entryPoint}})));
   this.renderPipe=await d.createRenderPipelineAsync({layout:'auto',vertex:{module:modules[4],entryPoint:'vs'},fragment:{module:modules[4],entryPoint:'fs',targets:[{format:this.format}]},primitive:{topology:'triangle-list',cullMode:'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'}});
   const make=(label,size,usage)=>d.createBuffer({label,size,usage});
   this.uniform=make('Planet frame',224,BUFFER.UNIFORM|BUFFER.COPY_DST);
   this.patchBuffer=make('Planet patches',this.patchBytes.byteLength,BUFFER.STORAGE|BUFFER.COPY_DST);
   this.vertices=make('Cached GPU terrain vertices',CAPACITY*GRID*GRID*VERTEX_BYTES,BUFFER.STORAGE|BUFFER.COPY_SRC);
+  this.lodErrorBuffer=make('Measured terrain LOD residuals',CAPACITY*4,BUFFER.STORAGE|BUFFER.COPY_SRC);
   this.riverMasks=make('Cached river coverage',CAPACITY*1681*8,BUFFER.STORAGE|BUFFER.COPY_SRC);
   this.bounds=make('Terrain meshlet bounds',CAPACITY*MESHLETS*16,BUFFER.STORAGE);
   this.activeBuffer=make('Active patches',CAPACITY*4,BUFFER.STORAGE|BUFFER.COPY_DST);
@@ -76,6 +78,7 @@ export class PlanetRenderer {
   const bindEntries=(pipe,entries)=>d.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,buffer])=>({binding,resource:{buffer}}))});
   const worldEntries=[[7,this.world],[8,this.worldDirections],[9,this.worldNeighbors],[10,this.worldFaces]];
   this.generateBind=bindEntries(this.generatePipe,[[0,this.uniform],[1,this.patchBuffer],[2,this.vertices],[3,this.queueBuffer],[4,this.plates],[7,this.world],[8,this.worldDirections],[10,this.worldFaces],[11,this.riverMasks]]);
+  this.lodErrorBind=bind(this.lodErrorPipe,[this.uniform,this.vertices,this.queueBuffer,this.lodErrorBuffer]);
   this.riverDetailBind=bindEntries(this.riverDetailPipe,[[0,this.uniform],[1,this.patchBuffer],[3,this.queueBuffer],...worldEntries,[11,this.riverMasks]]);
   this.normalBind=bind(this.normalPipe,[this.uniform,this.patchBuffer,this.vertices,this.normalQueueBuffer]);
   this.boundsBind=bind(this.boundsPipe,[this.uniform,this.vertices,this.bounds,this.queueBuffer]);
@@ -102,6 +105,7 @@ export class PlanetRenderer {
  }
  invalidateTerrain(){
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
+  this.lodErrors.clear();
   this.device.queue.writeBuffer(this.plates,0,seedPlates(this.seed));this.needsSelection=true;this.generation++;this.lastProbeKey='';
   this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
   if(this.cameraState.altitude<50)this.cameraState.surfaceHeight=10;
@@ -113,13 +117,32 @@ export class PlanetRenderer {
  }
  select(camera,now){
   const start=performance.now();
-  const result=selectPatches(camera,{budget:this.budget,maxDepth:this.maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits});
+  const result=selectPatches(camera,{budget:this.budget,maxDepth:this.maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.lodErrors});
   this.previousSplits=result.splits;
   const wantedNodes=new Map(result.visible.map(p=>[p.key,p])),wanted=new Set(wantedNodes.keys());
+  // Only patches touching an edge or corner can supply that vertex's normal.
+  // Tracking this local graph refreshes dependent cached normals without
+  // invalidating unrelated patches several tiles away.
+  const signatureFor=node=>{
+   let hash=(2166136261^node.normalStitch)>>>0;
+   const mixKey=key=>{for(let i=0;i<key.length;i++)hash=Math.imul(hash^key.charCodeAt(i),16777619)>>>0;};
+   for(const key of node.edgeKeys){
+    const other=wantedNodes.get(key);if(!other){hash=Math.imul(hash^0xff,16777619)>>>0;continue;}
+    mixKey(key);hash=Math.imul(hash^other.normalStitch,16777619)>>>0;
+   }
+   for(const corner of node.cornerKeys){
+    const owners=new Set([node.key,...corner]);hash=Math.imul(hash^0x7f,16777619)>>>0;
+    for(const key of [...owners].sort()){
+     const other=wantedNodes.get(key);if(!other)continue;mixKey(key);hash=Math.imul(hash^other.normalStitch,16777619)>>>0;
+     for(const peer of other.edgeKeys)if(owners.has(peer)&&wantedNodes.has(peer))mixKey(peer);
+    }
+   }
+   return hash;
+  };
   for(const [key,slot] of this.slotByKey)if(!wanted.has(key)){this.slotByKey.delete(key);this.stitchByKey.delete(key);this.free.push(slot);}
   const pending=[],normalPending=[];
   this.patches=result.visible.map(node=>{
-   const signature=`${node.normalStitch}/${node.coarseKeys.map(key=>{const coarse=wantedNodes.get(key);return coarse?`${key}:${coarse.normalStitch}`:'-';}).join(',')}`;
+   const signature=signatureFor(node);
    let slot=this.slotByKey.get(node.key);
    if(slot===undefined){slot=this.free.pop();if(slot===undefined)throw new Error('Planet patch cache exhausted.');this.slotByKey.set(node.key,slot);pending.push(slot);normalPending.push(slot);}
    else if(this.stitchByKey.get(node.key)!==signature)normalPending.push(slot);
@@ -188,7 +211,7 @@ export class PlanetRenderer {
    this.patchFloats.set([...high,0],i+12);this.patchFloats.set([...low,0],i+16);
    this.patchFloats.set(node.direction.map((x,k)=>x*RADIUS_KM-camera.eye[k]).concat(0),i+20);
    this.patchUints.set([node.face,node.level,node.stitch,node.normalStitch],i+24);
-   this.patchUints.set(node.coarseKeys.map(key=>this.slotByKey.get(key)??0xffffffff),i+28);
+   this.patchUints.set(node.edgeKeys.map(key=>this.slotByKey.get(key)??0xffffffff),i+28);
   }
   const raw=new ArrayBuffer(224),f=new Float32Array(raw),u=new Uint32Array(raw);
   f.set(camera.vp,0);camera.planes.forEach((p,i)=>f.set(p,16+i*4));
@@ -215,19 +238,26 @@ export class PlanetRenderer {
   const dispatch=(pipe,bind,count)=>{if(count){cp.setPipeline(pipe);cp.setBindGroup(0,bind);cp.dispatchWorkgroups(Math.ceil(count/64));}};
   dispatch(this.riverDetailPipe,this.riverDetailBind,this.pending.length*1681);
   dispatch(this.generatePipe,this.generateBind,this.pending.length*GRID*GRID);
+  if(this.pending.length){cp.setPipeline(this.lodErrorPipe);cp.setBindGroup(0,this.lodErrorBind);cp.dispatchWorkgroups(this.pending.length);}
   dispatch(this.normalPipe,this.normalBind,this.normalPending.length*17*17);
   dispatch(this.boundsPipe,this.boundsBind,this.pending.length*MESHLETS);
   dispatch(this.cullPipe,this.cullBind,this.patches.length*MESHLETS);cp.end();
   const descriptor={colorAttachments:[{view:this.context.getCurrentTexture().createView(),clearValue:{r:.006,g:.009,b:.016,a:1},loadOp:'clear',storeOp:'store'}],depthStencilAttachment:{view:this.depth.createView(),depthClearValue:0,depthLoadOp:'clear',depthStoreOp:'discard'}};
   if(sample&&this.timing)descriptor.timestampWrites={querySet:this.queries,beginningOfPassWriteIndex:2,endOfPassWriteIndex:3};
   const pass=encoder.beginRenderPass(descriptor);pass.setPipeline(this.renderPipe);pass.setBindGroup(0,this.renderBind);pass.drawIndirect(this.indirect,0);pass.end();
-  let readback;if(sample){readback=d.createBuffer({size:48,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});encoder.copyBufferToBuffer(this.indirect,0,readback,0,16);if(this.timing){encoder.resolveQuerySet(this.queries,0,4,this.resolve,0);encoder.copyBufferToBuffer(this.resolve,0,readback,16,32);}}
+  const measured=sample?this.patches.map(({key,slot})=>({key,slot})):null;
+  let readback;if(sample){readback=d.createBuffer({size:48+CAPACITY*4,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});encoder.copyBufferToBuffer(this.indirect,0,readback,0,16);encoder.copyBufferToBuffer(this.lodErrorBuffer,0,readback,48,CAPACITY*4);if(this.timing){encoder.resolveQuerySet(this.queries,0,4,this.resolve,0);encoder.copyBufferToBuffer(this.resolve,0,readback,16,32);}}
   d.queue.submit([encoder.finish()]);this.pending=[];this.normalPending=[];this.inFlight++;
   d.queue.onSubmittedWorkDone().then(()=>{this.inFlight--;}).catch(()=>{this.inFlight--;});
   if(readback){const generation=this.generation;readback.mapAsync(GPUMapMode.READ).then(()=>{
    const data=readback.getMappedRange(),visibleMeshlets=new Uint32Array(data,0,4)[1];let gpuComputeMs=null,gpuRenderMs=null;
    if(this.timing){const t=new BigUint64Array(data,16,4);if(t[1]>=t[0]&&t[3]>=t[2]){gpuComputeMs=Number(t[1]-t[0])/1e6;gpuRenderMs=Number(t[3]-t[2])/1e6;}}
-   if(generation===this.generation)this.latest={visibleMeshlets,gpuComputeMs,gpuRenderMs,generatedPatchesSample:generatedOnSample};readback.unmap();
+   if(generation===this.generation){
+    const residuals=new Float32Array(data,48,CAPACITY);
+    for(const {key,slot} of measured){const error=residuals[slot];if(Number.isFinite(error)&&error>=0){this.lodErrors.delete(key);this.lodErrors.set(key,error);}}
+    while(this.lodErrors.size>8192)this.lodErrors.delete(this.lodErrors.keys().next().value);
+    this.latest={visibleMeshlets,gpuComputeMs,gpuRenderMs,generatedPatchesSample:generatedOnSample};
+   }readback.unmap();
   }).catch(e=>this.onError?.(`GPU telemetry: ${e.message}`)).finally(()=>{readback.destroy();this.pendingRead=false;});}
   return performance.now()-cpuStart;
  }

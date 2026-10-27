@@ -37,6 +37,27 @@ try{
   if(edges.has(key)){const previous=edges.get(key);if(previous.face!==node.face){crossMatches++;crossMaxKm=Math.max(crossMaxKm,Math.hypot(...position.map((v,k)=>v-previous.position[k])));}}
   else edges.set(key,{face:node.face,position});
  }});
+ // Compare the GPU's geometric residual with an independent CPU calculation
+ // on the same generated vertices, including spherical curvature.
+ const errorBuffer=device.createBuffer({size:512*4,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),errorEncoder=device.createCommandEncoder();
+ errorEncoder.copyBufferToBuffer(renderer.lodErrorBuffer,0,errorBuffer,0,512*4);device.queue.submit([errorEncoder.finish()]);await errorBuffer.mapAsync(GPUMapMode.READ);
+ const errorData=new Float32Array(errorBuffer.getMappedRange());let lodResidualMax=0,lodResidualDifference=0;
+ for(let i=0;i<roots.length;i++){
+  const p=(x,y)=>{const off=i*441*12+((y+2)*21+x+2)*12;return [rootData[off],rootData[off+1],rootData[off+2]];};let max=0;
+  for(let y=0;y<=16;y++)for(let x=0;x<=16;x++){
+   const oddX=x%2,oddY=y%2;if(!oddX&&!oddY)continue;
+   const a=oddX?(oddY?p(x-1,y+1):p(x-1,y)):p(x,y-1);
+   const b=oddX?(oddY?p(x+1,y-1):p(x+1,y)):p(x,y+1);
+   max=Math.max(max,Math.hypot(...p(x,y).map((v,k)=>v-(a[k]+b[k])*.5)));
+  }
+  const measured=errorData[roots[i].slot];lodResidualMax=Math.max(lodResidualMax,measured);lodResidualDifference=Math.max(lodResidualDifference,Math.abs(max-measured));
+  if(!Number.isFinite(measured)||Math.abs(max-measured)>Math.max(.0005,max*.0001))throw new Error(`GPU LOD residual does not match terrain vertices: ${max}/${measured}`);
+ }
+ errorBuffer.unmap();errorBuffer.destroy();if(lodResidualMax<=0)throw new Error('GPU LOD residual is empty');
+ // The asynchronous telemetry readback feeds these measurements back into
+ // subsequent selections; allow its mapping callback to complete.
+ for(let i=0;i<50&&renderer.lodErrors.size<roots.length;i++)await new Promise(resolve=>setTimeout(resolve,2));
+ const lodMeasurements=renderer.lodErrors.size;if(lodMeasurements<roots.length)throw new Error(`LOD measurements were not available to patch selection: ${lodMeasurements}`);
  rootBuffer.unmap();rootBuffer.destroy();if(crossMatches<100||crossMaxKm>.002)throw new Error(`Cube-face seams: ${crossMatches} matches, max ${crossMaxKm} km`);
  const highland=await renderer.findHighlands();const point=await renderer.sampleTerrain(highland.direction);
  if(Math.abs(point[3]-highland.height)>.02)throw new Error(`Highland probe disagrees with its sampled height: ${point[3]} / ${highland.height}`);
@@ -65,6 +86,23 @@ try{
   let along=slopeChannel(p+vec3<f32>(.4,0.0,0.0),down,seed);let across=slopeChannel(p+vec3<f32>(0.0,.4,0.0),down,seed);
   let error=abs(g.yzw-finite);
   samples[n]=vec4<f32>(max(error.x,max(error.y,error.z)),abs(center-along),abs(center-across),abs(g.x-noise3(p,seed)));
+ }
+ @compute @workgroup_size(64) fn regionalCheck(@builtin(global_invocation_id) gid:vec3<u32>){
+  let n=gid.x;if(n>=6u*24u*24u){return;}
+  let face=n/(24u*24u);let k=n%(24u*24u);
+  let u=(f32(k%24u)+.5)/24.0*2.0-1.0;let v=(f32(k/24u)+.5)/24.0*2.0-1.0;
+  let direction=normalize(facePoint(face,u,v));let sample=worldSample(direction);let profile=worldProfile(sample);
+  let flow=worldDrainage(sample,direction);
+  let incision=regionalIncision(sample,profile,direction,direction,vec3<f32>(0.0),vec3<f32>(0.0),profile.y,frame.counts.z);
+  samples[n]=vec4<f32>(dot(flow.xyz,direction),length(flow.xyz),incision,flow.w);
+ }
+ @compute @workgroup_size(64) fn edgeCandidates(@builtin(global_invocation_id) gid:vec3<u32>){
+  let n=gid.x;if(n>=6u*4u*64u){return;}let face=n/(4u*64u);let edge=(n/64u)%4u;
+  let t=(f32(n%64u)+.5)/32.0-1.0;
+  var u=t;var v=t;if(edge==0u){u=-1.0;}else if(edge==1u){u=1.0;}else if(edge==2u){v=-1.0;}else{v=1.0;}
+  let direction=normalize(facePoint(face,u,v));let sample=worldSample(direction);let profile=worldProfile(sample);
+  let incision=regionalIncision(sample,profile,direction,direction,vec3<f32>(0.0),vec3<f32>(0.0),profile.y,frame.counts.z);
+  samples[n]=vec4<f32>(direction,incision);
  }`});
  const detailPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'detailCheck'}});
  const detailBind=device.createBindGroup({layout:detailPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.uniform}},{binding:4,resource:{buffer:renderer.plates}},{binding:5,resource:{buffer:renderer.sampleBuffer}},{binding:6,resource:{buffer:renderer.probeInput}},{binding:7,resource:{buffer:renderer.world}},{binding:8,resource:{buffer:renderer.worldDirections}},{binding:9,resource:{buffer:renderer.worldNeighbors}},{binding:10,resource:{buffer:renderer.worldFaces}}]});
@@ -80,6 +118,25 @@ try{
  for(let i=0;i<valleyData.length;i+=4){gradientError=Math.max(gradientError,valleyData[i]);alongDifference+=valleyData[i+1];acrossDifference+=valleyData[i+2];scalarError=Math.max(scalarError,valleyData[i+3]);}
  valleyBuffer.unmap();valleyBuffer.destroy();
  if(gradientError>.01||scalarError>1e-6||alongDifference>=acrossDifference*.8)throw new Error(`Valley field is not slope-aligned or gradient is incorrect: ${JSON.stringify({gradientError,scalarError,alongDifference,acrossDifference})}`);
+ const regionalPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'regionalCheck'}});
+ const regionalBind=device.createBindGroup({layout:regionalPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.uniform}},{binding:5,resource:{buffer:renderer.sampleBuffer}},{binding:7,resource:{buffer:renderer.world}},{binding:8,resource:{buffer:renderer.worldDirections}},{binding:10,resource:{buffer:renderer.worldFaces}}]});
+ const regionalCount=6*24*24,regionalBuffer=device.createBuffer({size:regionalCount*16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),regionalEncoder=device.createCommandEncoder(),regionalPass=regionalEncoder.beginComputePass();
+ regionalPass.setPipeline(regionalPipe);regionalPass.setBindGroup(0,regionalBind);regionalPass.dispatchWorkgroups(Math.ceil(regionalCount/64));regionalPass.end();regionalEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,regionalBuffer,0,regionalCount*16);device.queue.submit([regionalEncoder.finish()]);await regionalBuffer.mapAsync(GPUMapMode.READ);
+ const regionalData=new Float32Array(regionalBuffer.getMappedRange());let regionalCountActive=0,regionalMax=0,regionalTangency=0;
+ for(let i=0;i<regionalData.length;i+=4){
+  if(![regionalData[i],regionalData[i+1],regionalData[i+2],regionalData[i+3]].every(Number.isFinite))throw new Error('Regional drainage produced non-finite data');
+  if(regionalData[i+1]>.5){regionalTangency=Math.max(regionalTangency,Math.abs(regionalData[i]));if(Math.abs(regionalData[i+1]-1)>.001)throw new Error('Regional drainage direction is not normalized');}
+  if(regionalData[i+2]>.001)regionalCountActive++;regionalMax=Math.max(regionalMax,regionalData[i+2]);
+ }
+ regionalBuffer.unmap();regionalBuffer.destroy();
+ if(regionalCountActive<100||regionalMax<.01||regionalTangency>.001)throw new Error(`Regional drainage detail failed: ${JSON.stringify({regionalCountActive,regionalMax,regionalTangency})}`);
+ const edgePipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'edgeCandidates'}});
+ const edgeBind=device.createBindGroup({layout:edgePipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.uniform}},{binding:5,resource:{buffer:renderer.sampleBuffer}},{binding:7,resource:{buffer:renderer.world}},{binding:8,resource:{buffer:renderer.worldDirections}},{binding:10,resource:{buffer:renderer.worldFaces}}]});
+ const edgeCount=6*4*64,edgeBuffer=device.createBuffer({size:edgeCount*16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),edgeEncoder=device.createCommandEncoder(),edgePass=edgeEncoder.beginComputePass();
+ edgePass.setPipeline(edgePipe);edgePass.setBindGroup(0,edgeBind);edgePass.dispatchWorkgroups(Math.ceil(edgeCount/64));edgePass.end();edgeEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,edgeBuffer,0,edgeCount*16);device.queue.submit([edgeEncoder.finish()]);await edgeBuffer.mapAsync(GPUMapMode.READ);
+ const edgeData=new Float32Array(edgeBuffer.getMappedRange());let bestEdge=0;for(let i=4;i<edgeData.length;i+=4)if(edgeData[i+3]>edgeData[bestEdge+3])bestEdge=i;
+ const edgeDirection=[edgeData[bestEdge],edgeData[bestEdge+1],edgeData[bestEdge+2]],edgeIncision=edgeData[bestEdge+3];edgeBuffer.unmap();edgeBuffer.destroy();
+ if(edgeIncision<.001)throw new Error(`No erosion-shaped land found on a cube-face edge: ${edgeIncision}`);
  // The control must change the seeded land geometry, remain reproducible,
  // and leave the fully submerged seabed unchanged.
  renderer.valleys=0;const unshaped=await renderer.sampleTerrain();renderer.valleys=1;const shaped=await renderer.sampleTerrain(),shapedRepeat=await renderer.sampleTerrain();
@@ -177,7 +234,7 @@ try{
  renderer.budget=384;renderer.pixelSize=14;renderer.invalidateTerrain();
  Object.assign(renderer.cameraState,{mode:'orbit',altitude:.03,surfaceHeight:point[3],longitude:Math.atan2(highland.direction[2],highland.direction[0]),latitude:Math.asin(highland.direction[1])});
  renderer.lastSelection=0;await capture();const deepSeams=await inspectSeams();
- if(deepSeams.deepMatched<100||deepSeams.deepMaxKm>.0001||deepSeams.deepMaxNormal>.5)throw new Error(`Close-up seams: ${JSON.stringify(deepSeams)}`);
+ if(deepSeams.deepMatched<100||deepSeams.deepMaxKm>.00001||deepSeams.deepMaxNormal>.5)throw new Error(`Close-up seams: ${JSON.stringify(deepSeams)}`);
  let reusedChanges=0;
  for(const offset of [.01,.03,.07]){
   const before=new Map(renderer.patches.map(p=>[p.key,p.normalStitch]));renderer.cameraState.longitude+=offset;renderer.needsSelection=true;renderer.lastSelection=0;await capture();
@@ -185,6 +242,49 @@ try{
   if(reusedChanges){if(renderer.stats.reusedNormalUpdates<reusedChanges)throw new Error('Changed neighboring LOD did not refresh cached normals');break;}
  }
  if(!reusedChanges)throw new Error('Camera movement did not exercise a cached stitch change');
+ // Exercise a close-up view centered directly on a cube-face edge. The same
+ // high-frequency terrain must agree on both faces, not only within a face.
+ const edgeHeight=await renderer.sampleTerrain(edgeDirection);
+ Object.assign(renderer.cameraState,{mode:'orbit',altitude:.03,surfaceHeight:Math.max(0,edgeHeight[3]),longitude:Math.atan2(edgeDirection[2],edgeDirection[0]),latitude:Math.asin(edgeDirection[1])});
+ renderer.invalidateTerrain();renderer.cameraState.surfaceHeight=Math.max(0,edgeHeight[3]);renderer.lastSelection=0;await capture();
+ async function inspectCubeEdge(){
+  const nodes=renderer.patches,chunk=441*48,buffer=device.createBuffer({size:nodes.length*chunk,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),encoder=device.createCommandEncoder();
+  nodes.forEach((node,i)=>encoder.copyBufferToBuffer(renderer.vertices,node.slot*chunk,buffer,i*chunk,chunk));device.queue.submit([encoder.finish()]);await buffer.mapAsync(GPUMapMode.READ);
+  const data=new Float32Array(buffer.getMappedRange()),points=new Map();let matches=0,maxKm=0,maxNormal=0,deepMatches=0,deepMaxKm=0,deepMaxNormal=0,worst=null,worstNormal=null;
+  for(let i=0;i<nodes.length;i++){
+   const n=nodes[i],half=n.span/2;
+   for(let edge=0;edge<4;edge++){
+    const boundary=edge===0?n.u-half:edge===1?n.u+half:edge===2?n.v-half:n.v+half;
+    if(Math.abs(Math.abs(boundary)-1)>1e-12)continue;
+    for(let k=0;k<=16;k++){
+     const x=edge===0?0:edge===1?16:k,y=edge===2?0:edge===3?16:k;
+     const d=faceDirection(n.face,n.u+(x-8)*n.span/16,n.v+(y-8)*n.span/16),key=d.map(v=>v.toFixed(10)).join(',');
+     const offset=i*441*12+((y+2)*21+x+2)*12,position=[0,1,2].map(c=>n.direction[c]*6371+data[offset+c]);
+     const normal=[data[offset+4],data[offset+5],data[offset+6]],other=points.get(key)||[];
+     for(const p of other)if(p.face!==n.face){
+      const distance=Math.hypot(...position.map((v,c)=>v-p.position[c]));
+      const dot=Math.max(-1,Math.min(1,normal.reduce((sum,v,c)=>sum+v*p.normal[c],0))),angle=Math.acos(dot)*180/Math.PI;
+      matches++;maxKm=Math.max(maxKm,distance);maxNormal=Math.max(maxNormal,angle);
+      if(n.level>=15&&p.level>=15){deepMatches++;if(distance>deepMaxKm){deepMaxKm=distance;worst={a:n.key,b:p.key};}if(angle>deepMaxNormal){deepMaxNormal=angle;worstNormal={a:n.key,ax:x,ay:y,as:n.stitch,an:n.normalStitch,ae:n.edgeKeys,b:p.key,bx:p.x,by:p.y,bs:p.stitch,bn:p.normalStitch,be:p.edgeKeys};}}
+     }
+     other.push({face:n.face,level:n.level,key:n.key,x,y,stitch:n.stitch,normalStitch:n.normalStitch,edgeKeys:n.edgeKeys,position,normal});points.set(key,other);
+    }
+   }
+  }
+  buffer.unmap();buffer.destroy();return {matches,maxKm,maxNormal,deepMatches,deepMaxKm,deepMaxNormal,worst,worstNormal};
+ }
+ const closeCubeEdge=await inspectCubeEdge();
+ if(closeCubeEdge.deepMatches<50||closeCubeEdge.deepMaxKm>.00001||closeCubeEdge.deepMaxNormal>.5)throw new Error(`Close-up cube-face seams: ${JSON.stringify(closeCubeEdge)}`);
+ // Travel along the same boundary with cached geometry still resident; changed
+ // LOD neighbors must refresh all normals that depend on the old edge chain.
+ const priorSlots=new Map(renderer.patches.map(n=>[n.key,n.slot])),movedDirection=[...edgeDirection];
+ let minor=0;for(let i=1;i<3;i++)if(Math.abs(movedDirection[i])<Math.abs(movedDirection[minor]))minor=i;
+ movedDirection[minor]+=(movedDirection[minor]>0?-.0001:.0001);const movedLength=Math.hypot(...movedDirection);for(let i=0;i<3;i++)movedDirection[i]/=movedLength;
+ const movedHeight=await renderer.sampleTerrain(movedDirection);
+ Object.assign(renderer.cameraState,{surfaceHeight:Math.max(0,movedHeight[3]),longitude:Math.atan2(movedDirection[2],movedDirection[0]),latitude:Math.asin(movedDirection[1])});
+ renderer.needsSelection=true;renderer.lastSelection=0;renderer.lastProbeTime=Infinity;await capture();
+ const reusedAtCubeEdge=renderer.patches.filter(n=>priorSlots.get(n.key)===n.slot).length,movedCubeEdge=await inspectCubeEdge();
+ if(reusedAtCubeEdge<10||movedCubeEdge.deepMatches<50||movedCubeEdge.deepMaxKm>.00001||movedCubeEdge.deepMaxNormal>.5)throw new Error(`Moving across cached cube-edge patches: ${JSON.stringify({reusedAtCubeEdge,movedCubeEdge})}`);
  Object.assign(renderer.cameraState,original);renderer.budget=36;renderer.pixelSize=24;renderer.invalidateTerrain();
  const background={pixels:new Uint8Array(first.pixels.length)};for(let y=0;y<height;y++)for(let x=0;x<width;x++){const i=y*stride+x*4;background.pixels.set(first.pixels.subarray(0,4),i);}
  const foreground=difference(first,background);if(foreground<2000)throw new Error(`Planet render is empty: ${foreground} foreground pixels`);
@@ -209,5 +309,5 @@ try{
   if(renderer.format.startsWith('bgra')){image.data[o]=first.pixels[i+2];image.data[o+1]=first.pixels[i+1];image.data[o+2]=first.pixels[i];}else image.data.set(first.pixels.subarray(i,i+3),o);image.data[o+3]=255;
  }
  ctx.putImageData(image,0,0);
- const result={ok:true,patches:first.patches,meshlets:first.count,foregroundPixels:foreground,cullingChanged,nearChanged,water,coastalWater,exposedSeafloor,seams,deepSeams,reusedChanges,detail:[...detail],valleyChanges,maxValleyKm,geometryChange,maxOceanChange,maxRepeat,gradientError,alongDifference,acrossDifference,valleyIncision:valley.incision,crossMatches,crossMaxKm,highlandHeight:highland.height,repeatChanged,seedChanged,biomeChanged,riverChanged,lodChanged,patchChanged,wireChanged};status.textContent=JSON.stringify(result);window.__planetSmokeDone=result;
+ const result={ok:true,patches:first.patches,meshlets:first.count,foregroundPixels:foreground,cullingChanged,nearChanged,water,coastalWater,exposedSeafloor,seams,deepSeams,closeCubeEdge,movedCubeEdge,reusedAtCubeEdge,edgeIncision,reusedChanges,detail:[...detail],valleyChanges,maxValleyKm,geometryChange,maxOceanChange,maxRepeat,gradientError,alongDifference,acrossDifference,regionalCountActive,regionalMax,regionalTangency,lodMeasurements,lodResidualMax,lodResidualDifference,valleyIncision:valley.incision,crossMatches,crossMaxKm,highlandHeight:highland.height,repeatChanged,seedChanged,biomeChanged,riverChanged,lodChanged,patchChanged,wireChanged};status.textContent=JSON.stringify(result);window.__planetSmokeDone=result;
 }catch(error){status.textContent=error.stack;window.__planetSmokeDone={ok:false,error:error.stack};}
