@@ -6,7 +6,7 @@
 fn main(@builtin(global_invocation_id) gid:vec3<u32>) {
  let index=gid.x;if(index>=frame.counts.y*MESHLETS_PER_PATCH){return;}
  let slot=queue[index/MESHLETS_PER_PATCH];let meshlet=index%MESHLETS_PER_PATCH;
- let x0=(meshlet%4u)*4u+1u;let y0=(meshlet/4u)*4u+1u;
+ let x0=(meshlet%4u)*4u+2u;let y0=(meshlet/4u)*4u+2u;
  var lo=vec3<f32>(1e30);var hi=vec3<f32>(-1e30);
  for(var y=0u;y<=4u;y++){for(var x=0u;x<=4u;x++){
   let p=vertices[slot*GRID_COUNT+(y0+y)*GRID+x0+x].position.xyz;lo=min(lo,p);hi=max(hi,p);

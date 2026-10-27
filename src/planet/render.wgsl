@@ -29,7 +29,7 @@ fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->
  if(coord.x==CELLS && (stitch&2u)!=0u && coord.y%2u!=0u){coord.y-=1u;}
  if(coord.y==0u && (stitch&4u)!=0u && coord.x%2u!=0u){coord.x-=1u;}
  if(coord.y==CELLS && (stitch&8u)!=0u && coord.x%2u!=0u){coord.x-=1u;}
- let vert=vertices[slot*GRID_COUNT+(coord.y+1u)*GRID+coord.x+1u];
+ let vert=vertices[slot*GRID_COUNT+(coord.y+2u)*GRID+coord.x+2u];
  let relative=tile.relative.xyz+vert.position.xyz;
  var mask=0u;
  if((frame.counts.w & 8u)!=0u){if(onPatchEdge(b,c)){mask|=1u;}if(onPatchEdge(c,a)){mask|=2u;}if(onPatchEdge(a,b)){mask|=4u;}}

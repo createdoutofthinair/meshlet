@@ -57,24 +57,39 @@ function score(node,camera,pixelSize=10) {
   if(angle>horizon+Math.min(Math.PI,node.span*1.5))return 0;
  }
  // Projected cell size is a refinement heuristic, not a geometric-error bound.
- const facing=directionToFace(camera.eye);
+ const facing=camera.facing;
  let distance=length(relative);
  if(facing.face===node.face){
   const half=node.span/2;
   const u=Math.max(node.u-half,Math.min(node.u+half,facing.u));
   const v=Math.max(node.v-half,Math.min(node.v+half,facing.v));
-  const nearest=faceDirection(node.face,u,v).map(x=>x*RADIUS_KM);
+  const nearest=faceDirection(node.face,u,v).map(x=>x*(RADIUS_KM+camera.altitude-camera.clearance));
   distance=Math.min(distance,length(sub(nearest,camera.eye)));
  }
  if(facing.face===node.face && Math.abs(facing.u-node.u)<=node.span/2 && Math.abs(facing.v-node.v)<=node.span/2 && camera.clearance<50)distance=Math.min(distance,Math.max(.001,camera.clearance));
  distance=Math.max(.001,distance);
- const underCamera=facing.face===node.face && Math.abs(facing.u-node.u)<=node.span/2 && Math.abs(facing.v-node.v)<=node.span/2;
  const projected=(RADIUS_KM*node.span/PATCH_CELLS)*camera.focalPixels/distance;
- const localFocus=underCamera && camera.clearance<100 && projected>pixelSize?64:1;
- return projected*localFocus;
+ const focus=camera.focus;
+ const inFocus=focus.face===node.face && Math.abs(focus.u-node.u)<=node.span/2 && Math.abs(focus.v-node.v)<=node.span/2;
+ // Prioritize the view center until it meets the same pixel target. The 2:1
+ // balancing then allocates supporting levels around it; all tiles stay covered.
+ const localFocus=inFocus && camera.clearance<100 && projected>pixelSize?256:1;
+ // The conservative culling bound includes the full possible mountain height.
+ // Near the ground that can make off-screen tiles compete with the view for
+ // detail. Use a tighter estimated footprint only as a priority, never a cull.
+ let viewPriority=1;
+ if(camera.clearance<10){
+  const estimate=node.direction.map(x=>x*(RADIUS_KM+camera.altitude-camera.clearance));
+  const r=sub(estimate,camera.eye),z0=dot(r,camera.forward),x0=dot(r,camera.right),y0=dot(r,camera.up);
+  const tightRadius=RADIUS_KM*node.span*.35;
+  const outside=Math.max(0,-z0-tightRadius,Math.abs(x0)-z0*camera.tanX-tightRadius,Math.abs(y0)-z0*camera.tanY-tightRadius);
+  viewPriority=1/(1+outside/Math.max(.001,camera.clearance)*32);
+ }
+ return projected*localFocus*viewPriority;
 }
 export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10}={}) {
  budget=Math.max(6,Math.floor(budget));maxDepth=Math.min(MAX_DEPTH,Math.max(0,maxDepth));
+ camera={...camera,facing:directionToFace(camera.eye),focus:directionToFace(camera.focusDirection||camera.eye)};
  const leaves=new Map();for(let face=0;face<6;face++){const n=makeTile(face,0,0,0);leaves.set(n.key,n);}
  // Refine most visible/highest projected cell size first; rebuilding from a
  // deterministic state avoids stale nodes and keeps budget behavior explicit.
@@ -87,9 +102,21 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
  const visible=[];
  for(const node of all){
   if(!score(node,camera))continue;
-  let stitch=0;
-  for(let edge=0;edge<4;edge++)if(neighbors(leaves,node,edge,maxDepth).some(other=>other.level<node.level))stitch|=1<<edge;
-  visible.push({...node,stitch});
+  let stitch=0,corners=0;const coarseKeys=[null,null,null,null];
+  for(let edge=0;edge<4;edge++){
+   const coarse=neighbors(leaves,node,edge,maxDepth).find(other=>other.level<node.level);
+   if(coarse){stitch|=1<<edge;coarseKeys[edge]=coarse.key;}
+  }
+  // A coarse tile may meet this tile only diagonally at a shared corner. Its
+  // derivative scale still needs to reach both same-level tiles at that corner.
+  const half=node.span/2,eps=node.span*1e-6;
+  for(let corner=0;corner<4;corner++){
+   const sx=corner&1?1:-1,sy=corner&2?1:-1;
+   const f=directionToFace(faceCube(node.face,node.u+sx*(half+eps),node.v+sy*(half+eps)));
+   const diagonal=tileAt(leaves,f.face,f.u,f.v,maxDepth);
+   if(diagonal && diagonal.level<node.level)corners|=1<<(corner+4);
+  }
+  visible.push({...node,stitch,normalStitch:stitch|corners,coarseKeys});
  }
  return {leaves:all,visible,deepest:Math.max(...visible.map(x=>x.level),0)};
 }

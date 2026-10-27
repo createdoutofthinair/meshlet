@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {FACE_BASES,faceCube,faceDirection,directionToFace,makeTile,seedPlates,reversePerspective,dot,cross} from '../src/planet/planet-math.js';
+import {FACE_BASES,faceCube,faceDirection,directionToFace,makeTile,seedPlates,reversePerspective,add,scale,normalize,dot,cross} from '../src/planet/planet-math.js';
 import {selectPatches,neighbors} from '../src/planet/quadtree.js';
 import {planetCamera} from '../src/planet/camera.js';
 
@@ -64,4 +64,29 @@ test('a near-ground view can refine to level 20 within a larger budget',()=>{
  const camera=planetCamera({mode:'orbit',altitude:.03,longitude:.8,latitude:.4},1280,720);
  const result=selectPatches(camera,{budget:384,maxDepth:20,pixelSize:10});
  assert.equal(result.deepest,20);assert.ok(result.leaves.length<=384);
+});
+test('zooming refines the viewed surface on high terrain in orbit and flyover',()=>{
+ for(const mode of ['orbit','flyover']){
+  const levels=[];
+  for(const altitude of [2,.3,.05]){
+   const camera=planetCamera({mode,altitude,surfaceHeight:7.25,longitude:-1.141034,latitude:.39478,pitch:.08,heading:.45},1280,720);
+   const result=selectPatches(camera,{budget:384,maxDepth:20,pixelSize:14}),focus=directionToFace(camera.focusDirection);
+   const leaf=result.leaves.find(n=>n.face===focus.face&&Math.abs(focus.u-n.u)<=n.span/2&&Math.abs(focus.v-n.v)<=n.span/2);
+   assert.ok(leaf,'view center is covered');assert.ok(result.leaves.length<=384);levels.push(leaf.level);
+  }
+  assert.ok(levels[0]<levels[1]&&levels[1]<levels[2],`${mode}: ${levels}`);
+  assert.ok(levels[2]>=(mode==='orbit'?19:15),`${mode}: ${levels}`);
+ }
+});
+test('close orbit detail covers the view, not only the center point',()=>{
+ const camera=planetCamera({mode:'orbit',altitude:.03,surfaceHeight:7.238,longitude:-1.141034,latitude:.39478},860,700);
+ const result=selectPatches(camera,{budget:384,maxDepth:20,pixelSize:14}),levels=[];
+ for(const y of [-.8,-.4,0,.4,.8])for(const x of [-.8,-.4,0,.4,.8]){
+  const ray=normalize(add(add(camera.forward,scale(camera.right,x*camera.tanX)),scale(camera.up,y*camera.tanY)));
+  const b=dot(camera.eye,ray),radius=6371+7.238,discriminant=b*b-(dot(camera.eye,camera.eye)-radius*radius);
+  assert.ok(discriminant>=0);const hit=directionToFace(add(camera.eye,scale(ray,-b-Math.sqrt(discriminant))));
+  const leaf=result.leaves.find(n=>n.face===hit.face&&Math.abs(hit.u-n.u)<=n.span/2&&Math.abs(hit.v-n.v)<=n.span/2);
+  assert.ok(leaf);levels.push(leaf.level);
+ }
+ levels.sort((a,b)=>a-b);assert.ok(levels[12]>=20,`median level: ${levels[12]}`);
 });

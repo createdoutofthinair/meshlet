@@ -9,13 +9,24 @@ fn hash3(p: vec3<i32>, seed:u32) -> f32 {
  h=(h^(h>>16u))*0x7feb352du;h=(h^(h>>15u))*0x846ca68bu;h=h^(h>>16u);
  return f32(h & 0x00ffffffu)*(2.0/16777215.0)-1.0;
 }
-fn noise3(p:vec3<f32>, seed:u32)->f32 {
- let cell=vec3<i32>(floor(p));let x=fract(p);let f=x*x*(vec3<f32>(3.0)-2.0*x);
+fn cellNoise(cell:vec3<i32>, x:vec3<f32>, seed:u32)->f32 {
+ let f=x*x*(vec3<f32>(3.0)-2.0*x);
  let a=mix(hash3(cell+vec3<i32>(0,0,0),seed),hash3(cell+vec3<i32>(1,0,0),seed),f.x);
  let b=mix(hash3(cell+vec3<i32>(0,1,0),seed),hash3(cell+vec3<i32>(1,1,0),seed),f.x);
  let c=mix(hash3(cell+vec3<i32>(0,0,1),seed),hash3(cell+vec3<i32>(1,0,1),seed),f.x);
  let d=mix(hash3(cell+vec3<i32>(0,1,1),seed),hash3(cell+vec3<i32>(1,1,1),seed),f.x);
  return mix(mix(a,b,f.y),mix(c,d,f.y),f.z);
+}
+fn noise3(p:vec3<f32>, seed:u32)->f32 {
+ return cellNoise(vec3<i32>(floor(p)),fract(p),seed);
+}
+// Keep the high and low parts separate through the lattice lookup. Adding
+// them to a unit vector first would round away the sub-meter offsets.
+fn localNoise(high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,frequency:f32,seed:u32)->f32 {
+ let scaled=high*frequency;
+ let residual=fract(scaled)+(low+delta)*frequency;
+ let cell=vec3<i32>(floor(scaled))+vec3<i32>(floor(residual));
+ return cellNoise(cell,fract(residual),seed);
 }
 fn terrain(direction:vec3<f32>,seed:u32)->f32 {
  // Low-frequency warp and continents provide geological structure; ridges
@@ -49,7 +60,9 @@ fn terrain(direction:vec3<f32>,seed:u32)->f32 {
  for(var i=0u;i<6u;i++){
   let r=1.0-min(1.0,abs(noise3(d*fineFrequency+warpDetail,seed+151u+i*23u))*2.2);
   fine+=(r*r-.22)*fineAmplitude*fineWeight;
-  fineWeight=clamp(r*1.6,.25,1.0);fineFrequency*=3.7;fineAmplitude*=.42;
+  // The amplitude must fall faster than frequency rises. Otherwise the
+  // smallest octaves create taller-than-wide spikes as the camera approaches.
+  fineWeight=clamp(r*1.6,.25,1.0);fineFrequency*=3.7;fineAmplitude*=.26;
  }
  let coords=vec3<f32>(dot(d,plates[0].xyz)*2100.0,dot(d,plates[1].xyz)*480.0,dot(d,plates[2].xyz)*125.0);
  let fold=1.0-min(1.0,abs(noise3(coords+warpDetail,seed+277u))*2.0);
@@ -57,19 +70,29 @@ fn terrain(direction:vec3<f32>,seed:u32)->f32 {
  let plainsDetail=noise3(d*900.0,seed+311u)*.035+noise3(d*5000.0,seed+313u)*.008;
  return clamp(mix(basin,plain,land)+mountains+roughness*fine+directional+plainsDetail*land,-8.0,9.0);
 }
+fn detailedTerrain(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32)->f32 {
+ let base=terrain(direction,seed);
+ // Independent, seeded bands produce real vertex relief from tens of meters
+ // down to sub-meter scales. Their low amplitudes preserve the landforms.
+ let micro=localNoise(high,low,delta,131072.0,seed+401u)*.0025
+          +localNoise(high,low,delta,524288.0,seed+409u)*.00065
+          +localNoise(high,low,delta,2097152.0,seed+419u)*.00018
+          +localNoise(high,low,delta,8388608.0,seed+421u)*.00005;
+ return base+micro*smoothstep(-.05,.25,base);
+}
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid:vec3<u32>) {
  let index=gid.x;if(index>=frame.counts.y*GRID_COUNT){return;}
  let slot=queue[index/GRID_COUNT];let sample=index%GRID_COUNT;
  let x=sample%GRID;let y=sample/GRID;let tile=patches[slot];
- let du=(f32(x)-1.0-f32(CELLS)*.5)*tile.cube.w/f32(CELLS);
- let dv=(f32(y)-1.0-f32(CELLS)*.5)*tile.cube.w/f32(CELLS);
+ let du=(f32(x)-2.0-f32(CELLS)*.5)*tile.cube.w/f32(CELLS);
+ let dv=(f32(y)-2.0-f32(CELLS)*.5)*tile.cube.w/f32(CELLS);
  let center=tile.cube.xyz;let delta=tile.axisU.xyz*du+tile.axisV.xyz*dv;
  let centerLength=length(center);let a=(2.0*dot(center,delta)+dot(delta,delta))/dot(center,center);
  let factor=sqrt(max(.01,1.0+a));let factorMinusOne=a/(factor+1.0);
  let directionDelta=(delta-center*factorMinusOne)/(centerLength*factor);
  let direction=normalize(center+delta);
- let h=clamp(terrain(direction,frame.counts.z)*frame.settings.y,-HEIGHT_LIMIT,HEIGHT_LIMIT);
+ let h=clamp(detailedTerrain(direction,tile.centerDirection.xyz,tile.centerLow.xyz,directionDelta,frame.counts.z)*frame.settings.y,-HEIGHT_LIMIT,HEIGHT_LIMIT);
  let surfaceHeight=select(h,max(h,0.0),frame.settings.z>.5);
  vertices[slot*GRID_COUNT+sample].position=vec4<f32>(directionDelta*frame.settings.x+direction*surfaceHeight,h);
 }
@@ -89,10 +112,10 @@ fn highlands(@builtin(global_invocation_id) gid:vec3<u32>){
  let face=n/(24u*24u);let k=n%(24u*24u);
  let u=(f32(k%24u)+.5)/24.0*2.0-1.0;let v=(f32(k/24u)+.5)/24.0*2.0-1.0;
  let direction=normalize(facePoint(face,u,v));
- samples[n]=vec4<f32>(direction,clamp(terrain(direction,frame.counts.z)*frame.settings.y,-HEIGHT_LIMIT,HEIGHT_LIMIT));
+ samples[n]=vec4<f32>(direction,clamp(detailedTerrain(direction,direction,vec3<f32>(0.0),vec3<f32>(0.0),frame.counts.z)*frame.settings.y,-HEIGHT_LIMIT,HEIGHT_LIMIT));
 }
 @compute @workgroup_size(1)
 fn point(){
  let direction=normalize(probe.direction.xyz);
- samples[0]=vec4<f32>(direction,clamp(terrain(direction,frame.counts.z)*frame.settings.y,-HEIGHT_LIMIT,HEIGHT_LIMIT));
+ samples[0]=vec4<f32>(direction,clamp(detailedTerrain(direction,direction,vec3<f32>(0.0),vec3<f32>(0.0),frame.counts.z)*frame.settings.y,-HEIGHT_LIMIT,HEIGHT_LIMIT));
 }
