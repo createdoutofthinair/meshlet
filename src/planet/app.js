@@ -1,6 +1,6 @@
 import {PlanetRenderer} from './renderer.js';
 const $=id=>document.getElementById(id);
-const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','generation-status','seed-form','seed','random','orbit','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','biomes','ocean','sun-follow','quality','render-scale','culling','lod-colors','patch-lines','wireframe','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','timing-note'];
+const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','generation-status','seed-form','seed','random','orbit','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','lod-colors','patch-lines','wireframe','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','timing-note'];
 const el=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const MIN_ALT=.03,MAX_ALT=30000;
 const fmt=n=>Math.round(n).toLocaleString('en-US');
@@ -103,6 +103,7 @@ el.valleys.addEventListener('change',()=>{if(!renderer)return;renderer.valleys=N
 el.erosion.addEventListener('input',()=>{el['erosion-value'].textContent=`${(Number(el.erosion.value)/100).toFixed(2)}×`;});
 el.erosion.addEventListener('change',()=>{if(!renderer)return;renderer.erosion=Number(el.erosion.value)/100;renderer.invalidateTerrain();ready=false;loading(true,'Updating erosion');});
 el.rivers.addEventListener('change',()=>{if(!renderer)return;renderer.rivers=el.rivers.checked;renderer.invalidateTerrain();ready=false;loading(true,'Updating surface water');});
+el.regional.addEventListener('change',()=>{if(!renderer)return;renderer.regional=el.regional.checked;renderer.invalidateTerrain();ready=false;loading(true,'Updating regional erosion');});
 el.biomes.addEventListener('change',()=>{if(renderer)renderer.biomes=el.biomes.checked;});
 el.ocean.addEventListener('change',()=>{if(!renderer)return;renderer.ocean=el.ocean.checked;renderer.invalidateTerrain();ready=false;loading(true,'Updating the surface');});
 el['sun-follow'].addEventListener('change',()=>{if(renderer)renderer.followSun=el['sun-follow'].checked;});

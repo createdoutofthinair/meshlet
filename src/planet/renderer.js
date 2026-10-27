@@ -2,8 +2,12 @@ import {RADIUS_KM,PATCH_CELLS,FACE_BASES,faceCube,seedPlates,normalize,add,scale
 import {planetCamera} from './camera.js';
 import {selectPatches} from './quadtree.js';
 import {buildWorldGrid} from './world-grid.js';
+import {regionsAround,REGION_FACE_TILES,REGION_CAPACITY,REGION_GRID,REGION_SAMPLES,REGION_LOOKUPS} from './regions.js';
 const BUFFER=globalThis.GPUBufferUsage;
 const CAPACITY=512,GRID=21,VERTEX_BYTES=48,MESHLETS=16,PATCH_BYTES=128;
+const REGION_LOOKUP_OFFSET=24578*(48+17*16+4);
+const REGION_VALUES_OFFSET=Math.ceil((REGION_LOOKUP_OFFSET+REGION_LOOKUPS*4)/16)*16;
+const WORLD_BYTES=REGION_VALUES_OFFSET+REGION_CAPACITY*REGION_SAMPLES*16;
 async function shader(device,code,label){
  const module=device.createShaderModule({label,code});const info=await module.getCompilationInfo();
  const errors=info.messages.filter(x=>x.type==='error');if(errors.length)throw new Error(`${label}: ${errors.map(x=>`${x.lineNum}:${x.linePos} ${x.message}`).join('; ')}`);return module;
@@ -20,20 +24,23 @@ export class PlanetRenderer {
  constructor(canvas,adapter,device,context,timing,onError){
   Object.assign(this,{canvas,adapter,device,context,timing,onError});this.format=navigator.gpu.getPreferredCanvasFormat();
   this.cameraState={longitude:.8,latitude:.4,altitude:14000,surfaceHeight:0,mode:'orbit',heading:.45,pitch:.3};
-  this.seed=918273;this.relief=1;this.valleys=1;this.erosion=1;this.rivers=true;this.biomes=true;this.ocean=true;this.followSun=true;this.culling=true;this.lodColors=false;this.wireframe=false;this.patchLines=false;
+  this.seed=918273;this.relief=1;this.valleys=1;this.erosion=1;this.regional=true;this.rivers=true;this.biomes=true;this.ocean=true;this.followSun=true;this.culling=true;this.lodColors=false;this.wireframe=false;this.patchLines=false;
   this.budget=384;this.pixelSize=14;this.resolution=1;this.maxDepth=20;
   this.patchBytes=new ArrayBuffer(CAPACITY*PATCH_BYTES);this.patchFloats=new Float32Array(this.patchBytes);this.patchUints=new Uint32Array(this.patchBytes);
   this.slotByKey=new Map();this.stitchByKey=new Map();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.patches=[];this.pending=[];this.normalPending=[];
   this.needsSelection=true;this.lastSelection=0;this.previousSplits=null;this.lodErrors=new Map();this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
   this.lastSample=0;this.pendingRead=false;this.generation=0;this.inFlight=0;this.probePending=false;this.lastProbeKey='';this.lastProbeTime=0;this.stats={leaves:0,visiblePatches:0,deepest:0,selectionMs:0,generated:0};
   this.hydrologySeed=null;
+  this.regionSeed=null;this.regions=new Map();this.regionFree=Array.from({length:REGION_CAPACITY},(_,i)=>REGION_CAPACITY-1-i);
+  this.regionLookup=new Uint32Array(REGION_LOOKUPS);this.regionLookup.fill(0xffffffff);
+  this.regionMeta=new Uint32Array(REGION_CAPACITY*4);this.regionPending=[];
  }
  async init(){
   const d=this.device;d.addEventListener('uncapturederror',e=>this.onError?.(`WebGPU: ${e.error.message}`));
   d.lost.then(info=>this.onError?.(`WebGPU device lost: ${info.message||info.reason}. Reload to retry.`));
   this.context.configure({device:d,format:this.format,alphaMode:'opaque'});
   const fetchText=async p=>{const r=await fetch(new URL(p,import.meta.url));if(!r.ok)throw new Error(`Failed to load ${p}`);return r.text();};
-  const [common,terrainCore,riverCurve,hydrologySource,worldField,riverDetailSource,...sources]=await Promise.all(['./common.wgsl','./terrain-core.wgsl','./river-curve.wgsl','./hydrology.wgsl','./world-field.wgsl','./river-detail.wgsl','./generate.wgsl','./normal.wgsl','./bounds.wgsl','./cull.wgsl','./render.wgsl','./lod-error.wgsl'].map(fetchText));
+  const [common,terrainCore,riverCurve,hydrologySource,worldField,riverDetailSource,regionalSource,...sources]=await Promise.all(['./common.wgsl','./terrain-core.wgsl','./river-curve.wgsl','./hydrology.wgsl','./world-field.wgsl','./river-detail.wgsl','./regional-hydrology.wgsl','./generate.wgsl','./normal.wgsl','./bounds.wgsl','./cull.wgsl','./render.wgsl','./lod-error.wgsl'].map(fetchText));
   const labels=['Terrain generation','Terrain normals','Meshlet bounds','Meshlet culling','Planet rendering','Terrain LOD residual'];
   const modules=await Promise.all(sources.map((s,i)=>shader(d,common+'\n'+(i===0?terrainCore+'\n'+riverCurve+'\n'+worldField+'\n':'')+s,labels[i])));
   [this.generatePipe,this.normalPipe,this.boundsPipe,this.cullPipe]=await Promise.all(modules.slice(0,4).map(module=>d.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}})));
@@ -53,7 +60,14 @@ export class PlanetRenderer {
   this.plates=make('Seeded plate controls',16*16,BUFFER.STORAGE|BUFFER.COPY_DST);
   const grid=buildWorldGrid(64);if(grid.count!==24578)throw new Error('Invalid world simulation grid');
   this.worldCount=grid.count;
-  this.world=make('World drainage, erosion and river paths',Math.ceil(grid.count*(48+17*16+4)/16)*16,BUFFER.STORAGE|BUFFER.COPY_SRC);
+  this.world=make('World drainage, erosion and regional simulation',WORLD_BYTES,BUFFER.STORAGE|BUFFER.COPY_SRC|BUFFER.COPY_DST);
+  d.queue.writeBuffer(this.world,REGION_LOOKUP_OFFSET,this.regionLookup);
+  this.regionMetaBuffer=make('Regional simulation tile metadata',this.regionMeta.byteLength,BUFFER.STORAGE|BUFFER.COPY_DST);
+  this.regionQueueBuffer=make('Regional simulation tile queue',REGION_CAPACITY*4,BUFFER.STORAGE|BUFFER.COPY_DST);
+  const regionStateBytes=REGION_CAPACITY*REGION_GRID*REGION_GRID*16;
+  this.regionA=make('Regional water and sediment A',regionStateBytes,BUFFER.STORAGE|BUFFER.COPY_SRC);
+  this.regionB=make('Regional water and sediment B',regionStateBytes,BUFFER.STORAGE|BUFFER.COPY_SRC);
+  this.regionFlux=make('Regional water outflow',regionStateBytes,BUFFER.STORAGE|BUFFER.COPY_SRC);
   this.worldDirections=make('World grid directions',grid.directions.byteLength,BUFFER.STORAGE|BUFFER.COPY_DST);
   this.worldNeighbors=make('World grid neighbors',grid.neighbors.byteLength,BUFFER.STORAGE|BUFFER.COPY_DST);
   this.worldFaces=make('World grid face indices',grid.faceIndices.byteLength,BUFFER.STORAGE|BUFFER.COPY_DST);
@@ -61,6 +75,11 @@ export class PlanetRenderer {
   d.queue.writeBuffer(this.worldDirections,0,grid.directions);d.queue.writeBuffer(this.worldNeighbors,0,grid.neighbors);d.queue.writeBuffer(this.worldFaces,0,grid.faceIndices);
   const hydroModule=await shader(d,common+'\n'+terrainCore+'\n'+riverCurve+'\n'+hydrologySource,'World hydrology');
   const riverDetailModule=await shader(d,common+'\n'+riverCurve+'\n'+worldField+'\n'+riverDetailSource,'River coverage');
+  const writableWorld=worldField.replace('var<storage,read> world:','var<storage,read_write> world:');
+  const regionalModule=await shader(d,common+'\n'+terrainCore+'\n'+riverCurve+'\n'+writableWorld+'\n'+regionalSource,'Regional hydrology');
+  const regionalNames=['initializeRegion','regionFlux','regionStep','finishRegion'];
+  const regionalPipelines=await Promise.all(regionalNames.map(entryPoint=>d.createComputePipelineAsync({layout:'auto',compute:{module:regionalModule,entryPoint}})));
+  this.regionPipes=Object.fromEntries(regionalNames.map((name,i)=>[name,regionalPipelines[i]]));
   this.riverDetailPipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:riverDetailModule,entryPoint:'main'}});
   const mainLayout=d.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.COMPUTE,buffer:{type:'uniform'}},{binding:4,visibility:GPUShaderStage.COMPUTE,buffer:{type:'read-only-storage'}}]});
   const workLayout=d.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.COMPUTE,buffer:{type:'storage'}},{binding:1,visibility:GPUShaderStage.COMPUTE,buffer:{type:'read-only-storage'}},{binding:2,visibility:GPUShaderStage.COMPUTE,buffer:{type:'read-only-storage'}},{binding:3,visibility:GPUShaderStage.COMPUTE,buffer:{type:'read-only-storage'}},{binding:4,visibility:GPUShaderStage.COMPUTE,buffer:{type:'storage'}}]});
@@ -77,6 +96,10 @@ export class PlanetRenderer {
   const bind=(pipe,resources)=>d.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((buffer,binding)=>({binding,resource:{buffer}}))});
   const bindEntries=(pipe,entries)=>d.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,buffer])=>({binding,resource:{buffer}}))});
   const worldEntries=[[7,this.world],[8,this.worldDirections],[9,this.worldNeighbors],[10,this.worldFaces]];
+  this.regionInitBind=bindEntries(this.regionPipes.initializeRegion,[[0,this.uniform],[4,this.plates],[7,this.world],[8,this.worldDirections],[10,this.worldFaces],[12,this.regionMetaBuffer],[13,this.regionQueueBuffer],[15,this.regionA]]);
+  this.regionFluxBinds=[this.regionA,this.regionB].map(input=>bindEntries(this.regionPipes.regionFlux,[[0,this.uniform],[13,this.regionQueueBuffer],[14,input],[16,this.regionFlux]]));
+  this.regionStepBinds=[[this.regionA,this.regionB],[this.regionB,this.regionA]].map(([input,output])=>bindEntries(this.regionPipes.regionStep,[[0,this.uniform],[13,this.regionQueueBuffer],[14,input],[15,output],[16,this.regionFlux]]));
+  this.regionFinishBind=bindEntries(this.regionPipes.finishRegion,[[0,this.uniform],[7,this.world],[13,this.regionQueueBuffer],[14,this.regionA]]);
   this.generateBind=bindEntries(this.generatePipe,[[0,this.uniform],[1,this.patchBuffer],[2,this.vertices],[3,this.queueBuffer],[4,this.plates],[7,this.world],[8,this.worldDirections],[10,this.worldFaces],[11,this.riverMasks]]);
   this.lodErrorBind=bind(this.lodErrorPipe,[this.uniform,this.vertices,this.queueBuffer,this.lodErrorBuffer]);
   this.riverDetailBind=bindEntries(this.riverDetailPipe,[[0,this.uniform],[1,this.patchBuffer],[3,this.queueBuffer],...worldEntries,[11,this.riverMasks]]);
@@ -103,12 +126,55 @@ export class PlanetRenderer {
   for(let epoch=0;epoch<3;epoch++){fill();run('route');clear();propagate('runoff');run('prepareSediment');clear();propagate('sediment');run('applySediment');}
   fill();run('route');clear();propagate('runoff');run('finish');run('markRiverPresence');run('buildRiverPaths',0,this.worldCount*17);pass.end();d.queue.submit([encoder.finish()]);this.hydrologySeed=seed;
  }
- invalidateTerrain(){
+ resetPatchCache(){
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
   this.lodErrors.clear();
-  this.device.queue.writeBuffer(this.plates,0,seedPlates(this.seed));this.needsSelection=true;this.generation++;this.lastProbeKey='';
+  this.needsSelection=true;this.generation++;this.lastProbeKey='';
   this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
+ }
+ resetRegions(){
+  this.regionSeed=this.seed>>>0;this.regions.clear();this.regionFree=Array.from({length:REGION_CAPACITY},(_,i)=>REGION_CAPACITY-1-i);
+  this.regionLookup.fill(0xffffffff);this.regionPending=[];
+  this.device.queue.writeBuffer(this.world,REGION_LOOKUP_OFFSET,this.regionLookup);
+ }
+ invalidateTerrain(){
+  this.resetPatchCache();if(this.regionSeed!==(this.seed>>>0))this.resetRegions();
+  this.device.queue.writeBuffer(this.plates,0,seedPlates(this.seed));
   if(this.cameraState.altitude<50)this.cameraState.surfaceHeight=10;
+ }
+ invalidateRegionalPatches(changed){
+  const around=new Map(),span=2/REGION_FACE_TILES;
+  for(const r of changed){const direction=faceCube(r.face,-1+(r.x+.5)*span,-1+(r.y+.5)*span);for(const neighbor of regionsAround(direction))around.set(neighbor.id,neighbor);}
+  const touched=new Set(),candidates=[...around.values()];
+  for(const node of this.patches){
+   const half=node.span/2;
+   if(candidates.some(r=>r.face===node.face && node.u+half>=-1+r.x*span && node.u-half<=-1+(r.x+1)*span && node.v+half>=-1+r.y*span && node.v-half<=-1+(r.y+1)*span)){
+    const slot=this.slotByKey.get(node.key);if(slot!==undefined){this.slotByKey.delete(node.key);this.stitchByKey.delete(node.key);this.lodErrors.delete(node.key);this.free.push(slot);touched.add(node.key);}
+   }
+  }
+  for(const node of this.patches)if(node.edgeKeys.some(key=>touched.has(key))||node.cornerKeys.some(keys=>keys.some(key=>touched.has(key))))this.stitchByKey.delete(node.key);
+  this.needsSelection=true;this.generation++;this.lastProbeKey='';this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
+ }
+ prepareRegions(camera){
+  if(this.regionSeed!==(this.seed>>>0))this.resetRegions();
+  if(camera.clearance>=50 || this.erosion<=0 || !this.regional)return false;
+  const requested=regionsAround(camera.radial),protectedIds=new Set(requested.map(r=>r.id)),pending=[],changed=[];
+  for(const region of requested){
+   if(this.regions.has(region.id)){const slot=this.regions.get(region.id);this.regions.delete(region.id);this.regions.set(region.id,slot);continue;}
+   let slot=this.regionFree.pop();
+   if(slot===undefined){
+    const entry=[...this.regions].find(([id])=>!protectedIds.has(id));if(!entry)throw new Error('Regional simulation cache exhausted');
+    this.regions.delete(entry[0]);this.regionLookup[entry[0]]=0xffffffff;slot=entry[1];
+    changed.push({face:this.regionMeta[slot*4],x:this.regionMeta[slot*4+1],y:this.regionMeta[slot*4+2]});
+   }
+   this.regions.set(region.id,slot);this.regionLookup[region.id]=slot;
+   this.regionMeta.set([region.face,region.x,region.y,0],slot*4);pending.push(slot);changed.push(region);
+  }
+  if(!pending.length)return false;
+  this.regionPending=pending;const d=this.device;
+  d.queue.writeBuffer(this.world,REGION_LOOKUP_OFFSET,this.regionLookup);
+  d.queue.writeBuffer(this.regionMetaBuffer,0,this.regionMeta);d.queue.writeBuffer(this.regionQueueBuffer,0,new Uint32Array(pending));
+  this.invalidateRegionalPatches(changed);this.lastSelection=0;this.lastProbeTime=0;return true;
  }
  resize(){
   const rect=this.canvas.getBoundingClientRect(),ratio=Math.min(window.devicePixelRatio||1,2)*this.resolution,max=this.device.limits.maxTextureDimension2D;
@@ -158,7 +224,7 @@ export class PlanetRenderer {
   d.queue.writeBuffer(this.uniform,164,new Float32Array([this.relief]));
   d.queue.writeBuffer(this.uniform,172,new Float32Array([this.valleys]));
   d.queue.writeBuffer(this.uniform,184,new Uint32Array([this.seed>>>0]));
-  d.queue.writeBuffer(this.uniform,208,new Float32Array([this.erosion,this.rivers?1:0,0,0]));this.ensureHydrology();
+  d.queue.writeBuffer(this.uniform,208,new Float32Array([this.erosion,this.rivers?1:0,this.regional?1:0,0]));this.ensureHydrology();
   if(direction)d.queue.writeBuffer(this.probeInput,0,new Float32Array([...direction,0]));
   const readback=d.createBuffer({size,usage:BUFFER.COPY_DST|BUFFER.MAP_READ}),encoder=d.createCommandEncoder();
   const pipe=kind==='rivers'?this.riverPipe:kind==='valleys'?this.valleyPipe:this.highlandsPipe,bind=kind==='rivers'?this.riverBind:kind==='valleys'?this.valleyBind:this.highlandsBind;
@@ -186,7 +252,7 @@ export class PlanetRenderer {
  }
  requestSurface(camera,now){
   if(this.cameraState.altitude>=50){this.cameraState.surfaceHeight=0;return;}
-  const key=[this.seed,this.relief,this.valleys,this.erosion,this.rivers,this.ocean,...camera.radial.map(x=>x.toFixed(7))].join('/');
+  const key=[this.seed,this.relief,this.valleys,this.erosion,this.regional,this.rivers,this.ocean,...camera.radial.map(x=>x.toFixed(7))].join('/');
   if(this.probePending || key===this.lastProbeKey || now-this.lastProbeTime<160)return;
   this.probePending=true;this.lastProbeTime=now;const generation=this.generation;
   this.sampleTerrain(camera.radial).then(data=>{
@@ -202,7 +268,8 @@ export class PlanetRenderer {
   if(this.inFlight>=2)return null;
   const cpuStart=performance.now();this.resize();
   const camera=planetCamera(this.cameraState,this.canvas.width,this.canvas.height);
-  this.requestSurface(camera,now);
+  const regionsChanged=this.prepareRegions(camera);
+  if(!regionsChanged)this.requestSurface(camera,now);
   if(this.needsSelection && (now-this.lastSelection>100||!this.patches.length))this.select(camera,now);
   for(const node of this.patches){
    const i=node.slot*32,b=FACE_BASES[node.face],cube=faceCube(node.face,node.u,node.v);
@@ -223,8 +290,8 @@ export class PlanetRenderer {
   f.set([...sun,0],36);f.set([RADIUS_KM,this.relief,this.ocean?1:0,this.valleys],40);
   const flags=(this.culling?1:0)|(this.lodColors?2:0)|(this.wireframe?4:0)|(this.patchLines?8:0)|(this.biomes?16:0);
   u.set([this.patches.length,this.pending.length,this.seed>>>0,flags],44);
-  u.set([this.normalPending.length,0,0,0],48);
-  f.set([this.erosion,this.rivers?1:0,0,0],52);
+  u.set([this.normalPending.length,this.regionPending.length,0,0],48);
+  f.set([this.erosion,this.rivers?1:0,this.regional?1:0,0],52);
   const d=this.device;d.queue.writeBuffer(this.uniform,0,raw);d.queue.writeBuffer(this.patchBuffer,0,this.patchBytes);
   if(this.patches.length)d.queue.writeBuffer(this.activeBuffer,0,new Uint32Array(this.patches.map(p=>p.slot)));
   if(this.pending.length)d.queue.writeBuffer(this.queueBuffer,0,new Uint32Array(this.pending));
@@ -236,6 +303,15 @@ export class PlanetRenderer {
   const encoder=d.createCommandEncoder({label:'Planet frame'});
   const cp=encoder.beginComputePass(sample&&this.timing?{timestampWrites:{querySet:this.queries,beginningOfPassWriteIndex:0,endOfPassWriteIndex:1}}:{});
   const dispatch=(pipe,bind,count)=>{if(count){cp.setPipeline(pipe);cp.setBindGroup(0,bind);cp.dispatchWorkgroups(Math.ceil(count/64));}};
+  const regionCount=this.regionPending.length;
+  if(regionCount){
+   dispatch(this.regionPipes.initializeRegion,this.regionInitBind,regionCount*REGION_GRID*REGION_GRID);
+   for(let i=0;i<6;i++){
+    dispatch(this.regionPipes.regionFlux,this.regionFluxBinds[i&1],regionCount*REGION_GRID*REGION_GRID);
+    dispatch(this.regionPipes.regionStep,this.regionStepBinds[i&1],regionCount*REGION_GRID*REGION_GRID);
+   }
+   dispatch(this.regionPipes.finishRegion,this.regionFinishBind,regionCount*REGION_SAMPLES);
+  }
   dispatch(this.riverDetailPipe,this.riverDetailBind,this.pending.length*1681);
   dispatch(this.generatePipe,this.generateBind,this.pending.length*GRID*GRID);
   if(this.pending.length){cp.setPipeline(this.lodErrorPipe);cp.setBindGroup(0,this.lodErrorBind);cp.dispatchWorkgroups(this.pending.length);}
@@ -247,7 +323,7 @@ export class PlanetRenderer {
   const pass=encoder.beginRenderPass(descriptor);pass.setPipeline(this.renderPipe);pass.setBindGroup(0,this.renderBind);pass.drawIndirect(this.indirect,0);pass.end();
   const measured=sample?this.patches.map(({key,slot})=>({key,slot})):null;
   let readback;if(sample){readback=d.createBuffer({size:48+CAPACITY*4,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});encoder.copyBufferToBuffer(this.indirect,0,readback,0,16);encoder.copyBufferToBuffer(this.lodErrorBuffer,0,readback,48,CAPACITY*4);if(this.timing){encoder.resolveQuerySet(this.queries,0,4,this.resolve,0);encoder.copyBufferToBuffer(this.resolve,0,readback,16,32);}}
-  d.queue.submit([encoder.finish()]);this.pending=[];this.normalPending=[];this.inFlight++;
+  d.queue.submit([encoder.finish()]);this.pending=[];this.normalPending=[];this.regionPending=[];this.inFlight++;
   d.queue.onSubmittedWorkDone().then(()=>{this.inFlight--;}).catch(()=>{this.inFlight--;});
   if(readback){const generation=this.generation;readback.mapAsync(GPUMapMode.READ).then(()=>{
    const data=readback.getMappedRange(),visibleMeshlets=new Uint32Array(data,0,4)[1];let gpuComputeMs=null,gpuRenderMs=null;

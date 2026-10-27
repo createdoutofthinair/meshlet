@@ -101,3 +101,47 @@ fn riverAt(direction:vec3<f32>,s:WorldSample)->RiverInfo{
  }
  return result;
 }
+
+// The regional field is addressed by geographic tile rather than render LOD.
+// World-space halo simulation makes same-face tile edges agree. A narrow,
+// static blend joins the different cube-face parameterizations.
+fn regionCube(face:u32,u:f32,v:f32)->vec3<f32>{
+ if(face==0u){return vec3<f32>(1.0,u,v);}if(face==1u){return vec3<f32>(-1.0,u,-v);}
+ if(face==2u){return vec3<f32>(u,1.0,-v);}if(face==3u){return vec3<f32>(u,-1.0,v);}
+ if(face==4u){return vec3<f32>(u,v,1.0);}return vec3<f32>(-u,v,-1.0);
+}
+fn regionFaceCoords(face:u32,p:vec3<f32>)->vec2<f32>{
+ if(face==0u){return p.yz/abs(p.x);}if(face==1u){return vec2<f32>(p.y,-p.z)/abs(p.x);}
+ if(face==2u){return vec2<f32>(p.x,-p.z)/abs(p.y);}if(face==3u){return p.xz/abs(p.y);}
+ if(face==4u){return p.xy/abs(p.z);}return vec2<f32>(-p.x,p.y)/abs(p.z);
+}
+fn regionIndex(face:u32,x:u32,y:u32)->u32{return face*REGION_TILES*REGION_TILES+y*REGION_TILES+x;}
+fn regionAvailable(face:u32,x:i32,y:i32)->bool{
+ if(x>=0 && x<i32(REGION_TILES) && y>=0 && y<i32(REGION_TILES)){return world.regionLookup[regionIndex(face,u32(x),u32(y))]!=NO_NODE;}
+ let uv=(vec2<f32>(f32(x),f32(y))+vec2<f32>(.5))*2.0/f32(REGION_TILES)-vec2<f32>(1.0);
+ let c=worldCoordinates(regionCube(face,uv.x,uv.y));let xy=clamp((c.yz+vec2<f32>(1.0))*.5*f32(REGION_TILES),vec2<f32>(0.0),vec2<f32>(f32(REGION_TILES)-.0001));
+ return world.regionLookup[regionIndex(u32(c.x),u32(xy.x),u32(xy.y))]!=NO_NODE;
+}
+fn regionFaceSample(face:u32,direction:vec3<f32>)->vec4<f32>{
+ let uv=clamp(regionFaceCoords(face,direction),vec2<f32>(-1.0),vec2<f32>(1.0));
+ let grid=(uv+vec2<f32>(1.0))*.5*f32(REGION_TILES);let tx=min(u32(floor(grid.x)),REGION_TILES-1u);let ty=min(u32(floor(grid.y)),REGION_TILES-1u);
+ let slot=world.regionLookup[regionIndex(face,tx,ty)];if(slot==NO_NODE){return vec4<f32>(0.0);}
+ let local=clamp(grid-vec2<f32>(f32(tx),f32(ty)),vec2<f32>(0.0),vec2<f32>(1.0));
+ let p=local*f32(REGION_CELLS);let x=min(u32(floor(p.x)),REGION_CELLS-1u);let y=min(u32(floor(p.y)),REGION_CELLS-1u);let f=p-vec2<f32>(f32(x),f32(y));
+ let i=slot*REGION_SAMPLE_COUNT+y*(REGION_CELLS+1u)+x;
+ let a=mix(world.regionValues[i],world.regionValues[i+1u],f.x);let b=mix(world.regionValues[i+REGION_CELLS+1u],world.regionValues[i+REGION_CELLS+2u],f.x);
+ var fade=1.0;let width=2.0/f32(REGION_CELLS);
+ if(!regionAvailable(face,i32(tx)-1,i32(ty))){fade*=smoothstep(0.0,width,local.x);}
+ if(!regionAvailable(face,i32(tx)+1,i32(ty))){fade*=smoothstep(0.0,width,1.0-local.x);}
+ if(!regionAvailable(face,i32(tx),i32(ty)-1)){fade*=smoothstep(0.0,width,local.y);}
+ if(!regionAvailable(face,i32(tx),i32(ty)+1)){fade*=smoothstep(0.0,width,1.0-local.y);}
+ return mix(a,b,f.y)*fade;
+}
+fn regionalSimulation(direction:vec3<f32>)->vec4<f32>{
+ let a=abs(direction);let largest=max(a.x,max(a.y,a.z));let ratios=a/largest;
+ let weights=smoothstep(vec3<f32>(.99975),vec3<f32>(1.0),ratios);var value=vec4<f32>(0.0);var total=0.0;
+ if(weights.x>0.0){let face=select(1u,0u,direction.x>=0.0);value+=regionFaceSample(face,direction)*weights.x;total+=weights.x;}
+ if(weights.y>0.0){let face=select(3u,2u,direction.y>=0.0);value+=regionFaceSample(face,direction)*weights.y;total+=weights.y;}
+ if(weights.z>0.0){let face=select(5u,4u,direction.z>=0.0);value+=regionFaceSample(face,direction)*weights.z;total+=weights.z;}
+ return value/max(total,.0001);
+}

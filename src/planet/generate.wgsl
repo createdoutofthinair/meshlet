@@ -42,6 +42,7 @@ fn surfaceBase(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,
           +localNoise(high,low,delta,8388608.0,seed+421u)*.00005;
  let s=worldSample(direction);let profile=worldProfile(s);
  var ground=base+micro*smoothstep(-.05,.25,base)+(profile.y-profile.x)*frame.hydrology.x;
+ if(frame.hydrology.z>.5){ground+=regionalSimulation(direction).x*frame.hydrology.x;}
  ground-=regionalIncision(s,profile,direction,high,low,delta,ground,seed);
  var lake=0.0;
  if(frame.hydrology.y>.5 && frame.hydrology.x>0.0 && ground>.0){
