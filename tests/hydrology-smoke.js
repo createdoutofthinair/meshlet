@@ -31,7 +31,7 @@ try{
     if(faceBits[i]&(faceBits[i]-1))sharedRiverNodes++;
     for(let sample=0;sample<17;sample++){
      const p=pathOffset+(i*17+sample)*4,point=[f[p],f[p+1],f[p+2]],width=f[p+3];
-     if(!point.every(Number.isFinite)||!Number.isFinite(width)||width<.1499||width>.7001||Math.abs(Math.hypot(...point)-1)>.00001)throw new Error(`Seed ${seed}: invalid river path ${i}/${sample}`);
+     if(!point.every(Number.isFinite)||!Number.isFinite(width)||width<.0249||width>.2801||Math.abs(Math.hypot(...point)-1)>.00001)throw new Error(`Seed ${seed}: invalid river path ${i}/${sample}`);
      if(sample===0||sample===16){const id=sample===0?i:down,distance=Math.hypot(...point.map((v,k)=>v-grid.directions[id*4+k]));if(distance>.00001)throw new Error(`Seed ${seed}: disconnected river path ${i}/${sample}: ${distance}`);}
     }
    }

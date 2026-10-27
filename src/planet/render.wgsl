@@ -75,11 +75,14 @@ fn fs(in:Output)->@location(0) vec4<f32> {
  let radial=normalize(in.direction);let light=normalize(frame.sun.xyz);let h=in.height;
  let pixelKm=max(length(dpdx(in.direction)),length(dpdy(in.direction)))*6371.0;var river=0.0;
  if(frame.hydrology.y>.5 && frame.hydrology.x>0.0 && h>=0.0 && pixelKm<1.0){river=stitchedRiver(in.patchSlot,in.patchUv)*(1.0-smoothstep(.6,1.0,pixelKm));}
- let water=select(0.0,max(clamp(in.surface.x,0.0,1.0),river),frame.hydrology.y>.5 && h>=0.0);
+ // The coarse basin estimate cannot resolve individual lake shorelines from
+ // orbit. Suppress their aliasing when one pixel covers several kilometers.
+ let lake=clamp(in.surface.x,0.0,1.0)*(1.0-smoothstep(2.0,6.0,pixelKm));
+ let water=select(0.0,max(lake,river),frame.hydrology.y>.5 && h>=0.0);
  let n=normalize(mix(in.normal,radial,water*.8));let slope=1.0-clamp(dot(n,radial),0.0,1.0);
  let deep=vec3<f32>(0.012,0.055,0.092);let ocean=vec3<f32>(0.025,0.17,0.23);
  let lowland=vec3<f32>(0.25,0.31,0.20);let upland=vec3<f32>(0.30,0.28,0.22);
- let rock=vec3<f32>(0.34,0.34,0.32);let snow=vec3<f32>(0.78,0.84,0.85);
+ let rock=vec3<f32>(0.34,0.34,0.32);let snow=vec3<f32>(0.66,0.71,0.72);
  var base=mix(lowland,upland,smoothstep(.4,2.2,h));
  if((frame.counts.w&16u)!=0u){
   let humidity=clamp(in.surface.y,0.0,1.0);let temperature=clamp(1.0-abs(radial.y)*1.1-max(0.0,h)*.075,0.0,1.0);
@@ -90,7 +93,10 @@ fn fs(in:Output)->@location(0) vec4<f32> {
  base=mix(base,rock,smoothstep(.006,.12,slope));
  let temperature=clamp(1.0-abs(radial.y)*1.1-max(0.0,h)*.075,0.0,1.0);
  let coldSnow=select(0.0,1.0-smoothstep(.12,.24,temperature),(frame.counts.w&16u)!=0u);
- base=mix(base,snow,max(smoothstep(7.0,9.3,h),coldSnow)*(1.0-smoothstep(.5,.85,slope)*.5));
+ // Snow collects on gentler slopes; exposed rock preserves the shape of
+ // steep mountain faces instead of painting the whole highland white.
+ let snowCover=max(smoothstep(7.0,9.3,h),coldSnow)*(1.0-smoothstep(.03,.32,slope)*.85);
+ base=mix(base,snow,snowCover);
  if(h<0.0){base=mix(deep,ocean,smoothstep(-4.0,0.0,h));}
  if(h>=0.0){base=mix(base,vec3<f32>(.025,.16,.19),smoothstep(.1,.6,water));}
  if((frame.counts.w&2u)!=0u){base=levelColor(in.level);}
@@ -98,6 +104,9 @@ fn fs(in:Output)->@location(0) vec4<f32> {
  var color=base*(fill+diffuse*.95)*(1.0-in.cavity*.30);
  let view=normalize(-in.relative);let rim=pow(1.0-clamp(dot(radial,view),0.0,1.0),4.0)*.055;
  color+=vec3<f32>(.10,.38,.58)*rim;
+ // Compress highlights before display encoding so bright snow keeps
+ // shading detail instead of clipping against the canvas's white limit.
+ color=color/(vec3<f32>(1.0)+color*.28);
  color=pow(max(color,vec3<f32>(0.0)),vec3<f32>(1.0/2.2));
  if((frame.counts.w&12u)!=0u){
   let edge=vec3<f32>(1.0)-smoothstep(vec3<f32>(.55),vec3<f32>(1.7),in.bary/max(fwidth(in.bary),vec3<f32>(.00001)));

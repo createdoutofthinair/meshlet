@@ -41,14 +41,22 @@ fn surfaceBase(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,
           +localNoise(high,low,delta,2097152.0,seed+419u)*.00018
           +localNoise(high,low,delta,8388608.0,seed+421u)*.00005;
  let s=worldSample(direction);let profile=worldProfile(s);
- var ground=base+micro*smoothstep(-.05,.25,base)+(profile.y-profile.x)*frame.hydrology.x;
- if(frame.hydrology.z>.5){ground+=regionalSimulation(direction).x*frame.hydrology.x;}
- ground-=regionalIncision(s,profile,direction,high,low,delta,ground,seed);
+ let natural=base+micro*smoothstep(-.05,.25,base);
+ var change=(profile.y-profile.x)*frame.hydrology.x;
+ if(frame.hydrology.z>.5){change+=regionalSimulation(direction).x*frame.hydrology.x;}
+ change-=regionalIncision(s,profile,direction,high,low,delta,natural+change,seed);
+ // Coarse erosion is interpolated over much finer landforms. It must not
+ // turn an existing piece of dry land into a new sea-level hole.
+ var ground=natural+change;
+ if(natural>0.0){ground=max(ground,natural*.10);}else{ground=natural;}
  var lake=0.0;
  if(frame.hydrology.y>.5 && frame.hydrology.x>0.0 && ground>.0){
-  let spill=worldSpill(s);let basin=max(0.0,spill-profile.y)*frame.hydrology.x;
-  let level=mix(profile.x,spill,clamp(frame.hydrology.x,0.0,1.0));let fill=max(0.0,level-ground);
-  lake=smoothstep(.002,.04,basin)*smoothstep(.001,.02,fill);
+  let basin=worldLake(s);
+  // Keep an uncertain coarse basin from flooding through an entire
+  // high-resolution valley; this is a small, local filled-water estimate.
+  let level=mix(profile.y,min(basin.y,profile.y+.15),clamp(frame.hydrology.x,0.0,1.0));
+  let fill=min(.15,max(0.0,level-ground));
+  lake=basin.x*smoothstep(.0,.25,frame.hydrology.x)*smoothstep(.001,.02,fill);
   ground+=fill*lake;
  }
  let humidity=clamp(worldRain(s)*.65+.08*log2(1.0+profile.z),0.0,1.0);
@@ -56,7 +64,8 @@ fn surfaceBase(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,
 }
 fn carveRiver(base:SurfaceData,river:vec2<f32>)->SurfaceData{
  let channel=river.x*smoothstep(.03,.3,base.height)*(1.0-base.lake);
- let h=base.height-channel*clamp(.025+.025*log2(1.0+river.y),.025,.15)*frame.hydrology.x;
+ var h=base.height-channel*clamp(.006+.006*log2(1.0+river.y),.006,.04)*frame.hydrology.x;
+ if(base.height>0.0){h=max(base.height*.10,h);}
  return SurfaceData(h,base.lake,base.humidity);
 }
 fn detailedTerrain(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32)->f32{

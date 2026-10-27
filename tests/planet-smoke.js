@@ -143,6 +143,17 @@ try{
  let valleyChanges=0,maxValleyKm=0,maxOceanChange=0,maxRepeat=0;
  for(let i=0;i<shaped.length;i+=4){const change=unshaped[i+3]-shaped[i+3];maxRepeat=Math.max(maxRepeat,Math.abs(shaped[i+3]-shapedRepeat[i+3]));if(unshaped[i+3]<-.2)maxOceanChange=Math.max(maxOceanChange,Math.abs(change));if(change>.001)valleyChanges++;maxValleyKm=Math.max(maxValleyKm,change);}
  if(valleyChanges<10||maxValleyKm<.02||maxOceanChange>1e-5||maxRepeat>1e-6)throw new Error(`Valley terrain field failed: ${JSON.stringify({valleyChanges,maxValleyKm,maxOceanChange,maxRepeat})}`);
+ // Interpolating coarse erosion over fine terrain must not create artificial
+ // sea-level holes in land that was above sea level before erosion.
+ const savedWater={erosion:renderer.erosion,rivers:renderer.rivers,regional:renderer.regional};
+ renderer.rivers=false;renderer.regional=false;renderer.erosion=0;const naturalCoast=await renderer.sampleTerrain();
+ renderer.erosion=1;const erodedCoast=await renderer.sampleTerrain();let landSamples=0,landToSea=0,erosionChanged=0;
+ for(let i=0;i<naturalCoast.length;i+=4){
+  if(naturalCoast[i+3]>.001){landSamples++;if(erodedCoast[i+3]<0.0)landToSea++;}
+  if(Math.abs(naturalCoast[i+3]-erodedCoast[i+3])>.001)erosionChanged++;
+ }
+ Object.assign(renderer,savedWater);
+ if(landSamples<100||erosionChanged<10||landToSea)throw new Error(`Erosion damaged the coastline: ${JSON.stringify({landSamples,erosionChanged,landToSea})}`);
  const savedCamera={...renderer.cameraState},savedProbeTime=renderer.lastProbeTime;
  Object.assign(renderer.cameraState,{mode:'orbit',altitude:4,surfaceHeight:valley.height,longitude:Math.atan2(valley.direction[2],valley.direction[0]),latitude:Math.asin(valley.direction[1])});
  renderer.budget=180;renderer.pixelSize=14;renderer.lastProbeTime=Infinity;

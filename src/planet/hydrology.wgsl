@@ -126,7 +126,9 @@ fn buildRiverPaths(@builtin(global_invocation_id) gid:vec3<u32>){
  let t=f32(sample)/f32(RIVER_SAMPLES-1u);let curve=normalize(riverCurve(a,b,m0,m1,t));
  let field=noise3(curve*640.0,frame.counts.z+997u);let side=normalize(cross(a,b));
  let bend=field-mix(bitcast<f32>(cell.route.w),bitcast<f32>(world.cells[end].route.w),t);
- let point=normalize(curve+side*(bend/6371.0));let flow=mix(cell.profile.z,max(cell.profile.z,world.cells[end].profile.z),t);
- let width=clamp((.12+.17*sqrt(log2(1.0+flow)))*(1.0+.1*field),.15,.7);
+ let point=normalize(curve+side*(bend*2.4/6371.0));let flow=mix(cell.profile.z,max(cell.profile.z,world.cells[end].profile.z),t);
+ // Narrow headwaters and modest changes in width produce channels rather
+ // than the uniformly wide bands of the old coarse spline.
+ let width=clamp((.035+.045*sqrt(log2(1.0+flow)))*(1.0+.32*field),.025,.28);
  world.paths[index]=vec4<f32>(point,width);
 }

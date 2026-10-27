@@ -52,10 +52,21 @@ fn worldRain(s:WorldSample)->f32{
  let d=world.cells[s.corners.w].process.z/max(.001,worldDirections[s.corners.w].w);
  return mix(mix(a,b,s.blend.x),mix(c,d,s.blend.x),s.blend.y);
 }
-fn worldSpill(s:WorldSample)->f32{
- let a=bitcast<f32>(world.cells[s.corners.x].route.y);let b=bitcast<f32>(world.cells[s.corners.y].route.y);
- let c=bitcast<f32>(world.cells[s.corners.z].route.y);let d=bitcast<f32>(world.cells[s.corners.w].route.y);
- return mix(mix(a,b,s.blend.x),mix(c,d,s.blend.x),s.blend.y);
+// A coarse spill height alone is not evidence that an entire interpolated
+// cell is underwater. Restrict lake coverage to the neighborhood of actual
+// filled land nodes and ignore unfinished flood values. The weights remain
+// continuous across world-grid and cube-face edges.
+fn worldLake(s:WorldSample)->vec2<f32>{
+ let weights=vec4<f32>((1.0-s.blend.x)*(1.0-s.blend.y),s.blend.x*(1.0-s.blend.y),(1.0-s.blend.x)*s.blend.y,s.blend.x*s.blend.y);
+ var support=0.0;var weightedLevel=0.0;
+ for(var k=0u;k<4u;k++){
+  let cell=world.cells[s.corners[k]];let height=cell.profile.y;let spill=bitcast<f32>(cell.route.y);
+  if(height>0.0 && spill<19.0){
+   let basin=max(0.0,spill-height);let w=weights[k]*smoothstep(.03,.12,basin);
+   support+=w;weightedLevel+=w*spill;
+  }
+ }
+ return vec2<f32>(smoothstep(.55,.85,support),weightedLevel/max(support,.00001));
 }
 // Search segments attached to the enclosing quad and its neighbors. Shared
 // world-grid nodes let a river keep the same endpoints across all cube faces.
@@ -75,7 +86,7 @@ fn riverSegment(direction:vec3<f32>,start:u32)->RiverInfo{
   let curve=normalize(riverCurve(a,b,m0,m1,t));let derivative=riverDerivative(a,b,m0,m1,t);
   t=clamp(t+dot(direction-curve,derivative)/max(dot(derivative,derivative),.00000001),0.0,1.0);
  }
- let guess=i32(floor(t*f32(RIVER_SAMPLES-1u)));var distance=1e20;var width=.15;var bestT=t;
+ let guess=i32(floor(t*f32(RIVER_SAMPLES-1u)));var distance=1e20;var width=.025;var bestT=t;
  for(var offset=-3;offset<=3;offset++){
   let k=guess+offset;if(k<0 || k>=i32(RIVER_SAMPLES-1u)){continue;}
   let p=world.paths[start*RIVER_SAMPLES+u32(k)];let q=world.paths[start*RIVER_SAMPLES+u32(k)+1u];let line=q.xyz-p.xyz;
