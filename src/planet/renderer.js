@@ -19,7 +19,7 @@ export class PlanetRenderer {
  constructor(canvas,adapter,device,context,timing,onError){
   Object.assign(this,{canvas,adapter,device,context,timing,onError});this.format=navigator.gpu.getPreferredCanvasFormat();
   this.cameraState={longitude:.8,latitude:.4,altitude:14000,surfaceHeight:0,mode:'orbit',heading:.45,pitch:.3};
-  this.seed=918273;this.relief=1;this.ocean=true;this.followSun=true;this.culling=true;this.lodColors=false;this.wireframe=false;this.patchLines=false;
+  this.seed=918273;this.relief=1;this.valleys=1;this.ocean=true;this.followSun=true;this.culling=true;this.lodColors=false;this.wireframe=false;this.patchLines=false;
   this.budget=384;this.pixelSize=14;this.resolution=1;this.maxDepth=20;
   this.patchBytes=new ArrayBuffer(CAPACITY*PATCH_BYTES);this.patchFloats=new Float32Array(this.patchBytes);this.patchUints=new Uint32Array(this.patchBytes);
   this.slotByKey=new Map();this.stitchByKey=new Map();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.patches=[];this.pending=[];this.normalPending=[];
@@ -35,7 +35,7 @@ export class PlanetRenderer {
   const labels=['Terrain generation','Terrain normals','Meshlet bounds','Meshlet culling','Planet rendering'];
   const modules=await Promise.all(sources.map((s,i)=>shader(d,common+'\n'+s,labels[i])));
   [this.generatePipe,this.normalPipe,this.boundsPipe,this.cullPipe]=await Promise.all(modules.slice(0,4).map(module=>d.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}})));
-  [this.highlandsPipe,this.pointPipe]=await Promise.all(['highlands','point'].map(entryPoint=>d.createComputePipelineAsync({layout:'auto',compute:{module:modules[0],entryPoint}})));
+  [this.highlandsPipe,this.pointPipe,this.valleyPipe]=await Promise.all(['highlands','point','valleyCandidates'].map(entryPoint=>d.createComputePipelineAsync({layout:'auto',compute:{module:modules[0],entryPoint}})));
   this.renderPipe=await d.createRenderPipelineAsync({layout:'auto',vertex:{module:modules[4],entryPoint:'vs'},fragment:{module:modules[4],entryPoint:'fs',targets:[{format:this.format}]},primitive:{topology:'triangle-list',cullMode:'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'}});
   const make=(label,size,usage)=>d.createBuffer({label,size,usage});
   this.uniform=make('Planet frame',208,BUFFER.UNIFORM|BUFFER.COPY_DST);
@@ -57,6 +57,7 @@ export class PlanetRenderer {
   this.cullBind=bind(this.cullPipe,[this.uniform,this.patchBuffer,this.bounds,this.activeBuffer,this.visible,this.indirect]);
   this.renderBind=bind(this.renderPipe,[this.uniform,this.patchBuffer,this.vertices,this.visible]);
   this.highlandsBind=d.createBindGroup({layout:this.highlandsPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.uniform}},{binding:4,resource:{buffer:this.plates}},{binding:5,resource:{buffer:this.sampleBuffer}}]});
+  this.valleyBind=d.createBindGroup({layout:this.valleyPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.uniform}},{binding:4,resource:{buffer:this.plates}},{binding:5,resource:{buffer:this.sampleBuffer}}]});
   this.pointBind=d.createBindGroup({layout:this.pointPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.uniform}},{binding:4,resource:{buffer:this.plates}},{binding:5,resource:{buffer:this.sampleBuffer}},{binding:6,resource:{buffer:this.probeInput}}]});
   if(this.timing){this.queries=d.createQuerySet({type:'timestamp',count:4});this.resolve=make('GPU timestamp resolve',32,BUFFER.QUERY_RESOLVE|BUFFER.COPY_SRC);}
   d.queue.writeBuffer(this.plates,0,seedPlates(this.seed));
@@ -90,13 +91,14 @@ export class PlanetRenderer {
   this.stats={leaves:result.leaves.length,visiblePatches:this.patches.length,deepest:result.deepest,selectionMs:performance.now()-start,generated:pending.length,normalUpdates:normalPending.length,reusedNormalUpdates:normalPending.length-pending.length};
   this.lastSelection=now;this.needsSelection=false;
  }
- async sampleTerrain(direction=null){
+ async sampleTerrain(direction=null,kind='terrain'){
   const d=this.device,all=!direction,count=all?6*24*24:1,size=count*16;
   d.queue.writeBuffer(this.uniform,164,new Float32Array([this.relief]));
+  d.queue.writeBuffer(this.uniform,172,new Float32Array([this.valleys]));
   d.queue.writeBuffer(this.uniform,184,new Uint32Array([this.seed>>>0]));
   if(direction)d.queue.writeBuffer(this.probeInput,0,new Float32Array([...direction,0]));
   const readback=d.createBuffer({size,usage:BUFFER.COPY_DST|BUFFER.MAP_READ}),encoder=d.createCommandEncoder();
-  const pass=encoder.beginComputePass();pass.setPipeline(all?this.highlandsPipe:this.pointPipe);pass.setBindGroup(0,all?this.highlandsBind:this.pointBind);pass.dispatchWorkgroups(all?Math.ceil(count/64):1);pass.end();
+  const pass=encoder.beginComputePass();pass.setPipeline(all?(kind==='valleys'?this.valleyPipe:this.highlandsPipe):this.pointPipe);pass.setBindGroup(0,all?(kind==='valleys'?this.valleyBind:this.highlandsBind):this.pointBind);pass.dispatchWorkgroups(all?Math.ceil(count/64):1);pass.end();
   encoder.copyBufferToBuffer(this.sampleBuffer,0,readback,0,size);d.queue.submit([encoder.finish()]);
   try{await readback.mapAsync(GPUMapMode.READ);const data=new Float32Array(readback.getMappedRange().slice(0));readback.unmap();return data;}
   finally{readback.destroy();}
@@ -106,9 +108,15 @@ export class PlanetRenderer {
   let best=0;for(let i=4;i<data.length;i+=4)if(data[i+3]>data[best+3])best=i;
   return {direction:[data[best],data[best+1],data[best+2]],height:data[best+3]};
  }
+ async findValleys(){
+  const generation=this.generation,data=await this.sampleTerrain(null,'valleys');if(generation!==this.generation)return null;
+  let best=0;for(let i=4;i<data.length;i+=4)if(data[i+3]>data[best+3])best=i;
+  const direction=[data[best],data[best+1],data[best+2]],height=await this.sampleTerrain(direction);
+  return generation===this.generation?{direction,height:height[3],incision:data[best+3]}:null;
+ }
  requestSurface(camera,now){
   if(this.cameraState.altitude>=50){this.cameraState.surfaceHeight=0;return;}
-  const key=[this.seed,this.relief,this.ocean,...camera.radial.map(x=>x.toFixed(7))].join('/');
+  const key=[this.seed,this.relief,this.valleys,this.ocean,...camera.radial.map(x=>x.toFixed(7))].join('/');
   if(this.probePending || key===this.lastProbeKey || now-this.lastProbeTime<160)return;
   this.probePending=true;this.lastProbeTime=now;const generation=this.generation;
   this.sampleTerrain(camera.radial).then(data=>{
@@ -142,7 +150,7 @@ export class PlanetRenderer {
    const low=this.cameraState.mode==='flyover';
    sun=normalize(add(add(scale(camera.radial,low ? .32 : .72),scale(camera.right,low ? .9 : .55)),scale(camera.up,low ? .22 : .25)));
   }
-  f.set([...sun,0],36);f.set([RADIUS_KM,this.relief,this.ocean?1:0,0],40);
+  f.set([...sun,0],36);f.set([RADIUS_KM,this.relief,this.ocean?1:0,this.valleys],40);
   const flags=(this.culling?1:0)|(this.lodColors?2:0)|(this.wireframe?4:0)|(this.patchLines?8:0);
   u.set([this.patches.length,this.pending.length,this.seed>>>0,flags],44);
   u.set([this.normalPending.length,0,0,0],48);

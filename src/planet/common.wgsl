@@ -2,7 +2,7 @@ struct PlanetFrame {
   viewProjection: mat4x4<f32>,
   planes: array<vec4<f32>,5>,
   sun: vec4<f32>,
-  settings: vec4<f32>, // radius km, relief multiplier, ocean 0/1, reserved
+  settings: vec4<f32>, // radius km, relief multiplier, ocean 0/1, valley detail
   counts: vec4<u32>, // active patches, new patches, seed, debug flags
   queueCounts: vec4<u32>, // patches whose normals require updating
 };

@@ -1,5 +1,5 @@
 import {PlanetRenderer} from '../src/planet/renderer.js';
-import {faceDirection} from '../src/planet/planet-math.js';
+import {faceDirection,directionToFace} from '../src/planet/planet-math.js';
 const status=document.querySelector('#status');
 try{
  const source=document.querySelector('#source');const adapter=await navigator.gpu?.requestAdapter();if(!adapter)throw new Error('No WebGPU adapter');
@@ -40,6 +40,9 @@ try{
  rootBuffer.unmap();rootBuffer.destroy();if(crossMatches<100||crossMaxKm>.002)throw new Error(`Cube-face seams: ${crossMatches} matches, max ${crossMaxKm} km`);
  const highland=await renderer.findHighlands();const point=await renderer.sampleTerrain(highland.direction);
  if(Math.abs(point[3]-highland.height)>.02)throw new Error(`Highland probe disagrees with its sampled height: ${point[3]} / ${highland.height}`);
+ const valley=await renderer.findValleys();
+ if(!valley||valley.incision<.02||!Number.isFinite(valley.height))throw new Error(`Could not find a seeded valley: ${JSON.stringify(valley)}`);
+ await renderer.sampleTerrain(highland.direction);
  // The extra detail is geometry, including at scales smaller than a float32
  // unit-vector coordinate can represent without the high/low decomposition.
  const [common,generator]=await Promise.all(['common.wgsl','generate.wgsl'].map(p=>fetch(`../src/planet/${p}`).then(r=>r.text())));
@@ -52,6 +55,16 @@ try{
   let c=localNoise(direction,zero,zero,8388608.0,seed+421u);
   let d=localNoise(direction,zero,tangent*(.5/6371000.0),8388608.0,seed+421u);
   samples[0]=vec4<f32>(a,b,c,d);
+ }
+ @compute @workgroup_size(64) fn valleyCheck(@builtin(global_invocation_id) gid:vec3<u32>){
+  let n=gid.x;if(n>=512u){return;}
+  let p=vec3<f32>(f32(n%32u)*.137+.123,f32(n/32u)*.169+.157,f32((n*37u)%53u)*.117+.183);
+  let seed=frame.counts.z;let e=.001;let g=noiseGradient(p,seed);
+  let finite=vec3<f32>(noise3(p+vec3<f32>(e,0.0,0.0),seed)-noise3(p-vec3<f32>(e,0.0,0.0),seed),noise3(p+vec3<f32>(0.0,e,0.0),seed)-noise3(p-vec3<f32>(0.0,e,0.0),seed),noise3(p+vec3<f32>(0.0,0.0,e),seed)-noise3(p-vec3<f32>(0.0,0.0,e),seed))/(2.0*e);
+  let down=vec3<f32>(1.0,0.0,0.0);let center=slopeChannel(p,down,seed);
+  let along=slopeChannel(p+vec3<f32>(.4,0.0,0.0),down,seed);let across=slopeChannel(p+vec3<f32>(0.0,.4,0.0),down,seed);
+  let error=abs(g.yzw-finite);
+  samples[n]=vec4<f32>(max(error.x,max(error.y,error.z)),abs(center-along),abs(center-across),abs(g.x-noise3(p,seed)));
  }`});
  const detailPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'detailCheck'}});
  const detailBind=device.createBindGroup({layout:detailPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.uniform}},{binding:4,resource:{buffer:renderer.plates}},{binding:5,resource:{buffer:renderer.sampleBuffer}},{binding:6,resource:{buffer:renderer.probeInput}}]});
@@ -59,6 +72,40 @@ try{
  detailPass.setPipeline(detailPipe);detailPass.setBindGroup(0,detailBind);detailPass.dispatchWorkgroups(1);detailPass.end();detailEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,detailBuffer,0,16);device.queue.submit([detailEncoder.finish()]);
  await detailBuffer.mapAsync(GPUMapMode.READ);const detail=new Float32Array(detailBuffer.getMappedRange().slice(0));detailBuffer.unmap();detailBuffer.destroy();
  if(!detail.every(Number.isFinite)||Math.abs(detail[0]-detail[1])<.000001||Math.abs(detail[2]-detail[3])<.001)throw new Error(`Fine terrain samples did not vary with position: ${[...detail]}`);
+ const valleyPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'valleyCheck'}});
+ const valleyBind=device.createBindGroup({layout:valleyPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.uniform}},{binding:5,resource:{buffer:renderer.sampleBuffer}}]});
+ const valleyBuffer=device.createBuffer({size:512*16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),valleyEncoder=device.createCommandEncoder(),valleyPass=valleyEncoder.beginComputePass();
+ valleyPass.setPipeline(valleyPipe);valleyPass.setBindGroup(0,valleyBind);valleyPass.dispatchWorkgroups(8);valleyPass.end();valleyEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,valleyBuffer,0,512*16);device.queue.submit([valleyEncoder.finish()]);await valleyBuffer.mapAsync(GPUMapMode.READ);
+ const valleyData=new Float32Array(valleyBuffer.getMappedRange());let gradientError=0,scalarError=0,alongDifference=0,acrossDifference=0;
+ for(let i=0;i<valleyData.length;i+=4){gradientError=Math.max(gradientError,valleyData[i]);alongDifference+=valleyData[i+1];acrossDifference+=valleyData[i+2];scalarError=Math.max(scalarError,valleyData[i+3]);}
+ valleyBuffer.unmap();valleyBuffer.destroy();
+ if(gradientError>.01||scalarError>1e-6||alongDifference>=acrossDifference*.8)throw new Error(`Valley field is not slope-aligned or gradient is incorrect: ${JSON.stringify({gradientError,scalarError,alongDifference,acrossDifference})}`);
+ // The control must change the seeded land geometry, remain reproducible,
+ // and leave the fully submerged seabed unchanged.
+ renderer.valleys=0;const unshaped=await renderer.sampleTerrain();renderer.valleys=1;const shaped=await renderer.sampleTerrain(),shapedRepeat=await renderer.sampleTerrain();
+ let valleyChanges=0,maxValleyKm=0,maxOceanChange=0,maxRepeat=0;
+ for(let i=0;i<shaped.length;i+=4){const change=unshaped[i+3]-shaped[i+3];maxRepeat=Math.max(maxRepeat,Math.abs(shaped[i+3]-shapedRepeat[i+3]));if(unshaped[i+3]<-.2)maxOceanChange=Math.max(maxOceanChange,Math.abs(change));if(change>.001)valleyChanges++;maxValleyKm=Math.max(maxValleyKm,change);}
+ if(valleyChanges<10||maxValleyKm<.02||maxOceanChange>1e-5||maxRepeat>1e-6)throw new Error(`Valley terrain field failed: ${JSON.stringify({valleyChanges,maxValleyKm,maxOceanChange,maxRepeat})}`);
+ const savedCamera={...renderer.cameraState},savedProbeTime=renderer.lastProbeTime;
+ Object.assign(renderer.cameraState,{mode:'orbit',altitude:4,surfaceHeight:valley.height,longitude:Math.atan2(valley.direction[2],valley.direction[0]),latitude:Math.asin(valley.direction[1])});
+ renderer.budget=180;renderer.pixelSize=14;renderer.lastProbeTime=Infinity;
+ async function valleyVertices(strength){
+  renderer.valleys=strength;renderer.invalidateTerrain();renderer.cameraState.surfaceHeight=valley.height;renderer.lastSelection=0;await capture();
+  const p=directionToFace(valley.direction),node=renderer.patches.find(n=>n.face===p.face&&Math.abs(p.u-n.u)<=n.span/2&&Math.abs(p.v-n.v)<=n.span/2);
+  if(!node)throw new Error('Valley view did not select its focal patch');
+  const read=device.createBuffer({size:441*32,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),encoder=device.createCommandEncoder();encoder.copyBufferToBuffer(renderer.vertices,node.slot*441*32,read,0,441*32);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
+  const data=new Float32Array(read.getMappedRange()),heights=[];for(let y=0;y<=16;y++)for(let x=0;x<=16;x++)heights.push(data[((y+2)*21+x+2)*8+3]);read.unmap();read.destroy();return {key:node.key,heights};
+ }
+ const verticesOff=await valleyVertices(0),verticesOn=await valleyVertices(1);
+ if(verticesOff.key!==verticesOn.key)throw new Error('Valley comparison did not use the same patch');
+ const geometryChange=Math.max(...verticesOff.heights.map((h,i)=>Math.abs(h-verticesOn.heights[i])));
+ if(geometryChange<.005)throw new Error(`Valley control did not displace the rendered geometry: ${geometryChange} km`);
+ renderer.valleys=1;renderer.lastProbeTime=savedProbeTime;Object.assign(renderer.cameraState,savedCamera);renderer.budget=36;renderer.pixelSize=24;renderer.invalidateTerrain();renderer.lastSelection=0;await capture();
+ for(const seed of [1,42,0xffffffff]){
+  renderer.seed=seed;renderer.invalidateTerrain();const candidate=await renderer.findValleys();
+  if(!candidate||candidate.incision<.005||!Number.isFinite(candidate.height))throw new Error(`Valley search failed for seed ${seed}: ${JSON.stringify(candidate)}`);
+ }
+ renderer.seed=918273;renderer.invalidateTerrain();renderer.lastSelection=0;await capture();
  // A flat ocean must shade the rendered sea surface, not cavities and slopes
  // in the hidden seafloor. Exercise many patches near an actual coastline.
  const oceanCamera={...renderer.cameraState},oceanSamples=await renderer.sampleTerrain();let sea=0;
@@ -153,5 +200,5 @@ try{
   if(renderer.format.startsWith('bgra')){image.data[o]=first.pixels[i+2];image.data[o+1]=first.pixels[i+1];image.data[o+2]=first.pixels[i];}else image.data.set(first.pixels.subarray(i,i+3),o);image.data[o+3]=255;
  }
  ctx.putImageData(image,0,0);
- const result={ok:true,patches:first.patches,meshlets:first.count,foregroundPixels:foreground,cullingChanged,nearChanged,water,coastalWater,exposedSeafloor,seams,deepSeams,reusedChanges,detail:[...detail],crossMatches,crossMaxKm,highlandHeight:highland.height,repeatChanged,seedChanged,lodChanged,patchChanged,wireChanged};status.textContent=JSON.stringify(result);window.__planetSmokeDone=result;
+ const result={ok:true,patches:first.patches,meshlets:first.count,foregroundPixels:foreground,cullingChanged,nearChanged,water,coastalWater,exposedSeafloor,seams,deepSeams,reusedChanges,detail:[...detail],valleyChanges,maxValleyKm,geometryChange,maxOceanChange,maxRepeat,gradientError,alongDifference,acrossDifference,valleyIncision:valley.incision,crossMatches,crossMaxKm,highlandHeight:highland.height,repeatChanged,seedChanged,lodChanged,patchChanged,wireChanged};status.textContent=JSON.stringify(result);window.__planetSmokeDone=result;
 }catch(error){status.textContent=error.stack;window.__planetSmokeDone={ok:false,error:error.stack};}

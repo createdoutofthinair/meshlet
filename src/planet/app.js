@@ -1,6 +1,6 @@
 import {PlanetRenderer} from './renderer.js';
 const $=id=>document.getElementById(id);
-const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','generation-status','seed-form','seed','random','orbit','highlands','mode','altitude','altitude-range','relief','relief-value','ocean','sun-follow','quality','render-scale','culling','lod-colors','patch-lines','wireframe','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','timing-note'];
+const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','generation-status','seed-form','seed','random','orbit','highlands','find-valleys','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','ocean','sun-follow','quality','render-scale','culling','lod-colors','patch-lines','wireframe','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','timing-note'];
 const el=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const MIN_ALT=.03,MAX_ALT=30000;
 const fmt=n=>Math.round(n).toLocaleString('en-US');
@@ -65,18 +65,29 @@ el['seed-form'].addEventListener('submit',e=>{e.preventDefault();setSeed(el.seed
 el.random.addEventListener('click',()=>{const value=new Uint32Array(1);crypto.getRandomValues(value);setSeed(String(value[0]));});
 el.orbit.addEventListener('click',()=>{if(!renderer)return;renderer.cameraState.surfaceHeight=0;setMode('orbit');setAltitude(14000);});
 el.highlands.addEventListener('click',async()=>{
- if(!renderer||findBusy)return;findBusy=true;el.highlands.disabled=true;el.highlands.textContent='SEARCHING GPU…';
+ if(!renderer||findBusy)return;findBusy=true;el.highlands.disabled=true;el.highlands.textContent='SEARCHING…';
  try{
   const point=await renderer.findHighlands();if(!point)return;
   const d=point.direction;renderer.cameraState.longitude=Math.atan2(d[2],d[0]);renderer.cameraState.latitude=Math.asin(Math.max(-1,Math.min(1,d[1])));
-  renderer.cameraState.mode='flyover';renderer.cameraState.heading=.45;renderer.cameraState.pitch=.08;renderer.cameraState.surfaceHeight=renderer.ocean?Math.max(0,point.height):point.height;
-  el.mode.value='flyover';renderer.lastProbeKey='';setAltitude(.3);renderer.needsSelection=true;
- }catch(error){fail(error.message);}finally{findBusy=false;el.highlands.disabled=false;el.highlands.textContent='FIND HIGHLANDS ↗';}
+  renderer.cameraState.mode='flyover';renderer.cameraState.heading=.45;renderer.cameraState.pitch=.08;
+  el.mode.value='flyover';renderer.lastProbeKey='';setAltitude(.3);renderer.cameraState.surfaceHeight=renderer.ocean?Math.max(0,point.height):point.height;renderer.needsSelection=true;
+ }catch(error){fail(error.message);}finally{findBusy=false;el.highlands.disabled=false;el.highlands.textContent='HIGHLANDS';}
+});
+el['find-valleys'].addEventListener('click',async()=>{
+ if(!renderer||findBusy)return;findBusy=true;el['find-valleys'].disabled=true;el['find-valleys'].textContent='SEARCHING…';
+ try{
+  const point=await renderer.findValleys();if(!point)return;
+  const d=point.direction;renderer.cameraState.longitude=Math.atan2(d[2],d[0]);renderer.cameraState.latitude=Math.asin(Math.max(-1,Math.min(1,d[1])));
+  renderer.cameraState.mode='orbit';el.mode.value='orbit';setAltitude(4);
+  renderer.cameraState.surfaceHeight=renderer.ocean?Math.max(0,point.height):point.height;renderer.lastProbeKey='';renderer.needsSelection=true;
+ }catch(error){fail(error.message);}finally{findBusy=false;el['find-valleys'].disabled=false;el['find-valleys'].textContent='VALLEYS';}
 });
 el.mode.addEventListener('change',()=>setMode(el.mode.value));
 el['altitude-range'].addEventListener('input',()=>setAltitude(fromSlider(el['altitude-range'].value)));
 el.relief.addEventListener('input',()=>{const value=Number(el.relief.value)/100;el['relief-value'].textContent=`${value.toFixed(2)}×`;});
 el.relief.addEventListener('change',()=>{if(!renderer)return;renderer.relief=Number(el.relief.value)/100;renderer.invalidateTerrain();ready=false;loading(true,'Updating relief');});
+el.valleys.addEventListener('input',()=>{el['valleys-value'].textContent=`${(Number(el.valleys.value)/100).toFixed(2)}×`;});
+el.valleys.addEventListener('change',()=>{if(!renderer)return;renderer.valleys=Number(el.valleys.value)/100;renderer.invalidateTerrain();ready=false;loading(true,'Shaping valleys');});
 el.ocean.addEventListener('change',()=>{if(!renderer)return;renderer.ocean=el.ocean.checked;renderer.invalidateTerrain();ready=false;loading(true,'Updating the surface');});
 el['sun-follow'].addEventListener('change',()=>{if(renderer)renderer.followSun=el['sun-follow'].checked;});
 el.quality.addEventListener('change',()=>{if(renderer){renderer.budget=Number(el.quality.value);renderer.needsSelection=true;}});

@@ -20,6 +20,26 @@ fn cellNoise(cell:vec3<i32>, x:vec3<f32>, seed:u32)->f32 {
 fn noise3(p:vec3<f32>, seed:u32)->f32 {
  return cellNoise(vec3<i32>(floor(p)),fract(p),seed);
 }
+// Value noise and its analytic derivative in noise-space coordinates. This
+// reuses the same lattice values rather than evaluating the terrain repeatedly.
+fn noiseGradient(p:vec3<f32>,seed:u32)->vec4<f32>{
+ let cell=vec3<i32>(floor(p));let x=fract(p);let f=x*x*(vec3<f32>(3.0)-2.0*x);let df=6.0*x*(vec3<f32>(1.0)-x);
+ let h000=hash3(cell,seed);let h100=hash3(cell+vec3<i32>(1,0,0),seed);
+ let h010=hash3(cell+vec3<i32>(0,1,0),seed);let h110=hash3(cell+vec3<i32>(1,1,0),seed);
+ let h001=hash3(cell+vec3<i32>(0,0,1),seed);let h101=hash3(cell+vec3<i32>(1,0,1),seed);
+ let h011=hash3(cell+vec3<i32>(0,1,1),seed);let h111=hash3(cell+vec3<i32>(1,1,1),seed);
+ let a=mix(h000,h100,f.x);let b=mix(h010,h110,f.x);let c=mix(h001,h101,f.x);let d=mix(h011,h111,f.x);
+ let gx=mix(mix(h100-h000,h110-h010,f.y),mix(h101-h001,h111-h011,f.y),f.z)*df.x;
+ let gy=mix(b-a,d-c,f.z)*df.y;let gz=(mix(c,d,f.y)-mix(a,b,f.y))*df.z;
+ return vec4<f32>(mix(mix(a,b,f.y),mix(c,d,f.y),f.z),gx,gy,gz);
+}
+// Average samples along the local slope. The resulting zero contours tend to
+// run downhill; nesting two scales makes irregular, branching-looking flutes.
+// This is procedural shaping, not an erosion or hydrology simulation.
+fn slopeChannel(p:vec3<f32>,down:vec3<f32>,seed:u32)->f32{
+ let n=noise3(p,seed)*.25+(noise3(p+down*.8,seed)+noise3(p-down*.8,seed))*.25+(noise3(p+down*1.6,seed)+noise3(p-down*1.6,seed))*.125;
+ let channel=1.0-smoothstep(.025,.30,abs(n));return channel*channel;
+}
 // Keep the high and low parts separate through the lattice lookup. Adding
 // them to a unit vector first would round away the sub-meter offsets.
 fn localNoise(high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,frequency:f32,seed:u32)->f32 {
@@ -28,7 +48,7 @@ fn localNoise(high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,frequency:f32,seed:u3
  let cell=vec3<i32>(floor(scaled))+vec3<i32>(floor(residual));
  return cellNoise(cell,fract(residual),seed);
 }
-fn terrain(direction:vec3<f32>,seed:u32)->f32 {
+fn terrainShape(direction:vec3<f32>,seed:u32,valleyStrength:f32)->vec2<f32> {
  // Low-frequency warp and continents provide geological structure; ridges
  // only amplify selected land and plate-boundary regions, not the whole globe.
  let warp=vec3<f32>(noise3(direction*2.1,seed+11u),noise3(direction*2.1+vec3<f32>(17.0,3.0,9.0),seed+19u),noise3(direction*2.1+vec3<f32>(5.0,23.0,2.0),seed+29u));
@@ -46,16 +66,21 @@ fn terrain(direction:vec3<f32>,seed:u32)->f32 {
  let plain=.16+max(0.0,continent)*1.5+noise3(d*28.0,seed+43u)*.20;
  let basin=-3.7+noise3(d*16.0,seed+47u)*.55;
  let warpDetail=warp*.45;
- var ridges=0.0;var amplitude=.56;var freq=14.0;
+ let mountainZone=clamp(boundary*.82+smoothstep(.08,.35,continent)*.34,0.0,1.0);
+ let roughness=land*mountainZone;let valleyEnabled=valleyStrength>0.0 && roughness>.025;
+ var ridges=0.0;var ridgeGradient=vec3<f32>(0.0);var amplitude=.56;var freq=14.0;
  for(var i=0u;i<4u;i++){
-  let r=1.0-min(1.0,abs(noise3(d*freq+warpDetail,seed+53u+i*23u))*2.3);
+  let p=d*freq+warpDetail;var n:f32;
+  if(valleyEnabled){let sample=noiseGradient(p,seed+53u+i*23u);n=sample.x;
+   let r=1.0-min(1.0,abs(n)*2.3);
+   if(abs(n)*2.3<1.0){ridgeGradient+=sample.yzw*(-4.6*r*sign(n)*amplitude*freq);}
+  }else{n=noise3(p,seed+53u+i*23u);}
+  let r=1.0-min(1.0,abs(n)*2.3);
   ridges+=r*r*amplitude;freq*=2.23;amplitude*=.50;
  }
- let mountainZone=clamp(boundary*.82+smoothstep(.08,.35,continent)*.34,0.0,1.0);
  let mountains=land*mountainZone*pow(max(0.0,ridges),1.25)*7.5;
  // Small, bounded terrain-detail bands. These are erosion-inspired noise,
  // not a hydraulic simulation; the land mask prevents ocean-wide ridges.
- let roughness=land*mountainZone;
  var fine=0.0;var fineWeight=1.0;var fineFrequency=640.0;var fineAmplitude=1.0;
  for(var i=0u;i<6u;i++){
   let r=1.0-min(1.0,abs(noise3(d*fineFrequency+warpDetail,seed+151u+i*23u))*2.2);
@@ -68,8 +93,23 @@ fn terrain(direction:vec3<f32>,seed:u32)->f32 {
  let fold=1.0-min(1.0,abs(noise3(coords+warpDetail,seed+277u))*2.0);
  let directional=(fold*fold-.25)*.38*roughness;
  let plainsDetail=noise3(d*900.0,seed+311u)*.035+noise3(d*5000.0,seed+313u)*.008;
- return clamp(mix(basin,plain,land)+mountains+roughness*fine+directional+plainsDetail*land,-8.0,9.0);
+ let unshaped=mix(basin,plain,land)+mountains+roughness*fine+directional+plainsDetail*land;
+ var valleys=0.0;
+ if(valleyEnabled){
+  let tangent=ridgeGradient-d*dot(ridgeGradient,d);let magnitude=length(tangent);
+  let slope=magnitude*roughness*7.5/6371.0;
+  if(magnitude>.0001 && slope>.003){
+   let down=-tangent/magnitude;
+   let primary=slopeChannel(d*1400.0+warpDetail,down,seed+337u);
+   let secondary=slopeChannel(d*4300.0+warpDetail,down,seed+349u);
+   let mask=roughness*smoothstep(.025,.10,roughness)*smoothstep(.003,.09,slope)*smoothstep(.08,.55,ridges)*smoothstep(.05,.6,unshaped);
+   valleys=(primary*.22+secondary*(.25+.75*primary)*.075)*mask*valleyStrength;
+  }
+ }
+ let h=clamp(unshaped-valleys,-8.0,9.0);
+ return vec2<f32>(h,max(0.0,clamp(unshaped,-8.0,9.0)-h));
 }
+fn terrain(direction:vec3<f32>,seed:u32)->f32{return terrainShape(direction,seed,frame.settings.w).x;}
 fn detailedTerrain(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32)->f32 {
  let base=terrain(direction,seed);
  // Independent, seeded bands produce real vertex relief from tens of meters
@@ -113,6 +153,17 @@ fn highlands(@builtin(global_invocation_id) gid:vec3<u32>){
  let u=(f32(k%24u)+.5)/24.0*2.0-1.0;let v=(f32(k/24u)+.5)/24.0*2.0-1.0;
  let direction=normalize(facePoint(face,u,v));
  samples[n]=vec4<f32>(direction,clamp(detailedTerrain(direction,direction,vec3<f32>(0.0),vec3<f32>(0.0),frame.counts.z)*frame.settings.y,-HEIGHT_LIMIT,HEIGHT_LIMIT));
+}
+@compute @workgroup_size(64)
+fn valleyCandidates(@builtin(global_invocation_id) gid:vec3<u32>){
+ let n=gid.x;if(n>=6u*24u*24u){return;}
+ let face=n/(24u*24u);let k=n%(24u*24u);
+ let u=(f32(k%24u)+.5)/24.0*2.0-1.0;let v=(f32(k/24u)+.5)/24.0*2.0-1.0;
+ let direction=normalize(facePoint(face,u,v));
+ let shape=terrainShape(direction,frame.counts.z,1.0);
+ let before=clamp((shape.x+shape.y)*frame.settings.y,-HEIGHT_LIMIT,HEIGHT_LIMIT);
+ let after=clamp(shape.x*frame.settings.y,-HEIGHT_LIMIT,HEIGHT_LIMIT);
+ samples[n]=vec4<f32>(direction,max(0.0,before-after));
 }
 @compute @workgroup_size(1)
 fn point(){
