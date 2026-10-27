@@ -40,9 +40,9 @@ export class PlanetRenderer {
   d.lost.then(info=>this.onError?.(`WebGPU device lost: ${info.message||info.reason}. Reload to retry.`));
   this.context.configure({device:d,format:this.format,alphaMode:'opaque'});
   const fetchText=async p=>{const r=await fetch(new URL(p,import.meta.url));if(!r.ok)throw new Error(`Failed to load ${p}`);return r.text();};
-  const [common,terrainCore,riverCurve,hydrologySource,worldField,riverDetailSource,regionalSource,...sources]=await Promise.all(['./common.wgsl','./terrain-core.wgsl','./river-curve.wgsl','./hydrology.wgsl','./world-field.wgsl','./river-detail.wgsl','./regional-hydrology.wgsl','./generate.wgsl','./normal.wgsl','./bounds.wgsl','./cull.wgsl','./render.wgsl','./lod-error.wgsl'].map(fetchText));
+  const [common,terrainCore,riverCurve,hydrologySource,worldField,riverDetailSource,regionalSource,terrainSurface,...sources]=await Promise.all(['./common.wgsl','./terrain-core.wgsl','./river-curve.wgsl','./hydrology.wgsl','./world-field.wgsl','./river-detail.wgsl','./regional-hydrology.wgsl','./terrain-surface.wgsl','./generate.wgsl','./normal.wgsl','./bounds.wgsl','./cull.wgsl','./render.wgsl','./lod-error.wgsl'].map(fetchText));
   const labels=['Terrain generation','Terrain normals','Meshlet bounds','Meshlet culling','Planet rendering','Terrain LOD residual'];
-  const modules=await Promise.all(sources.map((s,i)=>shader(d,common+'\n'+(i===0?terrainCore+'\n'+riverCurve+'\n'+worldField+'\n':'')+s,labels[i])));
+  const modules=await Promise.all(sources.map((s,i)=>shader(d,common+'\n'+(i===0||i===4?terrainCore+'\n'+riverCurve+'\n'+worldField+'\n'+terrainSurface+'\n':'')+s,labels[i])));
   [this.generatePipe,this.normalPipe,this.boundsPipe,this.cullPipe]=await Promise.all(modules.slice(0,4).map(module=>d.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}})));
   this.lodErrorPipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:modules[5],entryPoint:'main'}});
   [this.highlandsPipe,this.pointPipe,this.valleyPipe,this.riverPipe]=await Promise.all(['highlands','point','valleyCandidates','riverCandidates'].map(entryPoint=>d.createComputePipelineAsync({layout:'auto',compute:{module:modules[0],entryPoint}})));
@@ -106,7 +106,7 @@ export class PlanetRenderer {
   this.normalBind=bind(this.normalPipe,[this.uniform,this.patchBuffer,this.vertices,this.normalQueueBuffer]);
   this.boundsBind=bind(this.boundsPipe,[this.uniform,this.vertices,this.bounds,this.queueBuffer]);
   this.cullBind=bind(this.cullPipe,[this.uniform,this.patchBuffer,this.bounds,this.activeBuffer,this.visible,this.indirect]);
-  this.renderBind=bind(this.renderPipe,[this.uniform,this.patchBuffer,this.vertices,this.visible,this.riverMasks]);
+  this.renderBind=bindEntries(this.renderPipe,[[0,this.uniform],[1,this.patchBuffer],[2,this.vertices],[3,this.visible],[5,this.plates],...worldEntries]);
   this.highlandsBind=bindEntries(this.highlandsPipe,[[0,this.uniform],[4,this.plates],[5,this.sampleBuffer],...worldEntries]);
   this.valleyBind=d.createBindGroup({layout:this.valleyPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.uniform}},{binding:4,resource:{buffer:this.plates}},{binding:5,resource:{buffer:this.sampleBuffer}}]});
   this.pointBind=bindEntries(this.pointPipe,[[0,this.uniform],[4,this.plates],[5,this.sampleBuffer],[6,this.probeInput],...worldEntries]);

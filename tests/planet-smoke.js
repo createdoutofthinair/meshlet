@@ -1,5 +1,7 @@
 import {PlanetRenderer} from '../src/planet/renderer.js';
 import {faceDirection,directionToFace} from '../src/planet/planet-math.js';
+import {buildWorldGrid} from '../src/planet/world-grid.js';
+import {REGION_LOOKUPS,REGION_SAMPLES,REGION_CAPACITY,regionAt} from '../src/planet/regions.js';
 const status=document.querySelector('#status');
 try{
  const source=document.querySelector('#source');const adapter=await navigator.gpu?.requestAdapter();if(!adapter)throw new Error('No WebGPU adapter');
@@ -66,8 +68,8 @@ try{
  await renderer.sampleTerrain(highland.direction);
  // The extra detail is geometry, including at scales smaller than a float32
  // unit-vector coordinate can represent without the high/low decomposition.
- const [common,terrainCore,riverCurve,worldField,generator]=await Promise.all(['common.wgsl','terrain-core.wgsl','river-curve.wgsl','world-field.wgsl','generate.wgsl'].map(p=>fetch(`../src/planet/${p}`).then(r=>r.text())));
- const detailModule=device.createShaderModule({code:common+'\n'+terrainCore+'\n'+riverCurve+'\n'+worldField+'\n'+generator+`
+ const [common,terrainCore,riverCurve,worldField,terrainSurface,generator]=await Promise.all(['common.wgsl','terrain-core.wgsl','river-curve.wgsl','world-field.wgsl','terrain-surface.wgsl','generate.wgsl'].map(p=>fetch(`../src/planet/${p}`).then(r=>r.text())));
+ const detailModule=device.createShaderModule({code:common+'\n'+terrainCore+'\n'+riverCurve+'\n'+worldField+'\n'+terrainSurface+'\n'+generator+`
  @compute @workgroup_size(1) fn detailCheck(){
   let direction=normalize(probe.direction.xyz);let tangent=normalize(cross(direction,vec3<f32>(0.0,1.0,0.0)));
   let zero=vec3<f32>(0.0);let seed=frame.counts.z;let base=terrain(direction,seed);
@@ -103,6 +105,21 @@ try{
   let direction=normalize(facePoint(face,u,v));let sample=worldSample(direction);let profile=worldProfile(sample);
   let incision=regionalIncision(sample,profile,direction,direction,vec3<f32>(0.0),vec3<f32>(0.0),profile.y,frame.counts.z);
   samples[n]=vec4<f32>(direction,incision);
+ }
+ @compute @workgroup_size(1) fn waterStabilityCheck(){
+  let p=normalize(probe.direction.xyz);let zero=vec3<f32>(0.0);
+  let baseline=surfaceBase(p,p,zero,zero,frame.counts.z,false);
+  let regional=surfaceBase(p,p,zero,zero,frame.counts.z,true);
+  let close=worldSurfaceWater(p,.01);let middle=worldSurfaceWater(p,3.0);let far=worldSurfaceWater(p,20.0);
+  samples[0]=vec4<f32>(baseline.height,regional.height,baseline.lake,regional.lake);
+  samples[1]=vec4<f32>(close.x,middle.x,far.x,0.0);
+ }
+ @compute @workgroup_size(64) fn coastStabilityCheck(@builtin(global_invocation_id) gid:vec3<u32>){
+  let n=gid.x;if(n>=6u*16u*16u){return;}let face=n/(16u*16u);let k=n%(16u*16u);
+  let u=(f32(k%16u)+.5)/8.0-1.0;let v=(f32(k/16u)+.5)/8.0-1.0;
+  let p=normalize(facePoint(face,u,v));let zero=vec3<f32>(0.0);let seed=frame.counts.z;
+  let h=naturalHeight(terrain(p,seed),p,zero,zero,seed);
+  samples[n]=vec4<f32>(h,select(0.0,1.0,naturalLand(p,seed)),0.0,0.0);
  }`});
  const detailPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'detailCheck'}});
  const detailBind=device.createBindGroup({layout:detailPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.uniform}},{binding:4,resource:{buffer:renderer.plates}},{binding:5,resource:{buffer:renderer.sampleBuffer}},{binding:6,resource:{buffer:renderer.probeInput}},{binding:7,resource:{buffer:renderer.world}},{binding:8,resource:{buffer:renderer.worldDirections}},{binding:9,resource:{buffer:renderer.worldNeighbors}},{binding:10,resource:{buffer:renderer.worldFaces}}]});
@@ -137,6 +154,36 @@ try{
  const edgeData=new Float32Array(edgeBuffer.getMappedRange());let bestEdge=0;for(let i=4;i<edgeData.length;i+=4)if(edgeData[i+3]>edgeData[bestEdge+3])bestEdge=i;
  const edgeDirection=[edgeData[bestEdge],edgeData[bestEdge+1],edgeData[bestEdge+2]],edgeIncision=edgeData[bestEdge+3];edgeBuffer.unmap();edgeBuffer.destroy();
  if(edgeIncision<.001)throw new Error(`No erosion-shaped land found on a cube-face edge: ${edgeIncision}`);
+ // Give a known land location a synthetic basin and a nonzero regional tile.
+ // The same geographic lake must survive changes in pixel footprint and the
+ // presence of regional terrain, even though the terrain height itself moves.
+ const waterDirection=faceDirection(0,-.74609375,-.74609375),waterRegion=regionAt(waterDirection);
+ await renderer.sampleTerrain(waterDirection);
+ const waterLookupOffset=24578*(48+17*16+4),waterValuesOffset=Math.ceil((waterLookupOffset+REGION_LOOKUPS*4)/16)*16;
+ const waterWorld=device.createBuffer({size:waterValuesOffset+REGION_CAPACITY*REGION_SAMPLES*16,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST|GPUBufferUsage.COPY_SRC});
+ const waterCopy=device.createCommandEncoder();waterCopy.copyBufferToBuffer(renderer.world,0,waterWorld,0,waterWorld.size);device.queue.submit([waterCopy.finish()]);
+ const waterGrid=buildWorldGrid(64),face=directionToFace(waterDirection);
+ const gx=Math.min(63,Math.floor((face.u+1)*32)),gy=Math.min(63,Math.floor((face.v+1)*32)),start=face.face*65*65+gy*65+gx;
+ const corners=[waterGrid.faceIndices[start],waterGrid.faceIndices[start+1],waterGrid.faceIndices[start+65],waterGrid.faceIndices[start+66]];
+ const cell=new ArrayBuffer(48),cellF=new Float32Array(cell),cellU=new Uint32Array(cell);cellF[0]=8;cellF[1]=8;cellF[2]=4;cellF[10]=.8;
+ cellU[4]=0xffffffff;cellU[5]=new Uint32Array(new Float32Array([8.5]).buffer)[0];cellU[6]=0xffffffff;
+ for(const corner of corners)device.queue.writeBuffer(waterWorld,corner*48,cell);
+ device.queue.writeBuffer(waterWorld,waterLookupOffset+waterRegion.id*4,new Uint32Array([0]));
+ const displaced=new Float32Array(REGION_SAMPLES*4);for(let i=0;i<REGION_SAMPLES;i++)displaced[i*4]=-.01;
+ device.queue.writeBuffer(waterWorld,waterValuesOffset,displaced);
+ const waterPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'waterStabilityCheck'}});
+ const waterBind=device.createBindGroup({layout:waterPipe.getBindGroupLayout(0),entries:[[0,renderer.uniform],[4,renderer.plates],[5,renderer.sampleBuffer],[6,renderer.probeInput],[7,waterWorld],[8,renderer.worldDirections],[9,renderer.worldNeighbors],[10,renderer.worldFaces]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
+ const waterRead=device.createBuffer({size:32,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),waterEncoder=device.createCommandEncoder(),waterPass=waterEncoder.beginComputePass();
+ waterPass.setPipeline(waterPipe);waterPass.setBindGroup(0,waterBind);waterPass.dispatchWorkgroups(1);waterPass.end();waterEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,waterRead,0,32);device.queue.submit([waterEncoder.finish()]);
+ await waterRead.mapAsync(GPUMapMode.READ);const stableWater=new Float32Array(waterRead.getMappedRange().slice(0));waterRead.unmap();waterRead.destroy();waterWorld.destroy();
+ if(!stableWater.every(Number.isFinite)||stableWater[2]<.5||Math.abs(stableWater[0]-stableWater[1])<.001||Math.abs(stableWater[2]-stableWater[3])>1e-6||Math.max(Math.abs(stableWater[4]-stableWater[5]),Math.abs(stableWater[4]-stableWater[6]))>1e-6)throw new Error(`Lake changed with regional streaming or pixel footprint: ${[...stableWater]}`);
+ const coastCount=6*16*16,coastPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'coastStabilityCheck'}});
+ const coastBind=device.createBindGroup({layout:coastPipe.getBindGroupLayout(0),entries:[[0,renderer.uniform],[4,renderer.plates],[5,renderer.sampleBuffer]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
+ const coastRead=device.createBuffer({size:coastCount*16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),coastEncoder=device.createCommandEncoder(),coastPass=coastEncoder.beginComputePass();
+ coastPass.setPipeline(coastPipe);coastPass.setBindGroup(0,coastBind);coastPass.dispatchWorkgroups(Math.ceil(coastCount/64));coastPass.end();coastEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,coastRead,0,coastCount*16);device.queue.submit([coastEncoder.finish()]);
+ await coastRead.mapAsync(GPUMapMode.READ);const coastData=new Float32Array(coastRead.getMappedRange());let coastLand=0,coastSea=0;
+ for(let i=0;i<coastData.length;i+=4){const h=coastData[i],classified=coastData[i+1]>.5;if(!Number.isFinite(h)||classified!==(h>=0))throw new Error(`Land/sea classification disagrees with terrain at sample ${i/4}: ${h}/${classified}`);if(classified)coastLand++;else coastSea++;}
+ coastRead.unmap();coastRead.destroy();if(coastLand<100||coastSea<100)throw new Error(`Missing land or sea in coastline check: ${coastLand}/${coastSea}`);
  // The control must change the seeded land geometry, remain reproducible,
  // and leave the fully submerged seabed unchanged.
  renderer.valleys=0;const unshaped=await renderer.sampleTerrain();renderer.valleys=1;const shaped=await renderer.sampleTerrain(),shapedRepeat=await renderer.sampleTerrain();
@@ -320,5 +367,5 @@ try{
   if(renderer.format.startsWith('bgra')){image.data[o]=first.pixels[i+2];image.data[o+1]=first.pixels[i+1];image.data[o+2]=first.pixels[i];}else image.data.set(first.pixels.subarray(i,i+3),o);image.data[o+3]=255;
  }
  ctx.putImageData(image,0,0);
- const result={ok:true,patches:first.patches,meshlets:first.count,foregroundPixels:foreground,cullingChanged,nearChanged,water,coastalWater,exposedSeafloor,seams,deepSeams,closeCubeEdge,movedCubeEdge,reusedAtCubeEdge,edgeIncision,reusedChanges,detail:[...detail],valleyChanges,maxValleyKm,geometryChange,maxOceanChange,maxRepeat,gradientError,alongDifference,acrossDifference,regionalCountActive,regionalMax,regionalTangency,lodMeasurements,lodResidualMax,lodResidualDifference,valleyIncision:valley.incision,crossMatches,crossMaxKm,highlandHeight:highland.height,repeatChanged,seedChanged,biomeChanged,riverChanged,lodChanged,patchChanged,wireChanged};status.textContent=JSON.stringify(result);window.__planetSmokeDone=result;
+ const result={ok:true,patches:first.patches,meshlets:first.count,foregroundPixels:foreground,cullingChanged,nearChanged,water,coastalWater,exposedSeafloor,stableWater:[...stableWater],coastLand,coastSea,seams,deepSeams,closeCubeEdge,movedCubeEdge,reusedAtCubeEdge,edgeIncision,reusedChanges,detail:[...detail],valleyChanges,maxValleyKm,geometryChange,maxOceanChange,maxRepeat,gradientError,alongDifference,acrossDifference,regionalCountActive,regionalMax,regionalTangency,lodMeasurements,lodResidualMax,lodResidualDifference,valleyIncision:valley.incision,crossMatches,crossMaxKm,highlandHeight:highland.height,repeatChanged,seedChanged,biomeChanged,riverChanged,lodChanged,patchChanged,wireChanged};status.textContent=JSON.stringify(result);window.__planetSmokeDone=result;
 }catch(error){status.textContent=error.stack;window.__planetSmokeDone={ok:false,error:error.stack};}

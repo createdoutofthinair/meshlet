@@ -71,17 +71,22 @@ fn worldLake(s:WorldSample)->vec2<f32>{
 // Search segments attached to the enclosing quad and its neighbors. Shared
 // world-grid nodes let a river keep the same endpoints across all cube faces.
 struct RiverInfo {mask:f32,discharge:f32};
-fn riverSegment(direction:vec3<f32>,start:u32)->RiverInfo{
+fn riverSegment(direction:vec3<f32>,start:u32,footprintKm:f32)->RiverInfo{
  if(start>=WORLD_COUNT){return RiverInfo(0.0,0.0);}
  let cell=world.cells[start];let end=cell.route.x;
  if(end==NO_NODE || cell.profile.z<1.5){return RiverInfo(0.0,0.0);}
  let a=worldDirections[start].xyz;let b=worldDirections[end].xyz;let ab=b-a;let segmentLength=length(ab);
+ let initialT=clamp(dot(direction-a,ab)/max(dot(ab,ab),.00000001),0.0,1.0);
+ // The Hermite bend and seeded meander stay inside this conservative bound.
+ // Reject distant segments before searching the cached polyline.
+ let bound=segmentLength*.60+(6.5+footprintKm*.5)/6371.0;
+ if(length(direction-(a+ab*initialT))>bound){return RiverInfo(0.0,0.0);}
  let upstream=cell.route.z;let next=world.cells[end].route.x;let endMain=world.cells[end].route.z;
  var previous=a;if(upstream!=NO_NODE){previous=worldDirections[upstream].xyz;}
  var following=b;if(next!=NO_NODE){following=worldDirections[next].xyz;}
  var endPrevious=a;if(endMain!=NO_NODE){endPrevious=worldDirections[endMain].xyz;}
  let m0=riverTangent(b-previous,a,segmentLength*.8);let m1=riverTangent(following-endPrevious,b,segmentLength*.8);
- var t=clamp(dot(direction-a,ab)/max(dot(ab,ab),.00000001),0.0,1.0);
+ var t=initialT;
  for(var iteration=0u;iteration<2u;iteration++){
   let curve=normalize(riverCurve(a,b,m0,m1,t));let derivative=riverDerivative(a,b,m0,m1,t);
   t=clamp(t+dot(direction-curve,derivative)/max(dot(derivative,derivative),.00000001),0.0,1.0);
@@ -95,23 +100,28 @@ fn riverSegment(direction:vec3<f32>,start:u32)->RiverInfo{
   if(d<distance){distance=d;width=mix(p.w,q.w,part);bestT=(f32(k)+part)/f32(RIVER_SAMPLES-1u);}
  }
  let flow=mix(cell.profile.z,max(cell.profile.z,world.cells[end].profile.z),bestT);
- let mask=1.0-smoothstep(width*.80,width*1.10,distance);
+ // Account for the footprint of a pixel without switching a river on or off
+ // at an arbitrary camera distance. A zero footprint gives the geometry mask.
+ let feather=max(0.0,footprintKm)*.5;
+ let coverage=min(1.0,(width*2.0)/max(width*2.0,footprintKm));
+ let mask=coverage*(1.0-smoothstep(max(0.0,width*.80-feather),width*1.10+feather,distance));
  return RiverInfo(mask,flow);
 }
 // Search segments attached to the enclosing quad and its neighbors. Shared
 // world-grid nodes let a river keep the same endpoints across all cube faces.
-fn riverAt(direction:vec3<f32>,s:WorldSample)->RiverInfo{
+fn riverAtFiltered(direction:vec3<f32>,s:WorldSample,footprintKm:f32)->RiverInfo{
  var result=RiverInfo(0.0,0.0);
  for(var c=0u;c<4u;c++){
   let corner=s.corners[c];
   for(var k=0u;k<9u;k++){
    var start=corner;if(k>0u){start=worldNeighbors[corner*8u+k-1u];}
-   let candidate=riverSegment(direction,start);
+   let candidate=riverSegment(direction,start,footprintKm);
    if(candidate.mask>result.mask){result.mask=candidate.mask;result.discharge=candidate.discharge;}
   }
  }
  return result;
 }
+fn riverAt(direction:vec3<f32>,s:WorldSample)->RiverInfo{return riverAtFiltered(direction,s,0.0);}
 
 // The regional field is addressed by geographic tile rather than render LOD.
 // World-space halo simulation makes same-face tile edges agree. A narrow,

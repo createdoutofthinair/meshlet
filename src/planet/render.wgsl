@@ -2,7 +2,7 @@
 @group(0) @binding(1) var<storage,read> patches:array<Patch>;
 @group(0) @binding(2) var<storage,read> vertices:array<PlanetVertex>;
 @group(0) @binding(3) var<storage,read> visible:array<u32>;
-@group(0) @binding(4) var<storage,read> riverMasks:array<vec2<f32>>;
+@group(0) @binding(5) var<storage,read> plates:array<vec4<f32>>;
 struct Output {
  @builtin(position) position:vec4<f32>,
  @location(0) normal:vec3<f32>,
@@ -14,8 +14,6 @@ struct Output {
  @location(6) @interpolate(flat) edgeMask:u32,
  @location(7) cavity:f32,
  @location(8) surface:vec4<f32>, // lake and moisture
- @location(9) patchUv:vec2<f32>,
- @location(10) @interpolate(flat) patchSlot:u32,
 };
 fn onPatchEdge(a:vec2<u32>,b:vec2<u32>)->bool {
  return (a.x==b.x && (a.x==0u || a.x==CELLS)) || (a.y==b.y && (a.y==0u || a.y==CELLS));
@@ -45,26 +43,7 @@ fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->
  var out:Output;out.position=frame.viewProjection*vec4<f32>(relative,1.0);out.normal=vert.normal.xyz;
  out.direction=normalize(tile.centerDirection.xyz+vert.position.xyz/frame.settings.x);out.relative=relative;out.height=vert.position.w;
  out.level=tile.details.y;out.bary=bary;out.edgeMask=mask;out.cavity=vert.normal.w;out.surface=vert.surface;
- out.patchUv=vec2<f32>(coord)/f32(CELLS);out.patchSlot=slot;return out;
-}
-fn sampleRiver(slot:u32,uv:vec2<f32>)->f32{
- let p=clamp(uv,vec2<f32>(0.0),vec2<f32>(1.0))*32.0+vec2<f32>(4.0);let x=min(u32(floor(p.x)),39u);let y=min(u32(floor(p.y)),39u);
- let f=p-vec2<f32>(f32(x),f32(y));let i=slot*1681u+y*41u+x;
- return mix(mix(riverMasks[i].x,riverMasks[i+1u].x,f.x),mix(riverMasks[i+41u].x,riverMasks[i+42u].x,f.x),f.y);
-}
-fn stitchedRiver(slot:u32,uv:vec2<f32>)->f32{
- let tile=patches[slot];let stitch=tile.details.z;var result=sampleRiver(slot,uv);var blend=0.0;var edge=4u;
- if((stitch&1u)!=0u){let w=1.0-smoothstep(0.0,.125,uv.x);if(w>blend){blend=w;edge=0u;}}
- if((stitch&2u)!=0u){let w=1.0-smoothstep(0.0,.125,1.0-uv.x);if(w>blend){blend=w;edge=1u;}}
- if((stitch&4u)!=0u){let w=1.0-smoothstep(0.0,.125,uv.y);if(w>blend){blend=w;edge=2u;}}
- if((stitch&8u)!=0u){let w=1.0-smoothstep(0.0,.125,1.0-uv.y);if(w>blend){blend=w;edge=3u;}}
- if(edge<4u){let neighbor=tile.coarseNeighbors[edge];if(neighbor!=0xffffffffu){
-  let coarse=patches[neighbor];let p=tile.cube.xyz+tile.axisU.xyz*((uv.x-.5)*tile.cube.w)+tile.axisV.xyz*((uv.y-.5)*tile.cube.w);
-  let normal=normalize(cross(coarse.axisU.xyz,coarse.axisV.xyz));let projected=p/max(.001,dot(p,normal));let offset=projected-coarse.cube.xyz;
-  let c=vec2<f32>(dot(offset,coarse.axisU.xyz),dot(offset,coarse.axisV.xyz))/coarse.cube.w+vec2<f32>(.5);
-  result=mix(result,sampleRiver(neighbor,c),blend);
- }}
- return result;
+ return out;
 }
 fn levelColor(level:u32)->vec3<f32>{
  let palette=array<vec3<f32>,6>(vec3<f32>(0.12,0.66,0.80),vec3<f32>(0.23,0.75,0.48),vec3<f32>(0.85,0.67,0.20),vec3<f32>(0.90,0.36,0.20),vec3<f32>(0.73,0.27,0.68),vec3<f32>(0.36,0.37,0.90));
@@ -72,14 +51,19 @@ fn levelColor(level:u32)->vec3<f32>{
 }
 @fragment
 fn fs(in:Output)->@location(0) vec4<f32> {
- let radial=normalize(in.direction);let light=normalize(frame.sun.xyz);let h=in.height;
- let pixelKm=max(length(dpdx(in.direction)),length(dpdy(in.direction)))*6371.0;var river=0.0;
- if(frame.hydrology.y>.5 && frame.hydrology.x>0.0 && h>=0.0 && pixelKm<1.0){river=stitchedRiver(in.patchSlot,in.patchUv)*(1.0-smoothstep(.6,1.0,pixelKm));}
- // The coarse basin estimate cannot resolve individual lake shorelines from
- // orbit. Suppress their aliasing when one pixel covers several kilometers.
- let lake=clamp(in.surface.x,0.0,1.0)*(1.0-smoothstep(2.0,6.0,pixelKm));
- let water=select(0.0,max(lake,river),frame.hydrology.y>.5 && h>=0.0);
- let n=normalize(mix(in.normal,radial,water*.8));let slope=1.0-clamp(dot(n,radial),0.0,1.0);
+ let radial=normalize(in.direction);let light=normalize(frame.sun.xyz);
+ // Classify the sea from the same seeded world at every LOD, rather than
+ // from interpolated heights of the triangles currently on screen.
+ let land=naturalLand(radial,frame.counts.z);let h=select(min(in.height,0.0),max(in.height,0.0),land);
+ let pixelKm=max(length(dpdx(in.direction)),length(dpdy(in.direction)))*6371.0;var waterField=vec2<f32>(0.0);
+ if(frame.hydrology.y>.5 && frame.hydrology.x>0.0 && land){
+  // Query the seeded world at the fragment's location, not a water mask
+  // interpolated from whichever terrain patch or LOD happens to cover it.
+  waterField=worldSurfaceWater(radial,pixelKm);
+ }
+ let water=smoothstep(.1,.6,max(waterField.x,waterField.y));
+ let flatOcean=!land && frame.settings.z>.5;
+ let n=select(normalize(mix(in.normal,radial,water*.8)),radial,flatOcean);let slope=1.0-clamp(dot(n,radial),0.0,1.0);
  let deep=vec3<f32>(0.012,0.055,0.092);let ocean=vec3<f32>(0.025,0.17,0.23);
  let lowland=vec3<f32>(0.25,0.31,0.20);let upland=vec3<f32>(0.30,0.28,0.22);
  let rock=vec3<f32>(0.34,0.34,0.32);let snow=vec3<f32>(0.66,0.71,0.72);
@@ -97,11 +81,11 @@ fn fs(in:Output)->@location(0) vec4<f32> {
  // steep mountain faces instead of painting the whole highland white.
  let snowCover=max(smoothstep(7.0,9.3,h),coldSnow)*(1.0-smoothstep(.03,.32,slope)*.85);
  base=mix(base,snow,snowCover);
- if(h<0.0){base=mix(deep,ocean,smoothstep(-4.0,0.0,h));}
- if(h>=0.0){base=mix(base,vec3<f32>(.025,.16,.19),smoothstep(.1,.6,water));}
+ if(!land){base=mix(deep,ocean,smoothstep(-4.0,0.0,h));}
+ if(land){base=mix(base,vec3<f32>(.025,.16,.19),water);}
  if((frame.counts.w&2u)!=0u){base=levelColor(in.level);}
  let diffuse=max(dot(n,light),0.0);let fill=.22+.10*max(n.y,0.0);
- var color=base*(fill+diffuse*.95)*(1.0-in.cavity*.30);
+ var color=base*(fill+diffuse*.95)*(1.0-select(in.cavity,0.0,flatOcean)*.30);
  let view=normalize(-in.relative);let rim=pow(1.0-clamp(dot(radial,view),0.0,1.0),4.0)*.055;
  color+=vec3<f32>(.10,.38,.58)*rim;
  // Compress highlights before display encoding so bright snow keeps

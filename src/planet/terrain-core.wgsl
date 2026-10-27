@@ -42,7 +42,8 @@ fn localNoise(high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,frequency:f32,seed:u3
  let cell=vec3<i32>(floor(scaled))+vec3<i32>(floor(residual));
  return cellNoise(cell,fract(residual),seed);
 }
-fn terrainShape(direction:vec3<f32>,seed:u32,valleyStrength:f32)->vec2<f32> {
+struct TerrainBase {direction:vec3<f32>,warp:vec3<f32>,land:f32,plain:f32,basin:f32,roughness:f32};
+fn terrainBase(direction:vec3<f32>,seed:u32)->TerrainBase {
  // Low-frequency warp and continents provide geological structure; ridges
  // only amplify selected land and plate-boundary regions, not the whole globe.
  let warp=vec3<f32>(noise3(direction*2.1,seed+11u),noise3(direction*2.1+vec3<f32>(17.0,3.0,9.0),seed+19u),noise3(direction*2.1+vec3<f32>(5.0,23.0,2.0),seed+29u));
@@ -59,9 +60,13 @@ fn terrainShape(direction:vec3<f32>,seed:u32,valleyStrength:f32)->vec2<f32> {
  let land=smoothstep(-.15,.13,continent);
  let plain=.16+max(0.0,continent)*1.5+noise3(d*28.0,seed+43u)*.20;
  let basin=-3.7+noise3(d*16.0,seed+47u)*.55;
- let warpDetail=warp*.45;
  let mountainZone=clamp(boundary*.82+smoothstep(.08,.35,continent)*.34,0.0,1.0);
- let roughness=land*mountainZone;let valleyEnabled=valleyStrength>0.0 && roughness>.025;
+ return TerrainBase(d,warp,land,plain,basin,land*mountainZone);
+}
+fn terrainShapeFromBase(base:TerrainBase,seed:u32,valleyStrength:f32)->vec2<f32>{
+ let d=base.direction;let land=base.land;let plain=base.plain;let basin=base.basin;let roughness=base.roughness;
+ if(land<=0.0){return vec2<f32>(clamp(basin,-8.0,9.0),0.0);}
+ let warpDetail=base.warp*.45;let valleyEnabled=valleyStrength>0.0 && roughness>.025;
  var ridges=0.0;var ridgeGradient=vec3<f32>(0.0);var amplitude=.56;var freq=14.0;
  for(var i=0u;i<4u;i++){
   let p=d*freq+warpDetail;var n:f32;
@@ -72,7 +77,7 @@ fn terrainShape(direction:vec3<f32>,seed:u32,valleyStrength:f32)->vec2<f32> {
   let r=1.0-min(1.0,abs(n)*2.3);
   ridges+=r*r*amplitude;freq*=2.23;amplitude*=.50;
  }
- let mountains=land*mountainZone*pow(max(0.0,ridges),1.25)*7.5;
+ let mountains=roughness*pow(max(0.0,ridges),1.25)*7.5;
  // Small, bounded terrain-detail bands. These are erosion-inspired noise,
  // not a hydraulic simulation; the land mask prevents ocean-wide ridges.
  var fine=0.0;var fineWeight=1.0;var fineFrequency=640.0;var fineAmplitude=1.0;
@@ -103,4 +108,5 @@ fn terrainShape(direction:vec3<f32>,seed:u32,valleyStrength:f32)->vec2<f32> {
  let h=clamp(unshaped-valleys,-8.0,9.0);
  return vec2<f32>(h,max(0.0,clamp(unshaped,-8.0,9.0)-h));
 }
+fn terrainShape(direction:vec3<f32>,seed:u32,valleyStrength:f32)->vec2<f32>{return terrainShapeFromBase(terrainBase(direction,seed),seed,valleyStrength);}
 fn terrain(direction:vec3<f32>,seed:u32)->f32{return terrainShape(direction,seed,frame.settings.w).x;}
