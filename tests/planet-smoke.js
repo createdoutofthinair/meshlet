@@ -24,6 +24,29 @@ try{
  window.__planetCapture=capture;
  function difference(a,b){let n=0;for(let y=0;y<height;y++)for(let x=0;x<width;x++){const i=y*stride+x*4;if(Math.max(...[0,1,2].map(k=>Math.abs(a.pixels[i+k]-b.pixels[i+k])))>2)n++;}return n;}
  const first=await capture();if(first.patches<1||first.count<1)throw new Error(`No planet geometry was rendered: ${JSON.stringify({patches:first.patches,count:first.count})}`);
+ // Probe a synthetic sloped mesh using the real walking shader. The sample
+ // includes all four stitched edges and a high-altitude reference value.
+ const walkPatch=device.createBuffer({size:128,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+ const walkVertices=device.createBuffer({size:441*48,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+ const walkInput=device.createBuffer({size:48,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+ const walkOutput=device.createBuffer({size:16,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC});
+ const walkBind=device.createBindGroup({layout:renderer.walkProbePipe.getBindGroupLayout(0),entries:[[0,walkPatch],[1,walkVertices],[2,walkInput],[3,walkOutput]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
+ const walkVertexData=new Float32Array(441*12);
+ for(let y=0;y<21;y++)for(let x=0;x<21;x++){
+  const px=x-2,py=y-2,i=(y*21+x)*12;walkVertexData.set([px*.001,px*.0002+py*.0001,py*.001,0],i);
+ }
+ device.queue.writeBuffer(walkVertices,0,walkVertexData);
+ for(const [x,y,stitch] of [[3.25,4.65,0],[.1,3.6,1],[15.8,7.3,2],[3.6,.1,4],[7.3,15.9,8]]){
+  const patch=new Uint32Array(32);patch[26]=stitch;device.queue.writeBuffer(walkPatch,0,patch);
+  const raw=new ArrayBuffer(48),f=new Float32Array(raw),u=new Uint32Array(raw);
+  f.set([x*.001,0,y*.001,9,0,1,0,0]);u.set([0,Math.floor(x),Math.floor(y),0],8);device.queue.writeBuffer(walkInput,0,raw);
+  const read=device.createBuffer({size:16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),encoder=device.createCommandEncoder();
+  const pass=encoder.beginComputePass();pass.setPipeline(renderer.walkProbePipe);pass.setBindGroup(0,walkBind);pass.dispatchWorkgroups(1);pass.end();
+  encoder.copyBufferToBuffer(walkOutput,0,read,0,16);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
+  const values=new Float32Array(read.getMappedRange().slice(0));read.unmap();read.destroy();
+  if(values[1]<.5||Math.abs(values[0]-(9+x*.0002+y*.0001))>.00001)throw new Error(`Walking mesh probe failed at ${x},${y}, stitch ${stitch}: ${[...values]}`);
+ }
+ walkPatch.destroy();walkVertices.destroy();walkInput.destroy();walkOutput.destroy();
  renderer.culling=false;const uncull=await capture();renderer.culling=true;
  if(uncull.count!==uncull.patches*16 || first.count>uncull.count)throw new Error(`Invalid meshlet culling counts: ${first.count} / ${uncull.count}`);
  const cullingChanged=difference(first,uncull);if(cullingChanged>width*height*.02)throw new Error(`Culling changed ${cullingChanged} pixels`);
@@ -379,6 +402,12 @@ try{
  renderer.budget=180;renderer.pixelSize=14;renderer.lastSelection=0;const riversOn=await capture();
  renderer.rivers=false;renderer.invalidateTerrain();renderer.cameraState.surfaceHeight=river.height;renderer.lastSelection=0;const riversOff=await capture();
  const riverChanged=difference(riversOn,riversOff);if(riverChanged<20)throw new Error(`River control did not affect the image: ${riverChanged} pixels`);
+ // Check the full camera-to-patch lookup against generated terrain, not only
+ // the synthetic triangles used for the probe arithmetic above.
+ renderer.rivers=true;renderer.invalidateTerrain();renderer.budget=384;renderer.pixelSize=14;
+ Object.assign(renderer.cameraState,{mode:'walk',altitude:.0017,surfaceHeight:point[3],longitude:Math.atan2(highland.direction[2],highland.direction[0]),latitude:Math.asin(highland.direction[1]),pitch:.08});
+ renderer.lastSelection=-Infinity;await capture();const walkHeight=await renderer.sampleRenderedSurface(highland.direction);
+ if(walkHeight==null||!Number.isFinite(walkHeight)||Math.abs(walkHeight-point[3])>.5)throw new Error(`Walking probe could not find the generated ground: ${walkHeight} / ${point[3]}`);
  if(errors.length)throw new Error(errors.join('; '));
  const canvas=document.querySelector('#preview');canvas.width=width;canvas.height=height;const ctx=canvas.getContext('2d'),image=ctx.createImageData(width,height);
  for(let y=0;y<height;y++)for(let x=0;x<width;x++){

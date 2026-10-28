@@ -1,14 +1,14 @@
 import {lookAt,multiply} from '../math.js';
 import {RADIUS_KM,add,scale,dot,cross,normalize,reversePerspective} from './planet-math.js';
 export function planetCamera({longitude=0,latitude=.25,altitude=12000,surfaceHeight=0,mode='orbit',heading=.4,pitch=.28},width,height) {
- const lat=Math.max(-1.5,Math.min(1.5,latitude)),cl=Math.cos(lat);
+ const lat=Math.max(-Math.PI/2+1e-8,Math.min(Math.PI/2-1e-8,latitude)),cl=Math.cos(lat);
  const radial=[cl*Math.cos(longitude),Math.sin(lat),cl*Math.sin(longitude)];
  const east=normalize(cross([0,1,0],radial));
  const north=normalize(cross(radial,east));
  const clearance=altitude;altitude+=surfaceHeight;
  const eye=scale(radial,RADIUS_KM+altitude);
  let forward,up;
- if(mode==='flyover'){
+ if(mode==='flyover'||mode==='walk'){
   const tangent=add(scale(north,Math.cos(heading)),scale(east,Math.sin(heading)));
   forward=normalize(add(scale(tangent,Math.cos(pitch)),scale(radial,-Math.sin(pitch))));
   const right=normalize(cross(forward,radial));up=normalize(cross(right,forward));

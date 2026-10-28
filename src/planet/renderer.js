@@ -1,4 +1,4 @@
-import {RADIUS_KM,PATCH_CELLS,FACE_BASES,faceCube,seedPlates,normalize,add,scale} from './planet-math.js';
+import {RADIUS_KM,PATCH_CELLS,FACE_BASES,faceCube,directionToFace,seedPlates,normalize,add,scale} from './planet-math.js';
 import {planetCamera} from './camera.js';
 import {selectPatches} from './quadtree.js';
 import {buildWorldGrid} from './world-grid.js';
@@ -40,11 +40,13 @@ export class PlanetRenderer {
   d.lost.then(info=>this.onError?.(`WebGPU device lost: ${info.message||info.reason}. Reload to retry.`));
   this.context.configure({device:d,format:this.format,alphaMode:'opaque'});
   const fetchText=async p=>{const r=await fetch(new URL(p,import.meta.url));if(!r.ok)throw new Error(`Failed to load ${p}`);return r.text();};
-  const [common,terrainCore,riverCurve,hydrologySource,worldField,riverDetailSource,regionalSource,terrainSurface,...sources]=await Promise.all(['./common.wgsl','./terrain-core.wgsl','./river-curve.wgsl','./hydrology.wgsl','./world-field.wgsl','./river-detail.wgsl','./regional-hydrology.wgsl','./terrain-surface.wgsl','./generate.wgsl','./normal.wgsl','./bounds.wgsl','./cull.wgsl','./render.wgsl','./lod-error.wgsl'].map(fetchText));
+  const [common,terrainCore,riverCurve,hydrologySource,worldField,riverDetailSource,regionalSource,terrainSurface,walkProbeSource,...sources]=await Promise.all(['./common.wgsl','./terrain-core.wgsl','./river-curve.wgsl','./hydrology.wgsl','./world-field.wgsl','./river-detail.wgsl','./regional-hydrology.wgsl','./terrain-surface.wgsl','./walk-probe.wgsl','./generate.wgsl','./normal.wgsl','./bounds.wgsl','./cull.wgsl','./render.wgsl','./lod-error.wgsl'].map(fetchText));
   const labels=['Terrain generation','Terrain normals','Meshlet bounds','Meshlet culling','Planet rendering','Terrain LOD residual'];
   const modules=await Promise.all(sources.map((s,i)=>shader(d,common+'\n'+(i===0||i===4?terrainCore+'\n'+riverCurve+'\n'+worldField+'\n'+terrainSurface+'\n':'')+s,labels[i])));
   [this.generatePipe,this.normalPipe,this.boundsPipe,this.cullPipe]=await Promise.all(modules.slice(0,4).map(module=>d.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}})));
   this.lodErrorPipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:modules[5],entryPoint:'main'}});
+  const walkProbeModule=await shader(d,common+'\n'+walkProbeSource,'Walking surface probe');
+  this.walkProbePipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:walkProbeModule,entryPoint:'main'}});
   [this.highlandsPipe,this.pointPipe,this.valleyPipe,this.riverPipe]=await Promise.all(['highlands','point','valleyCandidates','riverCandidates'].map(entryPoint=>d.createComputePipelineAsync({layout:'auto',compute:{module:modules[0],entryPoint}})));
   this.renderPipe=await d.createRenderPipelineAsync({layout:'auto',vertex:{module:modules[4],entryPoint:'vs'},fragment:{module:modules[4],entryPoint:'fs',targets:[{format:this.format}]},primitive:{topology:'triangle-list',cullMode:'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'}});
   const make=(label,size,usage)=>d.createBuffer({label,size,usage});
@@ -91,6 +93,8 @@ export class PlanetRenderer {
   this.hydroWork=[[this.flowA,this.flowB],[this.flowB,this.flowA]].map(([input,output])=>d.createBindGroup({layout:workLayout,entries:[{binding:0,resource:{buffer:this.world}},{binding:1,resource:{buffer:this.worldDirections}},{binding:2,resource:{buffer:this.worldNeighbors}},{binding:3,resource:{buffer:input}},{binding:4,resource:{buffer:output}}]}));
   this.sampleBuffer=make('Terrain probe samples',grid.count*16,BUFFER.STORAGE|BUFFER.COPY_SRC);
   this.probeInput=make('Surface probe direction',16,BUFFER.UNIFORM|BUFFER.COPY_DST);
+  this.walkProbeInput=make('Walking surface probe',48,BUFFER.UNIFORM|BUFFER.COPY_DST);
+  this.walkProbeResult=make('Walking surface result',16,BUFFER.STORAGE|BUFFER.COPY_SRC);
   this.visible=make('Visible planet meshlets',CAPACITY*MESHLETS*4,BUFFER.STORAGE);
   this.indirect=make('Planet indirect draw',16,BUFFER.STORAGE|BUFFER.INDIRECT|BUFFER.COPY_DST|BUFFER.COPY_SRC);
   const bind=(pipe,resources)=>d.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((buffer,binding)=>({binding,resource:{buffer}}))});
@@ -110,6 +114,7 @@ export class PlanetRenderer {
   this.highlandsBind=bindEntries(this.highlandsPipe,[[0,this.uniform],[4,this.plates],[5,this.sampleBuffer],...worldEntries]);
   this.valleyBind=d.createBindGroup({layout:this.valleyPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.uniform}},{binding:4,resource:{buffer:this.plates}},{binding:5,resource:{buffer:this.sampleBuffer}}]});
   this.pointBind=bindEntries(this.pointPipe,[[0,this.uniform],[4,this.plates],[5,this.sampleBuffer],[6,this.probeInput],...worldEntries]);
+  this.walkProbeBind=bind(this.walkProbePipe,[this.patchBuffer,this.vertices,this.walkProbeInput,this.walkProbeResult]);
   this.riverBind=bindEntries(this.riverPipe,[[5,this.sampleBuffer],[7,this.world],[8,this.worldDirections]]);
   if(this.timing){this.queries=d.createQuerySet({type:'timestamp',count:4});this.resolve=make('GPU timestamp resolve',32,BUFFER.QUERY_RESOLVE|BUFFER.COPY_SRC);}
   d.queue.writeBuffer(this.plates,0,seedPlates(this.seed));
@@ -252,13 +257,33 @@ export class PlanetRenderer {
   const direction=[data[best],data[best+1],data[best+2]],height=await this.sampleTerrain(direction);
   return generation===this.generation?{direction,height:height[3],flow:data[best+3]}:null;
  }
+ async sampleRenderedSurface(direction){
+  if(!this.lastFrameEye||!this.patches.length)return null;
+  const face=directionToFace(direction),epsilon=1e-12;
+  const patch=this.patches.filter(p=>p.face===face.face&&Math.abs(face.u-p.u)<=p.span/2+epsilon&&Math.abs(face.v-p.v)<=p.span/2+epsilon).sort((a,b)=>b.level-a.level)[0];
+  if(!patch)return null;
+  const cell=(value,center)=>Math.max(0,Math.min(PATCH_CELLS-1,Math.floor((value-center+patch.span/2)/patch.span*PATCH_CELLS)));
+  // Keep the ray origin near the camera even on high mountains: subtracting
+  // large sea-level coordinates in f32 would lose millimeter-scale detail.
+  const reference=Math.hypot(...this.lastFrameEye)-RADIUS_KM;
+  const origin=direction.map((x,i)=>x*(RADIUS_KM+reference)-this.lastFrameEye[i]);
+  const raw=new ArrayBuffer(48),floats=new Float32Array(raw),uints=new Uint32Array(raw);
+  floats.set([...origin,reference,...direction,0]);uints.set([patch.slot,cell(face.u,patch.u),cell(face.v,patch.v),0],8);
+  const d=this.device;d.queue.writeBuffer(this.walkProbeInput,0,raw);
+  const readback=d.createBuffer({size:16,usage:BUFFER.COPY_DST|BUFFER.MAP_READ}),encoder=d.createCommandEncoder({label:'Walkable terrain probe'});
+  const pass=encoder.beginComputePass();pass.setPipeline(this.walkProbePipe);pass.setBindGroup(0,this.walkProbeBind);pass.dispatchWorkgroups(1);pass.end();
+  encoder.copyBufferToBuffer(this.walkProbeResult,0,readback,0,16);d.queue.submit([encoder.finish()]);
+  try{await readback.mapAsync(GPUMapMode.READ);const values=new Float32Array(readback.getMappedRange().slice(0));readback.unmap();return values[1]>.5?values[0]:null;}
+  finally{readback.destroy();}
+ }
  requestSurface(camera,now){
+  if(this.cameraState.mode==='walk')return;
   if(this.cameraState.altitude>=50){this.cameraState.surfaceHeight=0;return;}
   const key=[this.seed,this.relief,this.valleys,this.erosion,this.regional,this.rivers,this.ocean,...camera.radial.map(x=>x.toFixed(7))].join('/');
   if(this.probePending || key===this.lastProbeKey || now-this.lastProbeTime<160)return;
   this.probePending=true;this.lastProbeTime=now;const generation=this.generation;
   this.sampleTerrain(camera.radial).then(data=>{
-   if(generation!==this.generation)return;
+   if(generation!==this.generation||this.cameraState.mode==='walk')return;
    const current=planetCamera(this.cameraState,1,1).radial;
    const difference=Math.hypot(...current.map((x,i)=>x-camera.radial[i]));
    if(difference>1e-6)return;
@@ -286,7 +311,7 @@ export class PlanetRenderer {
   f.set(camera.vp,0);camera.planes.forEach((p,i)=>f.set(p,16+i*4));
   let sun=normalize([.55,.42,.72]);
   if(this.followSun){
-   const low=this.cameraState.mode==='flyover';
+   const low=this.cameraState.mode==='flyover'||this.cameraState.mode==='walk';
    sun=normalize(add(add(scale(camera.radial,low ? .32 : .72),scale(camera.right,low ? .9 : .55)),scale(camera.up,low ? .22 : .25)));
   }
   f.set([...sun,0],36);f.set([RADIUS_KM,this.relief,this.ocean?1:0,this.valleys],40);
@@ -325,7 +350,7 @@ export class PlanetRenderer {
   const pass=encoder.beginRenderPass(descriptor);pass.setPipeline(this.renderPipe);pass.setBindGroup(0,this.renderBind);pass.drawIndirect(this.indirect,0);pass.end();
   const measured=sample?this.patches.map(({key,slot})=>({key,slot})):null;
   let readback;if(sample){readback=d.createBuffer({size:48+CAPACITY*4,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});encoder.copyBufferToBuffer(this.indirect,0,readback,0,16);encoder.copyBufferToBuffer(this.lodErrorBuffer,0,readback,48,CAPACITY*4);if(this.timing){encoder.resolveQuerySet(this.queries,0,4,this.resolve,0);encoder.copyBufferToBuffer(this.resolve,0,readback,16,32);}}
-  d.queue.submit([encoder.finish()]);this.pending=[];this.normalPending=[];this.regionPending=[];this.inFlight++;
+  d.queue.submit([encoder.finish()]);this.lastFrameEye=camera.eye;this.pending=[];this.normalPending=[];this.regionPending=[];this.inFlight++;
   d.queue.onSubmittedWorkDone().then(()=>{this.inFlight--;}).catch(()=>{this.inFlight--;});
   if(readback){const generation=this.generation;readback.mapAsync(GPUMapMode.READ).then(()=>{
    const data=readback.getMappedRange(),visibleMeshlets=new Uint32Array(data,0,4)[1];let gpuComputeMs=null,gpuRenderMs=null;
