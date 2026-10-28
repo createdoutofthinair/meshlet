@@ -43,7 +43,7 @@ fn regionalIncision(s:WorldSample,profile:vec4<f32>,direction:vec3<f32>,high:vec
  return nested*terrainMask*frame.settings.w*frame.hydrology.x;
 }
 fn surfaceBase(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32,includeRegional:bool)->SurfaceData {
- let base=terrain(direction,seed);
+ let shape=terrainShape(direction,seed,frame.settings.w);let base=shape.x;
  // Independent, seeded bands produce real vertex relief from tens of meters
  // down to sub-meter scales. Their low amplitudes preserve the landforms.
  let s=worldSample(direction);let profile=worldProfile(s);
@@ -59,14 +59,16 @@ fn surfaceBase(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,
  var lake=0.0;
  if(frame.hydrology.y>.5 && frame.hydrology.x>0.0 && baseline>.0){
   let basin=worldLake(s);
-  // Keep an uncertain coarse basin from flooding through an entire
-  // high-resolution valley; this is a small, local filled-water estimate.
-  let level=mix(profile.y,min(basin.y,profile.y+.15),clamp(frame.hydrology.x,0.0,1.0));
-  // Use the global field for coverage, so streaming or evicting regional
-  // erosion tiles cannot create or remove a lake at a world location.
-  let baselineFill=min(.15,max(0.0,level-baseline));
-  lake=basin.x*smoothstep(.0,.25,frame.hydrology.x)*smoothstep(.001,.02,baselineFill);
-  ground+=min(.15,max(0.0,level-ground))*lake;
+  let level=basin.y;
+  // Determine the shoreline from broad terrain rather than tiny relief
+  // octaves. This avoids turning one basin into hundreds of speckled pools.
+  // Keep genuinely prominent local peaks as islands.
+  let broadGround=shape.z+(profile.y-profile.x)*frame.hydrology.x;
+  let islands=1.0-smoothstep(.35,.50,max(0.0,baseline-broadGround));
+  lake=basin.x*islands*smoothstep(.0,.25,frame.hydrology.x)*smoothstep(-.01,.035,level-broadGround);
+  // A lake has a surface, rather than a tint following the terrain below it.
+  // Its coverage depends only on the global field, not on regional streaming.
+  ground=mix(ground,level,lake);
  }
  let humidity=clamp(worldRain(s)*.65+.08*log2(1.0+profile.z),0.0,1.0);
  return SurfaceData(ground,lake,humidity);

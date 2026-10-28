@@ -21,7 +21,7 @@ struct PlanetVertex { position: vec4<f32>, normal: vec4<f32>, surface: vec4<f32>
 struct HydroCell {
   profile: vec4<f32>, // original height, current height, runoff, deposited sediment
   route: vec4<u32>, // downhill node, or 0xffffffff for an outlet/sink
-  process: vec4<f32>, // erosion, deposition fraction, rainfall, downhill slope
+  process: vec4<f32>, // erosion (then basin floor), deposition fraction (then river bend), rainfall, slope
 };
 struct HydroStorage {
   cells: array<HydroCell,24578>,
@@ -41,6 +41,11 @@ const WORLD_WIDTH:u32=65u;
 const WORLD_COUNT:u32=24578u;
 const RIVER_SAMPLES:u32=17u;
 const MAX_RIVER_HALF_WIDTH_KM:f32=.28;
+const MAX_RIVER_SWAY_KM:f32=9.6;
+const LAKE_MIN_DEPTH_KM:f32=.05;
+const LAKE_CONNECTION_DEPTH_KM:f32=.001;
+const LAKE_SPILL_TOLERANCE_KM:f32=.001;
+const LAKE_MAX_FILL_KM:f32=.25;
 const REGION_TILES:u32=256u;
 const REGION_CELLS:u32=64u;
 const REGION_HALO:u32=14u;

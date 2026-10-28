@@ -113,6 +113,9 @@ try{
   let close=worldSurfaceWater(p,.01);let middle=worldSurfaceWater(p,3.0);let far=worldSurfaceWater(p,20.0);
   samples[0]=vec4<f32>(baseline.height,regional.height,baseline.lake,regional.lake);
   samples[1]=vec4<f32>(close.x,middle.x,far.x,0.0);
+  let east=normalize(cross(p,vec3<f32>(0.0,1.0,0.0)));let north=normalize(cross(p,east));
+  let a=normalize(p+east*.00004);let b=normalize(p-east*.00004);let c=normalize(p+north*.00004);let d=normalize(p-north*.00004);
+  samples[2]=vec4<f32>(surfaceBase(a,a,zero,zero,frame.counts.z,false).height,surfaceBase(b,b,zero,zero,frame.counts.z,false).height,surfaceBase(c,c,zero,zero,frame.counts.z,false).height,surfaceBase(d,d,zero,zero,frame.counts.z,false).height);
  }
  @compute @workgroup_size(64) fn coastStabilityCheck(@builtin(global_invocation_id) gid:vec3<u32>){
   let n=gid.x;if(n>=6u*16u*16u){return;}let face=n/(16u*16u);let k=n%(16u*16u);
@@ -120,6 +123,10 @@ try{
   let p=normalize(facePoint(face,u,v));let zero=vec3<f32>(0.0);let seed=frame.counts.z;
   let h=naturalHeight(terrain(p,seed),p,zero,zero,seed);
   samples[n]=vec4<f32>(h,select(0.0,1.0,naturalLand(p,seed)),0.0,0.0);
+ }
+ @compute @workgroup_size(1) fn lakeSeparationCheck(){
+  let p=normalize(probe.direction.xyz);let lake=worldLake(worldSample(p));
+  samples[0]=vec4<f32>(lake,0.0,0.0);
  }`});
  const detailPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'detailCheck'}});
  const detailBind=device.createBindGroup({layout:detailPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.uniform}},{binding:4,resource:{buffer:renderer.plates}},{binding:5,resource:{buffer:renderer.sampleBuffer}},{binding:6,resource:{buffer:renderer.probeInput}},{binding:7,resource:{buffer:renderer.world}},{binding:8,resource:{buffer:renderer.worldDirections}},{binding:9,resource:{buffer:renderer.worldNeighbors}},{binding:10,resource:{buffer:renderer.worldFaces}}]});
@@ -155,8 +162,8 @@ try{
  const edgeDirection=[edgeData[bestEdge],edgeData[bestEdge+1],edgeData[bestEdge+2]],edgeIncision=edgeData[bestEdge+3];edgeBuffer.unmap();edgeBuffer.destroy();
  if(edgeIncision<.001)throw new Error(`No erosion-shaped land found on a cube-face edge: ${edgeIncision}`);
  // Give a known land location a synthetic basin and a nonzero regional tile.
- // The same geographic lake must survive changes in pixel footprint and the
- // presence of regional terrain, even though the terrain height itself moves.
+ // The same geographic lake and its filled surface must survive changes in
+ // pixel footprint and the presence of regional terrain.
  const waterDirection=faceDirection(0,-.74609375,-.74609375),waterRegion=regionAt(waterDirection);
  await renderer.sampleTerrain(waterDirection);
  const waterLookupOffset=24578*(48+17*16+4),waterValuesOffset=Math.ceil((waterLookupOffset+REGION_LOOKUPS*4)/16)*16;
@@ -165,7 +172,7 @@ try{
  const waterGrid=buildWorldGrid(64),face=directionToFace(waterDirection);
  const gx=Math.min(63,Math.floor((face.u+1)*32)),gy=Math.min(63,Math.floor((face.v+1)*32)),start=face.face*65*65+gy*65+gx;
  const corners=[waterGrid.faceIndices[start],waterGrid.faceIndices[start+1],waterGrid.faceIndices[start+65],waterGrid.faceIndices[start+66]];
- const cell=new ArrayBuffer(48),cellF=new Float32Array(cell),cellU=new Uint32Array(cell);cellF[0]=8;cellF[1]=8;cellF[2]=4;cellF[10]=.8;
+ const cell=new ArrayBuffer(48),cellF=new Float32Array(cell),cellU=new Uint32Array(cell);cellF[0]=8;cellF[1]=8;cellF[2]=4;cellF[8]=8;cellF[10]=.8;
  cellU[4]=0xffffffff;cellU[5]=new Uint32Array(new Float32Array([8.5]).buffer)[0];cellU[6]=0xffffffff;
  for(const corner of corners)device.queue.writeBuffer(waterWorld,corner*48,cell);
  device.queue.writeBuffer(waterWorld,waterLookupOffset+waterRegion.id*4,new Uint32Array([0]));
@@ -173,10 +180,22 @@ try{
  device.queue.writeBuffer(waterWorld,waterValuesOffset,displaced);
  const waterPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'waterStabilityCheck'}});
  const waterBind=device.createBindGroup({layout:waterPipe.getBindGroupLayout(0),entries:[[0,renderer.uniform],[4,renderer.plates],[5,renderer.sampleBuffer],[6,renderer.probeInput],[7,waterWorld],[8,renderer.worldDirections],[9,renderer.worldNeighbors],[10,renderer.worldFaces]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
- const waterRead=device.createBuffer({size:32,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),waterEncoder=device.createCommandEncoder(),waterPass=waterEncoder.beginComputePass();
- waterPass.setPipeline(waterPipe);waterPass.setBindGroup(0,waterBind);waterPass.dispatchWorkgroups(1);waterPass.end();waterEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,waterRead,0,32);device.queue.submit([waterEncoder.finish()]);
- await waterRead.mapAsync(GPUMapMode.READ);const stableWater=new Float32Array(waterRead.getMappedRange().slice(0));waterRead.unmap();waterRead.destroy();waterWorld.destroy();
- if(!stableWater.every(Number.isFinite)||stableWater[2]<.5||Math.abs(stableWater[0]-stableWater[1])<.001||Math.abs(stableWater[2]-stableWater[3])>1e-6||Math.max(Math.abs(stableWater[4]-stableWater[5]),Math.abs(stableWater[4]-stableWater[6]))>1e-6)throw new Error(`Lake changed with regional streaming or pixel footprint: ${[...stableWater]}`);
+ const waterRead=device.createBuffer({size:48,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),waterEncoder=device.createCommandEncoder(),waterPass=waterEncoder.beginComputePass();
+ waterPass.setPipeline(waterPipe);waterPass.setBindGroup(0,waterBind);waterPass.dispatchWorkgroups(1);waterPass.end();waterEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,waterRead,0,48);device.queue.submit([waterEncoder.finish()]);
+ await waterRead.mapAsync(GPUMapMode.READ);const stableWater=new Float32Array(waterRead.getMappedRange().slice(0));waterRead.unmap();waterRead.destroy();
+ if(!stableWater.every(Number.isFinite)||stableWater[2]<.99||Math.abs(stableWater[0]-8.25)>1e-4||Math.abs(stableWater[0]-stableWater[1])>1e-5||Math.abs(stableWater[2]-stableWater[3])>1e-6||Math.max(Math.abs(stableWater[4]-stableWater[5]),Math.abs(stableWater[4]-stableWater[6]))>1e-6||stableWater.slice(8).some(h=>Math.abs(h-stableWater[0])>1e-4))throw new Error(`Lake changed with position, regional streaming or pixel footprint: ${[...stableWater]}`);
+ // Adjacent depressions with different spill levels must not be blended into
+ // one sloping lake between their cells.
+ cellF[8]=7.5;cellU[5]=new Uint32Array(new Float32Array([9]).buffer)[0];
+ for(const corner of [corners[1],corners[3]])device.queue.writeBuffer(waterWorld,corner*48,cell);
+ const splitDirection=faceDirection(face.face,-1+2*(gx+.5)/64,-1+2*(gy+.5)/64);
+ device.queue.writeBuffer(renderer.probeInput,0,new Float32Array([...splitDirection,0]));
+ const splitPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'lakeSeparationCheck'}});
+ const splitBind=device.createBindGroup({layout:splitPipe.getBindGroupLayout(0),entries:[[5,renderer.sampleBuffer],[6,renderer.probeInput],[7,waterWorld],[10,renderer.worldFaces]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
+ const splitRead=device.createBuffer({size:16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),splitEncoder=device.createCommandEncoder(),splitPass=splitEncoder.beginComputePass();
+ splitPass.setPipeline(splitPipe);splitPass.setBindGroup(0,splitBind);splitPass.dispatchWorkgroups(1);splitPass.end();splitEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,splitRead,0,16);device.queue.submit([splitEncoder.finish()]);
+ await splitRead.mapAsync(GPUMapMode.READ);const splitLake=new Float32Array(splitRead.getMappedRange().slice(0));splitRead.unmap();splitRead.destroy();waterWorld.destroy();
+ if(!splitLake.every(Number.isFinite)||splitLake[0]>1e-5)throw new Error(`Separate basins were blended into one lake: ${[...splitLake]}`);
  const coastCount=6*16*16,coastPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'coastStabilityCheck'}});
  const coastBind=device.createBindGroup({layout:coastPipe.getBindGroupLayout(0),entries:[[0,renderer.uniform],[4,renderer.plates],[5,renderer.sampleBuffer]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
  const coastRead=device.createBuffer({size:coastCount*16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),coastEncoder=device.createCommandEncoder(),coastPass=coastEncoder.beginComputePass();

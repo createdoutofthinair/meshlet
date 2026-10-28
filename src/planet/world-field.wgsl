@@ -58,15 +58,27 @@ fn worldRain(s:WorldSample)->f32{
 // continuous across world-grid and cube-face edges.
 fn worldLake(s:WorldSample)->vec2<f32>{
  let weights=vec4<f32>((1.0-s.blend.x)*(1.0-s.blend.y),s.blend.x*(1.0-s.blend.y),(1.0-s.blend.x)*s.blend.y,s.blend.x*s.blend.y);
- var support=0.0;var weightedLevel=0.0;
+ var anchor=NO_NODE;var strongest=0.0;
  for(var k=0u;k<4u;k++){
   let cell=world.cells[s.corners[k]];let height=cell.profile.y;let spill=bitcast<f32>(cell.route.y);
   if(height>0.0 && spill<19.0){
-   let basin=max(0.0,spill-height);let w=weights[k]*smoothstep(.03,.12,basin);
-   support+=w;weightedLevel+=w*spill;
+   let basin=max(0.0,spill-height);let w=weights[k]*smoothstep(LAKE_MIN_DEPTH_KM,.18,basin);
+   if(w>strongest){strongest=w;anchor=s.corners[k];}
   }
  }
- return vec2<f32>(smoothstep(.55,.85,support),weightedLevel/max(support,.00001));
+ if(anchor==NO_NODE){return vec2<f32>(0.0);}
+ let anchorCell=world.cells[anchor];let anchorSpill=bitcast<f32>(anchorCell.route.y);let anchorFloor=anchorCell.process.x;
+ var support=0.0;var weightedLevel=0.0;
+ for(var k=0u;k<4u;k++){
+  let cell=world.cells[s.corners[k]];let height=cell.profile.y;let spill=bitcast<f32>(cell.route.y);
+  if(height>0.0 && spill<19.0 && abs(spill-anchorSpill)<LAKE_SPILL_TOLERANCE_KM && abs(cell.process.x-anchorFloor)<.0001){
+   let basin=max(0.0,spill-height);let w=weights[k]*smoothstep(LAKE_MIN_DEPTH_KM,.18,basin);
+   // Connected cells share the same propagated basin floor; this keeps a
+   // bounded fill level flat instead of tracking the interpolated ground.
+   support+=w;weightedLevel+=w*min(spill,cell.process.x+LAKE_MAX_FILL_KM);
+  }
+ }
+ return vec2<f32>(smoothstep(.78,.94,support),weightedLevel/max(support,.00001));
 }
 // Search segments attached to the enclosing quad and its neighbors. Shared
 // world-grid nodes let a river keep the same endpoints across all cube faces.
@@ -79,7 +91,7 @@ fn riverSegment(direction:vec3<f32>,start:u32,footprintKm:f32)->RiverInfo{
  let initialT=clamp(dot(direction-a,ab)/max(dot(ab,ab),.00000001),0.0,1.0);
  // The Hermite bend and seeded meander stay inside this conservative bound.
  // Reject distant segments before searching the cached polyline.
- let bound=segmentLength*.60+(6.5+footprintKm*.5)/6371.0;
+ let bound=segmentLength*.60+(MAX_RIVER_SWAY_KM+2.5+footprintKm*.5)/6371.0;
  if(length(direction-(a+ab*initialT))>bound){return RiverInfo(0.0,0.0);}
  let upstream=cell.route.z;let next=world.cells[end].route.x;let endMain=world.cells[end].route.z;
  var previous=a;if(upstream!=NO_NODE){previous=worldDirections[upstream].xyz;}

@@ -103,6 +103,35 @@ fn finish(@builtin(global_invocation_id) gid:vec3<u32>){
  for(var k=0u;k<8u;k++){let j=neighbors[i*8u+k];if(j!=NONE && world.cells[j].route.x==i && flowIn[j]>largest){largest=flowIn[j];main=j;}}
  world.cells[i].profile.z=max(0.0,flowIn[i]);world.cells[i].route.z=main;
  world.cells[i].route.w=bitcast<u32>(noise3(directions[i].xyz*640.0,frame.counts.z+997u));
+ // Sediment propagation has finished; reuse this value for the broad river
+ // bend, so adjacent segments share the same endpoint and remain connected.
+ world.cells[i].process.y=noise3(directions[i].xyz*192.0,frame.counts.z+1009u);
+}
+// Find the minimum bed elevation within each connected, filled depression.
+// Cells sharing a spill level can then use one bounded, coherent water level.
+fn lakeCandidate(cell:HydroCell)->bool{
+ let h=cell.profile.y;let spill=bitcast<f32>(cell.route.y);
+ return h>0.0 && spill<19.0 && spill-h>LAKE_CONNECTION_DEPTH_KM;
+}
+@compute @workgroup_size(64)
+fn initializeLake(@builtin(global_invocation_id) gid:vec3<u32>){
+ let i=gid.x;if(i>=WORLD_COUNT){return;}let cell=world.cells[i];
+ flowOut[i]=select(20.0,cell.profile.y,lakeCandidate(cell));
+}
+@compute @workgroup_size(64)
+fn spreadLakeMinimum(@builtin(global_invocation_id) gid:vec3<u32>){
+ let i=gid.x;if(i>=WORLD_COUNT){return;}let cell=world.cells[i];
+ if(!lakeCandidate(cell)){flowOut[i]=20.0;return;}
+ let spill=bitcast<f32>(cell.route.y);var lowest=flowIn[i];
+ for(var k=0u;k<8u;k++){
+  let j=neighbors[i*8u+k];if(j==NONE){continue;}let other=world.cells[j];
+  if(lakeCandidate(other) && abs(spill-bitcast<f32>(other.route.y))<LAKE_SPILL_TOLERANCE_KM){lowest=min(lowest,flowIn[j]);}
+ }
+ flowOut[i]=lowest;
+}
+@compute @workgroup_size(64)
+fn saveLakeMinimum(@builtin(global_invocation_id) gid:vec3<u32>){
+ let i=gid.x;if(i<WORLD_COUNT){world.cells[i].process.x=flowIn[i];}
 }
 @compute @workgroup_size(64)
 fn markRiverPresence(@builtin(global_invocation_id) gid:vec3<u32>){
@@ -126,7 +155,10 @@ fn buildRiverPaths(@builtin(global_invocation_id) gid:vec3<u32>){
  let t=f32(sample)/f32(RIVER_SAMPLES-1u);let curve=normalize(riverCurve(a,b,m0,m1,t));
  let field=noise3(curve*640.0,frame.counts.z+997u);let side=normalize(cross(a,b));
  let bend=field-mix(bitcast<f32>(cell.route.w),bitcast<f32>(world.cells[end].route.w),t);
- let point=normalize(curve+side*(bend*2.4/6371.0));let flow=mix(cell.profile.z,max(cell.profile.z,world.cells[end].profile.z),t);
+ let broad=noise3(curve*192.0,frame.counts.z+1009u)-mix(cell.process.y,world.cells[end].process.y,t);
+ let flat=1.0-smoothstep(.003,.035,cell.process.w);
+ let taper=smoothstep(0.0,.18,t)*smoothstep(0.0,.18,1.0-t);
+ let point=normalize(curve+side*(taper*(bend*1.4+broad*mix(1.4,3.4,flat))/6371.0));let flow=mix(cell.profile.z,max(cell.profile.z,world.cells[end].profile.z),t);
  // Narrow headwaters and modest changes in width produce channels rather
  // than the uniformly wide bands of the old coarse spline.
  let width=clamp((.035+.045*sqrt(log2(1.0+flow)))*(1.0+.32*field),.025,MAX_RIVER_HALF_WIDTH_KM);

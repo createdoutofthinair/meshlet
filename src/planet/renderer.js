@@ -84,7 +84,7 @@ export class PlanetRenderer {
   const mainLayout=d.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.COMPUTE,buffer:{type:'uniform'}},{binding:4,visibility:GPUShaderStage.COMPUTE,buffer:{type:'read-only-storage'}}]});
   const workLayout=d.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.COMPUTE,buffer:{type:'storage'}},{binding:1,visibility:GPUShaderStage.COMPUTE,buffer:{type:'read-only-storage'}},{binding:2,visibility:GPUShaderStage.COMPUTE,buffer:{type:'read-only-storage'}},{binding:3,visibility:GPUShaderStage.COMPUTE,buffer:{type:'read-only-storage'}},{binding:4,visibility:GPUShaderStage.COMPUTE,buffer:{type:'storage'}}]});
   const hydroLayout=d.createPipelineLayout({bindGroupLayouts:[mainLayout,workLayout]});
-  const names=['initialize','initializeFlood','flood','saveFlood','route','clearFlow','runoff','prepareSediment','sediment','applySediment','finish','markRiverPresence','buildRiverPaths'];
+  const names=['initialize','initializeFlood','flood','saveFlood','route','clearFlow','runoff','prepareSediment','sediment','applySediment','finish','initializeLake','spreadLakeMinimum','saveLakeMinimum','markRiverPresence','buildRiverPaths'];
   const hydroPipelines=await Promise.all(names.map(entryPoint=>d.createComputePipelineAsync({layout:hydroLayout,compute:{module:hydroModule,entryPoint}})));
   this.hydroPipes=Object.fromEntries(names.map((name,i)=>[name,hydroPipelines[i]]));
   this.hydroMain=d.createBindGroup({layout:mainLayout,entries:[{binding:0,resource:{buffer:this.uniform}},{binding:4,resource:{buffer:this.plates}}]});
@@ -124,7 +124,9 @@ export class PlanetRenderer {
   const fill=()=>{run('initializeFlood',1);for(let i=0;i<256;i++)run('flood',i&1);run('saveFlood');};
   run('initialize');
   for(let epoch=0;epoch<3;epoch++){fill();run('route');clear();propagate('runoff');run('prepareSediment');clear();propagate('sediment');run('applySediment');}
-  fill();run('route');clear();propagate('runoff');run('finish');run('markRiverPresence');run('buildRiverPaths',0,this.worldCount*17);pass.end();d.queue.submit([encoder.finish()]);this.hydrologySeed=seed;
+  fill();run('route');clear();propagate('runoff');run('finish');
+  run('initializeLake',1);for(let i=0;i<128;i++)run('spreadLakeMinimum',i&1);run('saveLakeMinimum');
+  run('markRiverPresence');run('buildRiverPaths',0,this.worldCount*17);pass.end();d.queue.submit([encoder.finish()]);this.hydrologySeed=seed;
  }
  resetPatchCache(){
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];

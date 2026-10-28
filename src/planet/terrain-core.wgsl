@@ -63,9 +63,9 @@ fn terrainBase(direction:vec3<f32>,seed:u32)->TerrainBase {
  let mountainZone=clamp(boundary*.82+smoothstep(.08,.35,continent)*.34,0.0,1.0);
  return TerrainBase(d,warp,land,plain,basin,land*mountainZone);
 }
-fn terrainShapeFromBase(base:TerrainBase,seed:u32,valleyStrength:f32)->vec2<f32>{
+fn terrainShapeFromBase(base:TerrainBase,seed:u32,valleyStrength:f32)->vec3<f32>{
  let d=base.direction;let land=base.land;let plain=base.plain;let basin=base.basin;let roughness=base.roughness;
- if(land<=0.0){return vec2<f32>(clamp(basin,-8.0,9.0),0.0);}
+ if(land<=0.0){return vec3<f32>(clamp(basin,-8.0,9.0),0.0,clamp(basin,-8.0,9.0));}
  let warpDetail=base.warp*.45;let valleyEnabled=valleyStrength>0.0 && roughness>.025;
  var ridges=0.0;var ridgeGradient=vec3<f32>(0.0);var amplitude=.56;var freq=14.0;
  for(var i=0u;i<4u;i++){
@@ -93,6 +93,7 @@ fn terrainShapeFromBase(base:TerrainBase,seed:u32,valleyStrength:f32)->vec2<f32>
  let directional=(fold*fold-.25)*.38*roughness;
  let plainsDetail=noise3(d*900.0,seed+311u)*.035+noise3(d*5000.0,seed+313u)*.008;
  let unshaped=mix(basin,plain,land)+mountains+roughness*fine+directional+plainsDetail*land;
+ let broadUnshaped=mix(basin,plain,land)+mountains;
  var valleys=0.0;
  if(valleyEnabled){
   let tangent=ridgeGradient-d*dot(ridgeGradient,d);let magnitude=length(tangent);
@@ -106,7 +107,7 @@ fn terrainShapeFromBase(base:TerrainBase,seed:u32,valleyStrength:f32)->vec2<f32>
   }
  }
  let h=clamp(unshaped-valleys,-8.0,9.0);
- return vec2<f32>(h,max(0.0,clamp(unshaped,-8.0,9.0)-h));
+ return vec3<f32>(h,max(0.0,clamp(unshaped,-8.0,9.0)-h),clamp(broadUnshaped,-8.0,9.0));
 }
-fn terrainShape(direction:vec3<f32>,seed:u32,valleyStrength:f32)->vec2<f32>{return terrainShapeFromBase(terrainBase(direction,seed),seed,valleyStrength);}
+fn terrainShape(direction:vec3<f32>,seed:u32,valleyStrength:f32)->vec3<f32>{return terrainShapeFromBase(terrainBase(direction,seed),seed,valleyStrength);}
 fn terrain(direction:vec3<f32>,seed:u32)->f32{return terrainShape(direction,seed,frame.settings.w).x;}
