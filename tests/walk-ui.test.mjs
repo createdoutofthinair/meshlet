@@ -35,7 +35,7 @@ await import('../src/planet/app.js');await flush();
 test('page lands, walks, responds to terrain changes and returns to orbit',async()=>{
  doc.getElementById('walk').dispatchEvent(new Event('click'));await flush();
  assert.equal(cameraState.mode,'walk');assert.equal(doc.getElementById('altitude-range').disabled,true);
- assert.equal(renderer.budget,512);assert.equal(doc.getElementById('quality').value,'512');
+ assert.equal(renderer.budget,384,'walking keeps the selected patch budget');
  assert.equal(doc.getElementById('walk-controls').hidden,false);
  await tick(100);key('keydown','KeyW');await tick(200);await tick(300);await tick(410);
  assert.ok(cameraState.latitude>0,'W moves the camera north');

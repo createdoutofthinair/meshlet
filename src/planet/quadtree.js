@@ -110,12 +110,21 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
  budget=Math.max(6,Math.floor(budget));maxDepth=Math.min(MAX_DEPTH,Math.max(0,maxDepth));
  camera={...camera,facing:directionToFace(camera.eye),focus:directionToFace(camera.focusDirection||camera.eye)};
  const leaves=new Map();for(let face=0;face<6;face++){const n=makeTile(face,0,0,0);leaves.set(n.key,n);}
+ // A node's projected priority cannot change during one selection: the camera,
+ // previous splits and error estimates are fixed. Cache it instead of repeating
+ // the expensive projection and horizon tests on every balancing iteration.
+ const priorities=new Map();
+ const priority=node=>{
+  let value=priorities.get(node.key);
+  if(value===undefined){value=score(node,camera,pixelSize,errorEstimates)*(previousSplits?.has(node.key)?1+hysteresis:1);priorities.set(node.key,value);}
+  return value;
+ };
  // Rebuild the covering tree on every selection, but give already-split nodes
  // a small priority margin. This reduces churn at refinement thresholds without
  // time-based fading, stale coverage, or exceeding the patch budget.
  for(let iteration=0;iteration<budget;iteration++){
   let best=null,bestScore=pixelSize;
-  for(const node of leaves.values())if(node.level<maxDepth){const s=score(node,camera,pixelSize,errorEstimates)*(previousSplits?.has(node.key)?1+hysteresis:1);if(s>bestScore){best=node;bestScore=s;}}
+  for(const node of leaves.values())if(node.level<maxDepth){const s=priority(node);if(s>bestScore){best=node;bestScore=s;}}
   if(!best || leaves.size+3>budget || !splitBalanced(leaves,best,budget,maxDepth))break;
  }
  const all=[...leaves.values()];

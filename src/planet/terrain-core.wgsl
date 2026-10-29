@@ -48,11 +48,31 @@ fn localNoiseGradient(high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,frequency:f32
  let cell=vec3<i32>(floor(scaled))+vec3<i32>(floor(residual));
  return cellNoiseGradient(cell,fract(residual),seed);
 }
+// The warp offsets are whole lattice cells. Adding 17 or 23 to the floating
+// coordinate before interpolation discards several bits, causing metre-high
+// terraces in otherwise smooth terrain. Shift the integer cell instead.
+fn terrainWarpLattice(direction:vec3<f32>,cellShift:vec3<i32>)->TerrainLattice{
+ let scaled=direction*2.1;
+ let residual=fract(scaled)+fma(direction,vec3<f32>(2.1),-scaled);
+ return TerrainLattice(vec3<i32>(floor(scaled))+vec3<i32>(floor(residual))+cellShift,fract(residual));
+}
+fn terrainWarpNoise(direction:vec3<f32>,cellShift:vec3<i32>,seed:u32)->f32{
+ let lattice=terrainWarpLattice(direction,cellShift);
+ return cellNoise(lattice.cell,lattice.fraction,seed);
+}
+fn terrainWarpGradient(direction:vec3<f32>,cellShift:vec3<i32>,seed:u32)->vec4<f32>{
+ let lattice=terrainWarpLattice(direction,cellShift);
+ return cellNoiseGradient(lattice.cell,lattice.fraction,seed);
+}
+struct TerrainLattice {cell:vec3<i32>,fraction:vec3<f32>};
 struct TerrainBase {direction:vec3<f32>,warp:vec3<f32>,land:f32,plain:f32,basin:f32,roughness:f32};
+fn terrainWarp(direction:vec3<f32>,seed:u32)->vec3<f32>{
+ return vec3<f32>(terrainWarpNoise(direction,vec3<i32>(0),seed+11u),terrainWarpNoise(direction,vec3<i32>(17,3,9),seed+19u),terrainWarpNoise(direction,vec3<i32>(5,23,2),seed+29u));
+}
 fn terrainBase(direction:vec3<f32>,seed:u32)->TerrainBase {
  // Low-frequency warp and continents provide geological structure; ridges
  // only amplify selected land and plate-boundary regions, not the whole globe.
- let warp=vec3<f32>(noise3(direction*2.1,seed+11u),noise3(direction*2.1+vec3<f32>(17.0,3.0,9.0),seed+19u),noise3(direction*2.1+vec3<f32>(5.0,23.0,2.0),seed+29u));
+ let warp=terrainWarp(direction,seed);
  let d=normalize(direction+warp*.19);
  var first=-2.0;var second=-2.0;var biasA=0.0;var biasB=0.0;
  for(var i=0u;i<16u;i++) {
@@ -80,18 +100,50 @@ fn terrainPreciseDot(high:vec3<f32>,low:vec3<f32>,axis:vec3<f32>)->vec2<f32>{
  return vec2<f32>(abc.x,abc.y+ab.y+errors.x+errors.y+errors.z+dot(low,axis));
 }
 struct TerrainPrecision {direction:vec3<f32>,warp:vec3<f32>};
-fn terrainPrecision(base:TerrainBase,direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32)->TerrainPrecision{
+fn terrainPrecision(base:TerrainBase,direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,gx:vec4<f32>,gy:vec4<f32>,gz:vec4<f32>)->TerrainPrecision{
  let error=(high-direction)+(low+delta);let e=error*2.1;
- let warpError=vec3<f32>(dot(noiseGradient(direction*2.1,seed+11u).yzw,e),dot(noiseGradient(direction*2.1+vec3<f32>(17.0,3.0,9.0),seed+19u).yzw,e),dot(noiseGradient(direction*2.1+vec3<f32>(5.0,23.0,2.0),seed+29u).yzw,e));
- let shift=error+warpError*.19;let d=base.direction;
- let directionError=(shift-d*dot(d,shift))/length(direction+base.warp*.19);
+ let warpError=vec3<f32>(dot(gx.yzw,e),dot(gy.yzw,e),dot(gz.yzw,e));
+ let d=base.direction;let magnitude=length(direction+base.warp*.19);
+ // Recover the tangential rounding error from both the warp addition and
+ // normalization. Keeping only the input residual leaves visible steps even
+ // when every later noise lookup uses split coordinates.
+ let rounded=fma(base.warp,vec3<f32>(.19),fma(-d,vec3<f32>(magnitude),direction));
+ let shift=error+warpError*.19;
+ let directionError=(rounded+shift-d*dot(d,shift))/magnitude;
  return TerrainPrecision(directionError,warpError);
 }
-struct TerrainLattice {cell:vec3<i32>,fraction:vec3<f32>};
 fn terrainPreciseLattice(high:vec3<f32>,low:vec3<f32>,frequency:f32,shift:vec3<f32>,shiftLow:vec3<f32>)->TerrainLattice{
  let scaled=high*frequency;
  let residual=fract(scaled)+fma(high,vec3<f32>(frequency),-scaled)+low*frequency+shift+shiftLow;
  return TerrainLattice(vec3<i32>(floor(scaled))+vec3<i32>(floor(residual)),fract(residual));
+}
+// The grid is geographic, not tied to render patches or their LOD. Blending
+// neighboring references near grid boundaries avoids exposing their residual
+// floating-point rounding as a new seam.
+struct TerrainDetailGrid {cell:vec3<f32>,side:vec3<f32>,blend:vec3<f32>};
+fn terrainDetailGrid(high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>)->TerrainDetailGrid{
+ let scaled=high*65536.0;let offset=delta*65536.0;
+ let fraction=fract(scaled)+fract(offset)+low*65536.0;
+ let nearest=floor(fraction+vec3<f32>(.5));let relative=fraction-nearest;
+ return TerrainDetailGrid(floor(scaled)+floor(offset)+nearest,sign(relative),smoothstep(vec3<f32>(.40),vec3<f32>(.50),abs(relative))*.5);
+}
+struct TerrainDetailReference {direction:vec3<f32>,warp:vec3<f32>,directionError:vec3<f32>,warpError:vec3<f32>};
+fn terrainDetailReference(cell:vec3<f32>,base:TerrainBase,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32)->TerrainDetailReference{
+ let anchor=normalize(cell/65536.0);
+ let gx=terrainWarpGradient(anchor,vec3<i32>(0),seed+11u);let gy=terrainWarpGradient(anchor,vec3<i32>(17,3,9),seed+19u);let gz=terrainWarpGradient(anchor,vec3<i32>(5,23,2),seed+29u);
+ let warp=vec3<f32>(gx.x,gy.x,gz.x);var local=base;local.warp=warp;local.direction=normalize(anchor+warp*.19);
+ let offset=terrainPrecision(local,anchor,high,low,delta,gx,gy,gz);
+ return TerrainDetailReference(local.direction,warp,offset.direction,offset.warp);
+}
+fn terrainDetailChannel(high:vec3<f32>,low:vec3<f32>,warp:vec3<f32>,warpLow:vec3<f32>,down:vec3<f32>,frequency:f32,seed:u32)->f32{
+ var n=0.0;
+ for(var i=-2;i<=2;i++){
+  let shift=warp+down*(f32(i)*.8);
+  let lattice=terrainPreciseLattice(high,low,frequency,shift,warpLow);
+  let weight=select(.25,.125,abs(i)==2);
+  n+=cellNoise(lattice.cell,lattice.fraction,seed)*weight;
+ }
+ let channel=1.0-smoothstep(.025,.30,abs(n));return channel*channel;
 }
 fn terrainPreciseFold(base:TerrainBase,detailOffset:TerrainPrecision,seed:u32)->f32{
  let d=base.direction;let a=terrainPreciseDot(d,detailOffset.direction,plates[0].xyz);let b=terrainPreciseDot(d,detailOffset.direction,plates[1].xyz);let c=terrainPreciseDot(d,detailOffset.direction,plates[2].xyz);
@@ -101,11 +153,29 @@ fn terrainPreciseFold(base:TerrainBase,detailOffset:TerrainPrecision,seed:u32)->
  return cellNoise(cell,fract(residual),seed+277u);
 }
 fn terrainShapeFromBaseDetail(base:TerrainBase,seed:u32,valleyStrength:f32,direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,useDetailOffset:bool)->vec3<f32>{
- let d=base.direction;let land=base.land;let plain=base.plain;let basin=base.basin;let roughness=base.roughness;
+ let land=base.land;let plain=base.plain;let basin=base.basin;let roughness=base.roughness;
  if(land<=0.0){return vec3<f32>(clamp(basin,-8.0,9.0),0.0,clamp(basin,-8.0,9.0));}
- let warpDetail=base.warp*.45;let valleyEnabled=valleyStrength>0.0 && roughness>.025;
+ let valleyEnabled=valleyStrength>0.0 && roughness>.025;
  let preciseBands=useDetailOffset && roughness>.001;var detailOffset=TerrainPrecision(vec3<f32>(0.0),vec3<f32>(0.0));
- if(preciseBands){detailOffset=terrainPrecision(base,direction,high,low,delta,seed);}
+ var detailBase=base;
+ if(preciseBands){
+  let grid=terrainDetailGrid(high,low,delta);
+  let reference=terrainDetailReference(grid.cell,base,high,low,delta,seed);
+  detailBase.direction=reference.direction;detailBase.warp=reference.warp;detailOffset=TerrainPrecision(reference.directionError,reference.warpError);
+  if(grid.blend.x>0.0 || grid.blend.y>0.0 || grid.blend.z>0.0){
+   for(var corner=1u;corner<8u;corner++){
+    let x=(corner&1u)!=0u;let y=(corner&2u)!=0u;let z=(corner&4u)!=0u;
+    let weight=select(1.0-grid.blend.x,grid.blend.x,x)*select(1.0-grid.blend.y,grid.blend.y,y)*select(1.0-grid.blend.z,grid.blend.z,z);
+    if(weight>0.0){
+     let offset=vec3<f32>(select(0.0,grid.side.x,x),select(0.0,grid.side.y,y),select(0.0,grid.side.z,z));
+     let neighbor=terrainDetailReference(grid.cell+offset,base,high,low,delta,seed);
+     detailOffset.direction+=((neighbor.direction-reference.direction)+(neighbor.directionError-reference.directionError))*weight;
+     detailOffset.warp+=((neighbor.warp-reference.warp)+(neighbor.warpError-reference.warpError))*weight;
+    }
+   }
+  }
+ }
+ let d=detailBase.direction;let warpDetail=detailBase.warp*.45;
  var ridges=0.0;var ridgeGradient=vec3<f32>(0.0);var amplitude=.56;var freq=14.0;
  for(var i=0u;i<4u;i++){
   let p=d*freq+warpDetail;var n:f32;
@@ -137,14 +207,19 @@ fn terrainShapeFromBaseDetail(base:TerrainBase,seed:u32,valleyStrength:f32,direc
   fineWeight=clamp(r*1.6,.25,1.0);fineFrequency*=3.7;fineAmplitude*=.26;
  }
  var foldNoise:f32;
- if(preciseBands){foldNoise=terrainPreciseFold(base,detailOffset,seed);}
+ if(preciseBands){foldNoise=terrainPreciseFold(detailBase,detailOffset,seed);}
  else{
   let coords=vec3<f32>(dot(d,plates[0].xyz)*2100.0,dot(d,plates[1].xyz)*480.0,dot(d,plates[2].xyz)*125.0);
   foldNoise=noise3(coords+warpDetail,seed+277u);
  }
  let fold=1.0-min(1.0,abs(foldNoise)*2.0);
  let directional=(fold*fold-.25)*.38*roughness;
- let plainsDetail=noise3(d*900.0,seed+311u)*.035+noise3(d*5000.0,seed+313u)*.008;
+ var plainsDetail:f32;
+ if(preciseBands){
+  let a=terrainPreciseLattice(d,detailOffset.direction,900.0,vec3<f32>(0.0),vec3<f32>(0.0));
+  let b=terrainPreciseLattice(d,detailOffset.direction,5000.0,vec3<f32>(0.0),vec3<f32>(0.0));
+  plainsDetail=cellNoise(a.cell,a.fraction,seed+311u)*.035+cellNoise(b.cell,b.fraction,seed+313u)*.008;
+ }else{plainsDetail=noise3(d*900.0,seed+311u)*.035+noise3(d*5000.0,seed+313u)*.008;}
  let unshaped=mix(basin,plain,land)+mountains+roughness*fine+directional+plainsDetail*land;
  let broadUnshaped=mix(basin,plain,land)+mountains;
  var valleys=0.0;
@@ -153,8 +228,14 @@ fn terrainShapeFromBaseDetail(base:TerrainBase,seed:u32,valleyStrength:f32,direc
   let slope=magnitude*roughness*7.5/6371.0;
   if(magnitude>.0001 && slope>.003){
    let down=-tangent/magnitude;
-   let primary=slopeChannel(d*1400.0+warpDetail,down,seed+337u);
-   let secondary=slopeChannel(d*4300.0+warpDetail,down,seed+349u);
+   var primary:f32;var secondary:f32;
+   if(preciseBands){
+    primary=terrainDetailChannel(d,detailOffset.direction,warpDetail,detailOffset.warp*.45,down,1400.0,seed+337u);
+    secondary=terrainDetailChannel(d,detailOffset.direction,warpDetail,detailOffset.warp*.45,down,4300.0,seed+349u);
+   }else{
+    primary=slopeChannel(d*1400.0+warpDetail,down,seed+337u);
+    secondary=slopeChannel(d*4300.0+warpDetail,down,seed+349u);
+   }
    let mask=roughness*smoothstep(.025,.10,roughness)*smoothstep(.003,.09,slope)*smoothstep(.08,.55,ridges)*smoothstep(.05,.6,unshaped);
    valleys=(primary*.22+secondary*(.25+.75*primary)*.075)*mask*valleyStrength;
   }

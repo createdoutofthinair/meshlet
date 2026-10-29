@@ -119,6 +119,14 @@ try{
   let original=terrainShapeFromBase(base,seed,frame.settings.w);
   samples[0]=vec4<f32>(a.x,b.x,original.x,0.0);
  }
+ @compute @workgroup_size(64) fn closeSurfaceCheck(@builtin(global_invocation_id) gid:vec3<u32>){
+  if(gid.x>=401u){return;}
+  let high=normalize(probe.direction.xyz);let tangent=normalize(cross(high,vec3<f32>(0.0,1.0,0.0)));
+  let delta=tangent*((f32(gid.x)-200.0)*(.1/6371000.0));let d=normalize(high+delta);let zero=vec3<f32>(0.0);
+  let base=terrainBase(d,frame.counts.z);
+  let height=terrainShapeFromBaseDetail(base,frame.counts.z,1.0,d,high,zero,delta,true).x;
+  samples[gid.x]=vec4<f32>(height,0.0,0.0,0.0);
+ }
  @compute @workgroup_size(64) fn valleyCheck(@builtin(global_invocation_id) gid:vec3<u32>){
   let n=gid.x;if(n>=512u){return;}
   let p=vec3<f32>(f32(n%32u)*.137+.123,f32(n/32u)*.169+.157,f32((n*37u)%53u)*.117+.183);
@@ -186,6 +194,22 @@ try{
  precisionPass.setPipeline(precisionPipe);precisionPass.setBindGroup(0,precisionBind);precisionPass.dispatchWorkgroups(1);precisionPass.end();precisionEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,precisionRead,0,16);device.queue.submit([precisionEncoder.finish()]);
  await precisionRead.mapAsync(GPUMapMode.READ);const precision=new Float32Array(precisionRead.getMappedRange().slice(0));precisionRead.unmap();precisionRead.destroy();
  if(!precision.every(Number.isFinite)||Math.abs(precision[0]-precision[1])>.00001||Math.abs(precision[0]-precision[2])>.001)throw new Error(`Fine terrain varied by patch anchor: ${[...precision]}`);
+ // Look for metre-high steps between samples ten centimetres apart, including
+ // a geographic precision-grid boundary in the default seeded world.
+ const closePipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'closeSurfaceCheck'}});
+ const closeBind=device.createBindGroup({layout:closePipe.getBindGroupLayout(0),entries:[[0,renderer.uniform],[4,renderer.plates],[5,renderer.sampleBuffer],[6,renderer.probeInput]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
+ for(const direction of [[.6417093742397793,.3894183423086504,.6607287141379383],[-.09365858024318582,-.6556100766034618,-.7492686419454866]]){
+  device.queue.writeBuffer(renderer.probeInput,0,new Float32Array([...direction,0]));
+  const read=device.createBuffer({size:401*16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),encoder=device.createCommandEncoder(),pass=encoder.beginComputePass();
+  pass.setPipeline(closePipe);pass.setBindGroup(0,closeBind);pass.dispatchWorkgroups(7);pass.end();encoder.copyBufferToBuffer(renderer.sampleBuffer,0,read,0,401*16);device.queue.submit([encoder.finish()]);
+  await read.mapAsync(GPUMapMode.READ);const data=new Float32Array(read.getMappedRange());let maxSecond=0,meanSecond=0;
+  for(let i=1;i<400;i++){
+   const h=data[i*4],prev=data[(i-1)*4],next=data[(i+1)*4];if(![h,prev,next].every(Number.isFinite))throw new Error('Close terrain contains a non-finite height');
+   const second=Math.abs(prev-2*h+next)*1000;maxSecond=Math.max(maxSecond,second);meanSecond+=second/399;
+  }
+  read.unmap();read.destroy();
+  if(maxSecond>.15||meanSecond>.01)throw new Error(`Close terrain contains abrupt height steps: ${JSON.stringify({direction,maxSecond,meanSecond})}`);
+ }
  const valleyPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'valleyCheck'}});
  const valleyBind=device.createBindGroup({layout:valleyPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.uniform}},{binding:5,resource:{buffer:renderer.sampleBuffer}}]});
  const valleyBuffer=device.createBuffer({size:512*16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),valleyEncoder=device.createCommandEncoder(),valleyPass=valleyEncoder.beginComputePass();

@@ -87,8 +87,8 @@ fn fs(in:Output)->@location(0) vec4<f32> {
  base=mix(base,snow,snowCover);
  if(!land){base=mix(deep,ocean,smoothstep(-4.0,0.0,h));}
  if(land){base=mix(base,vec3<f32>(.025,.16,.19),water);}
- // Procedural mineral and fine normal variation in world coordinates, with
- // pixel-footprint filtering. Water classification and geometry stay intact.
+ // A single filtered mineral band adds subtle variation without an expensive
+ // extra normal-noise evaluation at every close-up pixel.
  let footprint=max(length(dpdx(in.relative)),length(dpdy(in.relative)));
  if(land && water<.1 && (frame.counts.w&2u)==0u && footprint<.004){
   let visibleHeight=select(in.height,max(in.height,0.0),frame.settings.z>.5);
@@ -96,14 +96,7 @@ fn fs(in:Output)->@location(0) vec4<f32> {
   let detailDelta=(in.detailOffset-in.detailHigh*elevation)/(1.0+elevation);
   let medium=localNoise(in.detailHigh,in.detailLow,detailDelta,1048576.0,frame.counts.z+1709u);
   let mediumFilter=1.0-smoothstep(.001,.004,footprint);
-  var fine=0.0;
-  if(footprint<.0003){
-   let grain=localNoiseGradient(in.detailHigh,in.detailLow,detailDelta,8388608.0,frame.counts.z+1721u);
-   let grainFilter=1.0-smoothstep(.0001,.0003,footprint);fine=grain.x*grainFilter;
-   let tangent=grain.yzw-radial*dot(grain.yzw,radial);
-   n=normalize(n-tangent*(.000015*8388608.0/6371.0)*grainFilter);
-  }
-  let variation=medium*.075*mediumFilter+fine*.035;
+  let variation=medium*.075*mediumFilter;
   base=max(vec3<f32>(0.0),base*(1.0+variation)+vec3<f32>(.012,.005,-.008)*medium*mediumFilter);
  }
  if((frame.counts.w&2u)!=0u){base=levelColor(in.level);}

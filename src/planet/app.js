@@ -13,7 +13,7 @@ function seedNumber(value){
  if(/^\d+$/.test(value)){const n=Number(value);if(Number.isSafeInteger(n))return n>>>0;}
  let h=2166136261;for(const byte of new TextEncoder().encode(value)){h^=byte;h=Math.imul(h,16777619);}return h>>>0;
 }
-let renderer,walker,previous=0,frames=[],cpuFrames=[],ready=false,findBusy=false,walkEpoch=0,walkLanding=false,previousWalkBudget=null;
+let renderer,walker,previous=0,frames=[],cpuFrames=[],ready=false,findBusy=false,walkEpoch=0,walkLanding=false;
 const keys=new Set(),touchWalk=new Set(),orbitHint=el['planet-hint'].innerHTML;
 const inputForWalk=()=>({forward:Number(keys.has('KeyW')||keys.has('ArrowUp')||touchWalk.has('forward'))-Number(keys.has('KeyS')||keys.has('ArrowDown')||touchWalk.has('back')),strafe:Number(keys.has('KeyD')||keys.has('ArrowRight')||touchWalk.has('right'))-Number(keys.has('KeyA')||keys.has('ArrowLeft')||touchWalk.has('left')),fast:keys.has('ShiftLeft')||keys.has('ShiftRight')});
 function loading(show,title='Creating your world',detail='Generating terrain on the GPU'){el.loading.hidden=!show;el['loading-title'].textContent=title;el['loading-detail'].textContent=detail;}
@@ -27,7 +27,6 @@ function setAltitude(km){
 }
 function leaveWalk(){
  walkEpoch++;walkLanding=false;walker?.stop();keys.clear();touchWalk.clear();
- if(renderer&&previousWalkBudget!==null){renderer.budget=previousWalkBudget;el.quality.value=String(previousWalkBudget);previousWalkBudget=null;}
  if(document.pointerLockElement===el.view)document.exitPointerLock();
  el.view.parentElement.classList.remove('walking');el['walk-controls'].hidden=true;el['walk-help'].hidden=true;el.walk.disabled=false;el.walk.textContent='WALK ON SURFACE';
  el['altitude-range'].disabled=false;el['clearance-label'].textContent='CAMERA CLEARANCE';el['clearance-note'].textContent='above sampled surface near ground';el['planet-hint'].innerHTML=orbitHint;
@@ -60,7 +59,6 @@ async function enterWalk(){
    break;
   }
   setCameraDirection(camera,point.direction);camera.surfaceHeight=point.height;camera.altitude=WALK_EYE_HEIGHT_KM;
-  if(renderer.budget<512){previousWalkBudget=renderer.budget;renderer.budget=512;el.quality.value='512';}
   if(camera.mode!=='flyover')camera.pitch=.08;
   camera.pitch=Math.max(-1.35,Math.min(1.35,camera.pitch));camera.mode='walk';renderer.lastProbeKey='';renderer.lastSelection=-Infinity;renderer.needsSelection=true;
   walker.start();el.view.parentElement.classList.add('walking');el['walk-controls'].hidden=false;
@@ -168,7 +166,7 @@ el.regional.addEventListener('change',()=>{if(!renderer)return;renderer.regional
 el.biomes.addEventListener('change',()=>{if(renderer)renderer.biomes=el.biomes.checked;});
 el.ocean.addEventListener('change',()=>{if(!renderer)return;renderer.ocean=el.ocean.checked;rebuildTerrain('Updating the surface');});
 el['sun-follow'].addEventListener('change',()=>{if(renderer)renderer.followSun=el['sun-follow'].checked;});
-el.quality.addEventListener('change',()=>{if(renderer){renderer.budget=Number(el.quality.value);previousWalkBudget=null;renderer.needsSelection=true;}});
+el.quality.addEventListener('change',()=>{if(renderer){renderer.budget=Number(el.quality.value);renderer.needsSelection=true;}});
 el['render-scale'].addEventListener('change',()=>{if(renderer){renderer.resolution=Number(el['render-scale'].value);renderer.needsSelection=true;}});
 for(const [id,key] of [['culling','culling'],['lod-colors','lodColors'],['patch-lines','patchLines'],['wireframe','wireframe']])el[id].addEventListener('change',()=>{if(renderer)renderer[key]=el[id].checked;});
 let drag=null;
