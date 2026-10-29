@@ -126,6 +126,11 @@ fn splashOptics(p:vec3<f32>,incident:vec3<f32>,surfaceNormal:vec3<f32>)->vec3<f3
  var transmitted=sky(transmittedRay);if(transmittedRay.y< -.001){let d=min(30.0,(p.y+2.2)/max(.04,-transmittedRay.y));transmitted=ground((p+transmittedRay*d).xz)*vec3<f32>(.8,.93,.94);}
  return mix(transmitted,reflection,fresnel(abs(dot(n,-incident))));
 }
+// Common illuminated foam tint for the surface and airborne sheet.
+fn foamColor(normal:vec3<f32>)->vec3<f32>{
+ let sun=normalize(vec3<f32>(-.35,.65,.55));let illumination=.86+.14*abs(dot(normal,sun));
+ return vec3<f32>(.76,.85,.82)*illumination;
+}
 struct ObjectHit {distance:f32,color:vec3<f32>,opacity:f32};
 fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
  var distance=cubeHit(origin,direction);var color=vec3<f32>(0.0);var opacity=1.0;
@@ -151,12 +156,11 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
     if(t>stop || (distance>0.0 && t>distance)){break;}let p=origin+direction*t;let field=crownField(p,crownAge,base);
     if(field<.003){
      let e=.008;let normal=normalize(vec3<f32>(crownField(p+vec3<f32>(e,0.0,0.0),crownAge,base)-crownField(p-vec3<f32>(e,0.0,0.0),crownAge,base),crownField(p+vec3<f32>(0.0,e,0.0),crownAge,base)-crownField(p-vec3<f32>(0.0,e,0.0),crownAge,base),crownField(p+vec3<f32>(0.0,0.0,e),crownAge,base)-crownField(p-vec3<f32>(0.0,0.0,e),crownAge,base)));
-     let light=.48+.52*abs(dot(normal,normalize(vec3<f32>(-.35,.65,.55))));
      let fine=noise(p.xz*55.0+vec2<f32>(p.y*12.0,crownAge*3.0))*.55+noise(p.xz*117.0+vec2<f32>(p.y*22.0,8.0))*.45;
      let rim=smoothstep(.16,.32,p.y-base);let edge=pow(1.0-abs(dot(normal,-direction)),3.0);
-     let optics=splashOptics(p,direction,normal);let foam=mix(vec3<f32>(.32,.58,.56),vec3<f32>(.84,.93,.90),smoothstep(.42,.8,fine)*.5+rim*.35)*light;
-     color=mix(optics,foam,.25+rim*.35);
-     opacity=clamp(.16+rim*.30+edge*.28+smoothstep(.7,.9,fine)*.12,.16,.72);distance=t;break;
+     let optics=splashOptics(p,direction,normal);let coverage=clamp(.28+rim*.44+smoothstep(.48,.85,fine)*.20,0.0,.9);
+     color=mix(optics,foamColor(normal),coverage);
+     opacity=clamp(.20+rim*.30+edge*.22+smoothstep(.7,.9,fine)*.12,.20,.76);distance=t;break;
     }
     t+=clamp(field*.65,.012,.12);
    }
@@ -221,7 +225,7 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
   let envelope=exp(-pow((radius-front)/(.18+foamAge*.12),2.0))*(1.0-smoothstep(1.3,3.0,foamAge));
   let uv=relative*8.0+vec2<f32>(foamAge*.8,-foamAge*.5);let broken=noise(uv)*.40+noise(uv*2.4+vec2<f32>(4.2,6.1))*.30+noise(uv*5.3+vec2<f32>(8.1,4.9))*.20+noise(uv*10.0+vec2<f32>(2.1,11.0))*.10;
   let foam=envelope*smoothstep(.32,.67,broken)*.82;
-  color=mix(color,vec3<f32>(.76,.85,.82),foam);
+  color=mix(color,foamColor(normal),foam);
  }
  let horizon=overlayCrown(mix(color,sky(ray),smoothstep(90.0,200.0,t)),crown,t);
  return vec4<f32>(pow(max(horizon,vec3<f32>(0.0)),vec3<f32>(1.0/2.2)),1.0);
