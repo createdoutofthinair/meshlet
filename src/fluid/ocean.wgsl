@@ -21,23 +21,23 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
  if(impact[0].w>0.0 && age>=0.0 && age<4.0){let radius=length(p-impact[0].xy);let front=radius-age*1.4;ring=.045*sin(front*13.0)*exp(-front*front*3.0)*exp(-age*.8);}
  return (a+b+c)*params.settings.y+ring;
 }
-// Six bodies fit in one invocation: pair resolution is deterministic and
+// The bounded test bodies fit in one invocation: pair resolution is deterministic and
 // never reads another invocation's partially updated state.
 @compute @workgroup_size(1) fn updateBalls(){
  let dt=min(.033,params.settings.w);if(dt<=0.0){return;}
- for(var i=0u;i<6u;i++){
-  var ball=balls[i];let water=wave(ball.position.xz,params.settings.x,0.0);let radius=ball.position.w;
+ for(var i=0u;i<30u;i++){
+  var ball=balls[i];if(ball.position.w<=0.0){continue;}let water=wave(ball.position.xz,params.settings.x,0.0);let radius=ball.position.w;
   let submerged=clamp((water-(ball.position.y-radius))/(2.0*radius),0.0,1.0);
   ball.velocity.y=(ball.velocity.y+9.81*(submerged*2.0-1.0)*dt)*exp(-2.5*dt);
   let drift=mix(ball.velocity.xz,vec2<f32>(.18,.06),1.0-exp(-.45*dt));ball.velocity.x=drift.x;ball.velocity.z=drift.y;
   let previousY=ball.position.y;ball.position=vec4<f32>(ball.position.xyz+ball.velocity.xyz*dt,radius);
-  if(i==0u && previousY-radius>water && ball.position.y-radius<=water && ball.velocity.y< -1.2){impact[0]=vec4<f32>(ball.position.x,ball.position.z,params.settings.x,1.0);}
+  if(previousY-radius>water && ball.position.y-radius<=water && ball.velocity.y< -1.2){impact[0]=vec4<f32>(ball.position.x,ball.position.z,params.settings.x,1.0);}
   balls[i]=ball;
  }
  // Several sequential projections handle chains of simultaneous contacts.
  for(var iteration=0u;iteration<4u;iteration++){
-  for(var i=0u;i<6u;i++){
-   var ball=balls[i];let r=ball.position.w;let lo=vec3<f32>(-.65,-.95,-.65);let hi=vec3<f32>(.65,.75,.65);
+  for(var i=0u;i<30u;i++){
+   var ball=balls[i];let r=ball.position.w;if(r<=0.0){continue;}let lo=vec3<f32>(-.65,-.95,-.65);let hi=vec3<f32>(.65,.75,.65);
    let closest=clamp(ball.position.xyz,lo,hi);let delta=ball.position.xyz-closest;let d=length(delta);
    if(d<r){
     var normal=vec3<f32>(1.0,0.0,0.0);var penetration=r-d;
@@ -52,8 +52,8 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
     let vn=dot(ball.velocity.xyz,normal);if(vn<0.0){ball.velocity=vec4<f32>(ball.velocity.xyz-normal*vn*1.15,0.0);}
    }
    balls[i]=ball;
-   for(var j=i+1u;j<6u;j++){
-    var other=balls[j];ball=balls[i];let deltaPair=other.position.xyz-ball.position.xyz;let dPair=length(deltaPair);let overlap=ball.position.w+other.position.w-dPair;
+   for(var j=i+1u;j<30u;j++){
+    var other=balls[j];if(other.position.w<=0.0){continue;}ball=balls[i];let deltaPair=other.position.xyz-ball.position.xyz;let dPair=length(deltaPair);let overlap=ball.position.w+other.position.w-dPair;
     if(overlap>0.0){
      var normal=vec3<f32>(1.0,0.0,0.0);if(dPair>.00001){normal=deltaPair/dPair;}
      ball.position=vec4<f32>(ball.position.xyz-normal*overlap*.5,ball.position.w);other.position=vec4<f32>(other.position.xyz+normal*overlap*.5,other.position.w);
@@ -64,8 +64,8 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
    }
   }
  }
- for(var i=0u;i<6u;i++){
-  var ball=balls[i];if(abs(ball.position.x)>3.0){ball.position.x=clamp(ball.position.x,-3.0,3.0);ball.velocity.x*= -.7;}
+ for(var i=0u;i<30u;i++){
+  var ball=balls[i];if(ball.position.w<=0.0){continue;}if(abs(ball.position.x)>3.0){ball.position.x=clamp(ball.position.x,-3.0,3.0);ball.velocity.x*= -.7;}
   if(abs(ball.position.z)>2.5){ball.position.z=clamp(ball.position.z,-2.5,2.5);ball.velocity.z*= -.7;}balls[i]=ball;
  }
 }
@@ -135,14 +135,14 @@ struct ObjectHit {distance:f32,color:vec3<f32>,opacity:f32};
 fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
  var distance=cubeHit(origin,direction);var color=vec3<f32>(0.0);var opacity=1.0;
  if(distance>0.0){color=cubeColor(origin+direction*distance);}
- for(var i=0u;i<6u;i++){
-  let ball=balls[i];let delta=origin-ball.position.xyz;let b=dot(delta,direction);let discriminant=b*b-dot(delta,delta)+ball.position.w*ball.position.w;
+ for(var i=0u;i<30u;i++){
+  let ball=balls[i];if(ball.position.w<=0.0){continue;}let delta=origin-ball.position.xyz;let b=dot(delta,direction);let discriminant=b*b-dot(delta,delta)+ball.position.w*ball.position.w;
   if(discriminant>0.0){let root=sqrt(discriminant);var hit= -b-root;if(hit<=.001){hit= -b+root;}
    if(hit>.001 && (distance<0.0 || hit<distance)){
     distance=hit;let normal=normalize(origin+direction*hit-ball.position.xyz);let sun=normalize(vec3<f32>(-.35,.65,.55));
     let palette=array<vec3<f32>,6>(vec3<f32>(.85,.24,.08),vec3<f32>(.95,.71,.13),vec3<f32>(.18,.53,.70),vec3<f32>(.78,.28,.18),vec3<f32>(.80,.76,.50),vec3<f32>(.24,.56,.42));
     let diffuse=.28+.72*max(dot(normal,sun),0.0);let spec=pow(max(dot(reflect(-sun,normal),-direction),0.0),50.0);
-    color=palette[i]*diffuse+vec3<f32>(.55)*spec;
+    color=palette[i%6u]*diffuse+vec3<f32>(.55)*spec;
    }
   }
  }
