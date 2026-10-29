@@ -4,6 +4,7 @@ struct Params {eye:vec4<f32>, settings:vec4<f32>, viewport:vec4<f32>};
 @group(0) @binding(0) var<uniform> params:Params;
 struct FloatingBall {position:vec4<f32>,velocity:vec4<f32>};
 @group(0) @binding(1) var<storage,read_write> balls:array<FloatingBall>;
+@group(0) @binding(2) var<storage,read_write> impact:array<vec4<f32>>;
 struct Screen {@builtin(position) pos:vec4<f32>};
 @vertex fn vertex(@builtin(vertex_index) id:u32)->Screen{
  let p=array<vec2<f32>,3>(vec2<f32>(-1.0,-1.0),vec2<f32>(3.0,-1.0),vec2<f32>(-1.0,3.0));return Screen(vec4<f32>(p[id],0.0,1.0));
@@ -15,7 +16,10 @@ fn noise(p:vec2<f32>)->f32{let i=floor(p);let f=fract(p);let w=f*f*(3.0-2.0*f);r
 fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
  let large=1.0-smoothstep(25.0,120.0,dist);let mid=1.0-smoothstep(10.0,48.0,dist);let fine=1.0-smoothstep(4.0,18.0,dist);
  let a=sin(p.x*.57+p.y*.32+time*.72)*.12*large;let b=sin(p.x*1.3-p.y*.8-time*1.05)*.055*mid;
- let c=sin(p.x*2.6+p.y*2.05+time*1.5)*.018*fine;return (a+b+c)*params.settings.y;
+ let c=sin(p.x*2.6+p.y*2.05+time*1.5)*.018*fine;
+ let age=time-impact[0].z;var ring=0.0;
+ if(impact[0].w>0.0 && age>=0.0 && age<4.0){let radius=length(p-impact[0].xy);let front=radius-age*1.4;ring=.045*sin(front*13.0)*exp(-front*front*3.0)*exp(-age*.8);}
+ return (a+b+c)*params.settings.y+ring;
 }
 // Six bodies fit in one invocation: pair resolution is deterministic and
 // never reads another invocation's partially updated state.
@@ -26,7 +30,9 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
   let submerged=clamp((water-(ball.position.y-radius))/(2.0*radius),0.0,1.0);
   ball.velocity.y=(ball.velocity.y+9.81*(submerged*2.0-1.0)*dt)*exp(-2.5*dt);
   let drift=mix(ball.velocity.xz,vec2<f32>(.18,.06),1.0-exp(-.45*dt));ball.velocity.x=drift.x;ball.velocity.z=drift.y;
-  ball.position=vec4<f32>(ball.position.xyz+ball.velocity.xyz*dt,radius);balls[i]=ball;
+  let previousY=ball.position.y;ball.position=vec4<f32>(ball.position.xyz+ball.velocity.xyz*dt,radius);
+  if(i==0u && previousY-radius>water && ball.position.y-radius<=water && ball.velocity.y< -1.2){impact[0]=vec4<f32>(ball.position.x,ball.position.z,params.settings.x,1.0);}
+  balls[i]=ball;
  }
  // Several sequential projections handle chains of simultaneous contacts.
  for(var iteration=0u;iteration<4u;iteration++){
@@ -117,6 +123,16 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>)->ObjectHit{
     let diffuse=.28+.72*max(dot(normal,sun),0.0);let spec=pow(max(dot(reflect(-sun,normal),-direction),0.0),50.0);
     color=palette[i]*diffuse+vec3<f32>(.55)*spec;
    }
+  }
+ }
+ // Small ballistic droplets, emitted at the detected surface crossing.
+ let age=params.settings.x-impact[0].z;
+ if(impact[0].w>0.0 && age>=0.0 && age<1.15){
+  for(var k=0u;k<18u;k++){
+   let angle=f32(k)*2.399963;let speed=1.2+.12*f32(k%5u);let rise=2.6+.18*f32(k%4u);
+   let center=vec3<f32>(impact[0].x+cos(angle)*speed*age, wave(impact[0].xy,impact[0].z,0.0)+rise*age-4.905*age*age,impact[0].y+sin(angle)*speed*age);
+   if(center.y<0.0){continue;}let delta=origin-center;let b=dot(delta,direction);let disc=b*b-dot(delta,delta)+.0025;
+   if(disc>0.0){let hit= -b-sqrt(disc);if(hit>.001 && (distance<0.0||hit<distance)){distance=hit;color=vec3<f32>(.65,.82,.83);}}
   }
  }
  return ObjectHit(distance,color);
