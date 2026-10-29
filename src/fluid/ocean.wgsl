@@ -125,6 +125,23 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>)->ObjectHit{
    }
   }
  }
+ // A short-lived ring of overlapping, irregular foam lobes gives the impact
+ // a visible three-dimensional crown rather than only isolated droplets.
+ let crownAge=params.settings.x-impact[0].z;
+ if(impact[0].w>0.0 && crownAge>=0.0 && crownAge<.9){
+  let growth=smoothstep(0.0,.15,crownAge);let fade=1.0-smoothstep(.42,.9,crownAge);
+  let ringRadius=.16+crownAge*.52;let base=wave(impact[0].xy,impact[0].z,0.0);
+  for(var k=0u;k<16u;k++){
+   let angle=f32(k)*6.2831853/16.0;let variation=.8+.4*hash(vec2<f32>(f32(k),9.3));
+   let center=vec3<f32>(impact[0].x+cos(angle)*ringRadius,base+.06+growth*fade*(.10+.14*variation),impact[0].y+sin(angle)*ringRadius);
+   let radius=(.10+.035*variation)*growth*fade;let delta=origin-center;let b=dot(delta,direction);let disc=b*b-dot(delta,delta)+radius*radius;
+   if(disc>0.0){let hit= -b-sqrt(disc);if(hit>.001 && (distance<0.0||hit<distance)){
+    let normal=normalize(origin+direction*hit-center);let light=max(dot(normal,normalize(vec3<f32>(-.35,.65,.55))),0.0);
+    let texture=noise((origin+direction*hit).xz*24.0+vec2<f32>(f32(k),crownAge*2.0));
+    color=mix(vec3<f32>(.48,.61,.59),vec3<f32>(.88,.94,.91),texture)*(.65+.35*light);distance=hit;
+   }}
+  }
+ }
  // Small ballistic droplets, emitted at the detected surface crossing.
  let age=params.settings.x-impact[0].z;
  if(impact[0].w>0.0 && age>=0.0 && age<1.15){
@@ -167,7 +184,16 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
  let denom=max(.0001,nh*nh*(alpha*alpha-1.0)+1.0);let distribution=alpha*alpha/(3.14159265*denom*denom);
  let spec=min(1.2,distribution*.018)*max(dot(normal,sun),0.0);
  let scatter=pow(max(dot(ray,sun),0.0),5.0)*.07*(1.0-cosView);let f=fresnel(cosView);
- let color=mix(transmitted,reflection,f)+vec3<f32>(1.0,.91,.72)*spec+vec3<f32>(.05,.3,.24)*scatter;
+ var color=mix(transmitted,reflection,f)+vec3<f32>(1.0,.91,.72)*spec+vec3<f32>(.05,.3,.24)*scatter;
+ // Advected multiscale breakup creates foam around the expanding impact.
+ let foamAge=time-impact[0].z;
+ if(impact[0].w>0.0 && foamAge>=0.0 && foamAge<3.0){
+  let relative=point.xz-impact[0].xy;let radius=length(relative);let front=.16+foamAge*.65;
+  let envelope=exp(-pow((radius-front)/(.18+foamAge*.12),2.0))*(1.0-smoothstep(1.3,3.0,foamAge));
+  let uv=relative*8.0+vec2<f32>(foamAge*.8,-foamAge*.5);let broken=noise(uv)*.65+noise(uv*2.4+vec2<f32>(4.2,6.1))*.35;
+  let foam=envelope*smoothstep(.32,.67,broken)*.82;
+  color=mix(color,vec3<f32>(.76,.85,.82),foam);
+ }
  let horizon=mix(color,sky(ray),smoothstep(90.0,200.0,t));
  return vec4<f32>(pow(max(horizon,vec3<f32>(0.0)),vec3<f32>(1.0/2.2)),1.0);
 }
