@@ -118,9 +118,9 @@ fn crownField(p:vec3<f32>,age:f32,base:f32)->f32{
  let radius=.16+age*.52+max(0.0,local.y)*.55;
  return max(abs(radial-radius)-.028,max(-local.y,local.y-height));
 }
-struct ObjectHit {distance:f32,color:vec3<f32>};
-fn objectHit(origin:vec3<f32>,direction:vec3<f32>)->ObjectHit{
- var distance=cubeHit(origin,direction);var color=vec3<f32>(0.0);
+struct ObjectHit {distance:f32,color:vec3<f32>,opacity:f32};
+fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
+ var distance=cubeHit(origin,direction);var color=vec3<f32>(0.0);var opacity=1.0;
  if(distance>0.0){color=cubeColor(origin+direction*distance);}
  for(var i=0u;i<6u;i++){
   let ball=balls[i];let delta=origin-ball.position.xyz;let b=dot(delta,direction);let discriminant=b*b-dot(delta,delta)+ball.position.w*ball.position.w;
@@ -135,7 +135,7 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>)->ObjectHit{
  }
  // Trace a continuous curved sheet with an irregular, moving rim.
  let crownAge=params.settings.x-impact[0].z;
- if(impact[0].w>0.0 && crownAge>=0.0 && crownAge<.9){
+ if(includeCrown && impact[0].w>0.0 && crownAge>=0.0 && crownAge<.9){
   let base=wave(impact[0].xy,impact[0].z,0.0);let center=vec3<f32>(impact[0].x,base+.16,impact[0].y);
   let delta=origin-center;let projection=dot(delta,direction);let bound=projection*projection-dot(delta,delta)+1.44;
   if(bound>0.0){var t=max(.001,-projection-sqrt(bound));let stop= -projection+sqrt(bound);
@@ -145,7 +145,9 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>)->ObjectHit{
      let e=.008;let normal=normalize(vec3<f32>(crownField(p+vec3<f32>(e,0.0,0.0),crownAge,base)-crownField(p-vec3<f32>(e,0.0,0.0),crownAge,base),crownField(p+vec3<f32>(0.0,e,0.0),crownAge,base)-crownField(p-vec3<f32>(0.0,e,0.0),crownAge,base),crownField(p+vec3<f32>(0.0,0.0,e),crownAge,base)-crownField(p-vec3<f32>(0.0,0.0,e),crownAge,base)));
      let light=.48+.52*abs(dot(normal,normalize(vec3<f32>(-.35,.65,.55))));
      let fine=noise(p.xz*55.0+vec2<f32>(p.y*12.0,crownAge*3.0))*.55+noise(p.xz*117.0+vec2<f32>(p.y*22.0,8.0))*.45;
-     color=mix(vec3<f32>(.32,.52,.50),vec3<f32>(.87,.94,.91),smoothstep(.28,.75,fine))*light;distance=t;break;
+     let rim=smoothstep(.16,.32,p.y-base);let edge=pow(1.0-abs(dot(normal,-direction)),3.0);
+     color=mix(vec3<f32>(.32,.58,.56),vec3<f32>(.84,.93,.90),smoothstep(.42,.8,fine)*.5+rim*.35)*light;
+     opacity=clamp(.16+rim*.30+edge*.28+smoothstep(.7,.9,fine)*.12,.16,.72);distance=t;break;
     }
     t+=clamp(field*.65,.012,.12);
    }
@@ -158,31 +160,34 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>)->ObjectHit{
    let angle=f32(k)*2.399963;let speed=1.2+.12*f32(k%5u);let rise=2.6+.18*f32(k%4u);
    let center=vec3<f32>(impact[0].x+cos(angle)*speed*age, wave(impact[0].xy,impact[0].z,0.0)+rise*age-4.905*age*age,impact[0].y+sin(angle)*speed*age);
    if(center.y<0.0){continue;}let delta=origin-center;let b=dot(delta,direction);let disc=b*b-dot(delta,delta)+.0003;
-   if(disc>0.0){let hit= -b-sqrt(disc);if(hit>.001 && (distance<0.0||hit<distance)){distance=hit;color=vec3<f32>(.65,.82,.83);}}
+   if(disc>0.0){let hit= -b-sqrt(disc);if(hit>.001 && (distance<0.0||hit<distance)){distance=hit;color=vec3<f32>(.65,.82,.83);opacity=1.0;}}
   }
  }
- return ObjectHit(distance,color);
+ return ObjectHit(distance,color,opacity);
+}
+fn overlayCrown(base:vec3<f32>,hit:ObjectHit,limit:f32)->vec3<f32>{
+ if(hit.distance>0.0 && hit.distance<limit && hit.opacity<1.0){return mix(base,hit.color,hit.opacity);}return base;
 }
 fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(0.0)),vec3<f32>(1.0/2.2)),1.0);}
 @fragment fn fragment(input:Screen)->@location(0) vec4<f32>{
  let size=params.viewport.xy;let xy=vec2<f32>(input.pos.x/size.x*2.0-1.0,1.0-input.pos.y/size.y*2.0);
  let eye=params.eye.xyz;let forward=normalize(vec3<f32>(0.0,0.0,0.0)-eye);let right=normalize(cross(forward,vec3<f32>(0.0,1.0,0.0)));let up=normalize(cross(right,forward));
  let ray=normalize(forward+right*xy.x*(size.x/size.y)*.57735027+up*xy.y*.57735027);let time=params.settings.x;
- let direct=objectHit(eye,ray);
- if(ray.y>=-.001){if(direct.distance>0.0){return display(direct.color);}return display(sky(ray));}
+ let direct=objectHit(eye,ray,false);let crown=objectHit(eye,ray,true);
+ if(ray.y>=-.001){if(direct.distance>0.0){return display(overlayCrown(direct.color,crown,direct.distance));}return display(overlayCrown(sky(ray),crown,10000.0));}
  var t= -eye.y/ray.y;for(var i=0u;i<5u;i++){let p=eye+ray*t;t=(wave(p.xz,time,t)-eye.y)/ray.y;}
- if(direct.distance>0.0 && (t<=0.0 || direct.distance<t)){return display(direct.color);}
- if(t<=0.0 || t>200.0){return display(sky(ray));}
+ if(direct.distance>0.0 && (t<=0.0 || direct.distance<t)){return display(overlayCrown(direct.color,crown,direct.distance));}
+ if(t<=0.0 || t>200.0){return display(overlayCrown(sky(ray),crown,10000.0));}
  let point=eye+ray*t;let normal=waveNormal(point.xz,time,t);
  let cosView=max(dot(-ray,normal),0.0);let reflectedRay=reflect(ray,normal);var reflection=sky(reflectedRay);
- let reflectedHit=objectHit(point+normal*.001,reflectedRay);if(reflectedHit.distance>0.0){reflection=reflectedHit.color;}
+ let reflectedHit=objectHit(point+normal*.001,reflectedRay,true);if(reflectedHit.distance>0.0){reflection=mix(reflection,reflectedHit.color,reflectedHit.opacity);}
  let refracted=refract(ray,normal,1.0/1.333);
  let floorDepth=2.2;let travel=min(50.0,(floorDepth+point.y)/max(.05,-refracted.y));let bottom=point+refracted*travel;
  let clarity=max(.2,params.settings.z);
  let causticWave=sin(bottom.x*3.3+time*1.2+sin(bottom.z*2.4-time))*sin(bottom.z*3.0-time*.9+sin(bottom.x*2.0+time));
  let caustics=pow(max(0.0,causticWave),5.0)*.22*exp(-floorDepth*.35);
  var seabed=ground(bottom.xz)*(1.0+caustics);
- let submergedHit=objectHit(point-normal*.001,refracted);if(submergedHit.distance>0.0 && submergedHit.distance<travel){seabed=submergedHit.color;}
+ let submergedHit=objectHit(point-normal*.001,refracted,false);if(submergedHit.distance>0.0 && submergedHit.distance<travel){seabed=submergedHit.color;}
  let water=vec3<f32>(.018,.17,.16);
  let path=select(travel,submergedHit.distance,submergedHit.distance>0.0 && submergedHit.distance<travel);
  let attenuation=exp(-vec3<f32>(.17,.095,.065)*path/clarity);
@@ -203,6 +208,6 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
   let foam=envelope*smoothstep(.32,.67,broken)*.82;
   color=mix(color,vec3<f32>(.76,.85,.82),foam);
  }
- let horizon=mix(color,sky(ray),smoothstep(90.0,200.0,t));
+ let horizon=overlayCrown(mix(color,sky(ray),smoothstep(90.0,200.0,t)),crown,t);
  return vec4<f32>(pow(max(horizon,vec3<f32>(0.0)),vec3<f32>(1.0/2.2)),1.0);
 }
