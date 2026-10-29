@@ -11,7 +11,7 @@ test('Pages revisions keep each script and shader together across deployments',a
  const dir=await mkdtemp(join(tmpdir(),'meshlet-releases-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  const root=join(dir,'source'),output=join(dir,'site'),river=join(root,'src','river');await mkdir(river,{recursive:true});
  const page='<link href="./src/river/style.css"><script type="module" src="./src/river/app.js"></script>';
- for(const name of ['index.html','planet.html','river.html'])await writeFile(join(root,name),page);
+ for(const name of ['index.html','planet.html','river.html','fluid.html'])await writeFile(join(root,name),page);
  await writeFile(join(river,'app.js'),"import './renderer.js';");await writeFile(join(river,'renderer.js'),"const entry='makeTerrain';");
  await writeFile(join(river,'world.js'),"fetch(new URL('./geometry.wgsl',import.meta.url));");await writeFile(join(river,'geometry.wgsl'),'fn makeTerrain() {}');
  const a='a'.repeat(40),b='b'.repeat(40);await preparePages({root,output,version:a});
