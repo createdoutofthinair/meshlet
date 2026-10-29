@@ -73,18 +73,25 @@ fn riverRockWaves(p:vec2<f32>,distance:f32)->vec4<f32>{
 }
 fn waterfallPosition(q:f32,t:f32,time:f32)->vec3<f32>{
  let y0=riverLevel(-8.0);let y1=riverLevel(10.0);let middle=sin(t*3.14159265);
- let along=mix(-8.0,10.0,t)+middle*(2.0+.50*sin(q*11.0+t*12.0+time*2.0));
- let x=riverCenter(along)+q*riverHalfWidth();let y=mix(y0,y1,t);
+ let across=q*riverHalfWidth();let fingers=sin(across*.12+time*.65)+.45*sin(across*.27-time*.38+t*5.0);
+ let along=mix(-8.0,10.0,t)+middle*(2.2+1.2*fingers)+t*(1.0-t)*sin(across*.42+t*7.0-time*1.1)*1.1;
+ let x=riverCenter(along)+across;let y=mix(y0,y1,t);
  return vec3<f32>(x,y,along);
 }
 // A separately tessellated falling sheet joins the upper and lower water meshes.
-@vertex fn fallVertex(@builtin(vertex_index) vertex:u32)->VertexOut{
+fn waterfallVertex(vertex:u32,layer:f32)->VertexOut{
  let columns=80u;let rows=48u;let cell=vertex/6u;let corner=vertex%6u;
  let corners=array<vec2<u32>,6>(vec2<u32>(0u,0u),vec2<u32>(0u,1u),vec2<u32>(1u,0u),vec2<u32>(1u,0u),vec2<u32>(0u,1u),vec2<u32>(1u,1u));
  let grid=vec2<u32>(cell%columns,cell/columns)+corners[corner];let q=(f32(grid.x)/f32(columns)*2.0-1.0)*.99;let t=f32(grid.y)/f32(rows);
- let position=waterfallPosition(q,t,motion[0].y);let normal=normalize(vec3<f32>(0.0,18.0,riverLevel(-8.0)-riverLevel(10.0)));
+ var position=waterfallPosition(q,t,motion[0].y);
+ position.z+=layer*sin(t*3.14159265)*(1.8+1.2*riverNoise(vec2<f32>(q*8.0,t*4.0-motion[0].y*.7)));
+ let tangentQ=waterfallPosition(q+.002,t,motion[0].y)-waterfallPosition(q-.002,t,motion[0].y);
+ let tangentT=waterfallPosition(q,min(1.0,t+.002),motion[0].y)-waterfallPosition(q,max(0.0,t-.002),motion[0].y);
+ let normal=normalize(cross(tangentQ,tangentT));
  var out:VertexOut;out.position=riverFrame.viewProjection*vec4<f32>(position,1.0);out.world=position;out.normal=normal;out.material=vec4<f32>(q,t,0.0,0.0);return out;
 }
+@vertex fn fallVertex(@builtin(vertex_index) vertex:u32)->VertexOut{return waterfallVertex(vertex,0.0);}
+@vertex fn fallVeilVertex(@builtin(vertex_index) vertex:u32)->VertexOut{return waterfallVertex(vertex,1.0);}
 struct SprayState {position:vec3<f32>,radius:f32,opacity:f32};
 // Ballistic secondary droplets: stable, stateless trajectories evaluated on the GPU.
 fn waterfallSpray(id:u32,time:f32)->SprayState{
@@ -255,8 +262,17 @@ fn riverBubblePattern(p:vec2<f32>,time:f32)->f32{
  var color=mix(vec3<f32>(.14,.27,.27),vec3<f32>(.76,.81,.79),smoothstep(.27,.76,volume))*light;
  color=mix(color,vec3<f32>(.74,.81,.80),grazing*.35);
  let footprint=max(length(dpdx(input.world)),length(dpdy(input.world)));let bubbles=1.0-smoothstep(.25,1.8,footprint);
- if(bubbles>.01){let cells=1.0-riverBubblePattern(vec2<f32>(across*.9,travel*3.5),motion[0].y);color+=vec3<f32>(.12)*cells*bubbles*riverFrame.optics.z;}
+ if(bubbles>.01){let cells=1.0-riverBubblePattern(vec2<f32>(across*.9,travel*3.5),motion[0].y);color+=vec3<f32>(.025)*cells*bubbles*riverFrame.optics.z;}
  return vec4<f32>(displayColor(color),1.0);
+}
+// A translucent, displaced veil breaks up the silhouette around the main fall.
+@fragment fn fallVeilFragment(input:VertexOut)->@location(0) vec4<f32>{
+ let q=input.material.x;let t=input.material.y;let time=motion[0].y;let across=q*riverHalfWidth();
+ let flow=vec2<f32>(across*.14,input.world.y*.13+time*1.6);
+ let streak=riverFbm(flow+vec2<f32>(riverNoise(flow*.45)*1.5,0.0));
+ let edge=smoothstep(.0,.16,t)*(1.0-smoothstep(.88,1.0,t));
+ let alpha=edge*smoothstep(.46,.72,streak)*.28;
+ return vec4<f32>(.77,.83,.81,alpha);
 }
 fn riverAdvectedBubbles(across:f32,z:f32,distance:f32,speed:f32)->f32{
  let offset=.17*sin(across*.018+z*.006);let a=fract(distance/32.0+offset);let b=fract(a+.5);let weight=1.0-abs(a*2.0-1.0);
