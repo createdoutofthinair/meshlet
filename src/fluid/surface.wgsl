@@ -6,14 +6,14 @@ struct Screen{@builtin(position) pos:vec4<f32>,@location(0) uv:vec2<f32>};
  let p=array<vec2<f32>,3>(vec2<f32>(-1.0,-1.0),vec2<f32>(3.0,-1.0),vec2<f32>(-1.0,3.0));return Screen(vec4<f32>(p[i],0.0,1.0),p[i]);
 }
 fn depthAt(pixel:vec2<i32>)->f32{return textureLoad(source,clamp(pixel,vec2<i32>(0),vec2<i32>(textureDimensions(source))-vec2<i32>(1)),0).x;}
-@fragment fn smoothDepth(input:Screen)->@location(0) f32{
- let p=vec2<i32>(input.pos.xy);let center=depthAt(p);if(center<=0.0){return 0.0;}
+@fragment fn smoothDepth(input:Screen)->@location(0) vec4<f32>{
+ let p=vec2<i32>(input.pos.xy);let center=depthAt(p);if(center<=0.0){return vec4<f32>(0.0);}
  var weighted=0.0;var total=0.0;
  for(var y=-2;y<=2;y++){for(var x=-2;x<=2;x++){
   let sample=depthAt(p+vec2<i32>(x,y));if(sample<=0.0){continue;}
   let spatial=exp(-f32(x*x+y*y)*.25);let range=exp(-abs(sample-center)*15.0);let weight=spatial*range;
   weighted+=sample*weight;total+=weight;
- }}return weighted/max(total,.00001);
+ }}return vec4<f32>(weighted/max(total,.00001),0.0,0.0,1.0);
 }
 fn sky(ray:vec3<f32>)->vec3<f32>{
  let t=clamp(ray.y*.5+.5,0.0,1.0);return mix(vec3<f32>(.20,.26,.27),vec3<f32>(.53,.69,.74),t);
