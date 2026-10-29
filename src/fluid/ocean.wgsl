@@ -106,6 +106,19 @@ fn cubeHit(origin:vec3<f32>,direction:vec3<f32>)->f32{
  let near=min(a,b);let far=max(a,b);let enter=max(near.x,max(near.y,near.z));let leave=min(far.x,min(far.y,far.z));
  if(leave<max(enter,0.0)){return -1.0;}return select(leave,enter,enter>0.0);
 }
+// Ripples travel from each actual impact to the cube, then the wash fades.
+fn cubeImpactWash(position:vec2<f32>,time:f32)->f32{
+ var response=0.0;
+ for(var i=0u;i<30u;i++){
+  let event=impact[i];let distance=length(position-event.xy);let arrival=distance/1.4;let elapsed=time-event.z-arrival;
+  if(event.w>0.0 && elapsed>=0.0 && elapsed<2.0){
+   let near=1.0-smoothstep(1.5,4.0,distance);
+   let attack=smoothstep(0.0,.12,elapsed);let decay=1.0-smoothstep(.45,2.0,elapsed);
+   response=max(response,near*attack*decay);
+  }
+ }
+ return response;
+}
 fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let q=abs(p-vec3<f32>(0.0,-.1,0.0))/vec3<f32>(.65,.85,.65);var n=vec3<f32>(0.0,0.0,sign(p.z));
  if(q.x>q.y&&q.x>q.z){n=vec3<f32>(sign(p.x),0.0,0.0);}else if(q.y>q.z){n=vec3<f32>(0.0,sign(p.y+.1),0.0);}
@@ -121,10 +134,10 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let water=wave(p.xz,params.settings.x,0.0);let height=p.y-water;
  let faceCoord=select(p.x,p.z,abs(n.x)>.5);let uv=vec2<f32>(faceCoord*9.0+params.settings.x*.5,p.y*10.0-params.settings.x*1.8);
  let froth=noise(uv)*.55+noise(uv*2.3+vec2<f32>(3.7,8.1))*.3+noise(uv*4.7+vec2<f32>(9.0,2.2))*.15;
- let pulse=.5+.5*sin(params.settings.x*2.2+faceCoord*3.1);let washHeight=.08+.13*pulse;
+ let response=cubeImpactWash(p.xz,params.settings.x);let washHeight=.04+.18*response;
  let vertical=smoothstep(-.025,.025,height)*(1.0-smoothstep(washHeight,washHeight+.10,height));
- let foam=vertical*smoothstep(.35,.69,froth)*.85*select(1.0,0.0,abs(n.y)>.5);
- let wet=(1.0-smoothstep(.06,.38,height))*smoothstep(-.18,.02,height);color*=1.0-wet*.12;
+ let foam=vertical*smoothstep(.35,.69,froth)*.85*response*select(1.0,0.0,abs(n.y)>.5);
+ let wet=(1.0-smoothstep(.06,.38,height))*smoothstep(-.18,.02,height)*response;color*=1.0-wet*.12;
  return mix(color,foamColor(n),foam);
 }
 // Thin expanding crown surface, expressed as a 3D implicit sheet.
@@ -255,8 +268,8 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
   let near=1.0-smoothstep(.05,.50,cubeDistance);
   let uv=point.xz*8.0+vec2<f32>(time*.55,-time*.3);
   let texture=noise(uv)*.52+noise(uv*2.6+vec2<f32>(4.8,2.3))*.30+noise(uv*6.0+vec2<f32>(8.0,5.0))*.18;
-  let crest=.55+.45*sin(time*1.7+point.x*2.0+point.z*1.5);
-  color=mix(color,foamColor(normal),near*smoothstep(.38,.71,texture)*(.32+.4*crest));
+  let response=cubeImpactWash(point.xz,time);
+  color=mix(color,foamColor(normal),near*smoothstep(.38,.71,texture)*.72*response);
  }
  // Advected multiscale breakup creates foam around the expanding impact.
  for(var eventIndex=0u;eventIndex<30u;eventIndex++){
