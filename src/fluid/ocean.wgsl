@@ -173,6 +173,14 @@ fn foamColor(normal:vec3<f32>)->vec3<f32>{
  let sun=normalize(vec3<f32>(-.35,.65,.55));let illumination=.86+.14*abs(dot(normal,sun));
  return vec3<f32>(.76,.85,.82)*illumination;
 }
+// Foam is a translucent aerated layer over the existing water optics.
+// Preserve some reflected and transmitted light even at high coverage.
+fn foamOptics(water:vec3<f32>,reflected:vec3<f32>,normal:vec3<f32>,coverage:f32,fresnelTerm:f32)->vec3<f32>{
+ let amount=clamp(coverage,0.0,1.0);let scattering=foamColor(normal);
+ let reflectionWeight=clamp(.08+fresnelTerm*.35,0.0,.5);
+ let layer=mix(scattering,reflected,reflectionWeight);
+ return mix(water,layer,amount*.58);
+}
 struct ObjectHit {distance:f32,color:vec3<f32>,opacity:f32};
 fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
  var distance=cubeHit(origin,direction);var color=vec3<f32>(0.0);var opacity=1.0;
@@ -203,7 +211,7 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
      let fine=noise(p.xz*55.0+vec2<f32>(p.y*12.0,crownAge*3.0))*.55+noise(p.xz*117.0+vec2<f32>(p.y*22.0,8.0))*.45;
      let rim=smoothstep(.16,.32,p.y-base);let edge=pow(1.0-abs(dot(normal,-direction)),3.0);
      let optics=splashOptics(p,direction,normal);let coverage=clamp(.28+rim*.44+smoothstep(.48,.85,fine)*.20,0.0,.9);
-     color=mix(optics,foamColor(normal),coverage);
+     color=foamOptics(optics,sky(reflect(direction,normal)),normal,coverage,edge);
      opacity=clamp(.20+rim*.30+edge*.22+smoothstep(.7,.9,fine)*.12,.20,.76);distance=t;break;
     }
     t+=clamp(field*.65,.012,.12);
@@ -282,7 +290,7 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
   let texture=noise(uv)*.52+noise(uv*2.6+vec2<f32>(4.8,2.3))*.30+noise(uv*6.0+vec2<f32>(8.0,5.0))*.18;
   let face=select(vec2<f32>(0.0,sign(point.z)),vec2<f32>(sign(point.x),0.0),abs(point.x)>abs(point.z));
   let response=cubeImpactWash(point.xz,face,time);
-  color=mix(color,foamColor(normal),near*smoothstep(.38,.71,texture)*.72*response);
+  color=foamOptics(color,reflection,normal,near*smoothstep(.38,.71,texture)*.72*response,f);
  }
  // Advected multiscale breakup creates foam around the expanding impact.
  for(var eventIndex=0u;eventIndex<30u;eventIndex++){
@@ -296,7 +304,7 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
   let envelope=max(outer,trailing)*lifetime;
   let uv=relative*8.0+vec2<f32>(foamAge*.8,-foamAge*.5);let broken=noise(uv)*.40+noise(uv*2.4+vec2<f32>(4.2,6.1))*.30+noise(uv*5.3+vec2<f32>(8.1,4.9))*.20+noise(uv*10.0+vec2<f32>(2.1,11.0))*.10;
   let foam=envelope*smoothstep(.32,.67,broken)*.82;
-  color=mix(color,foamColor(normal),foam);
+  color=foamOptics(color,reflection,normal,foam,f);
  }
  }
  let horizon=overlayCrown(mix(color,sky(ray),smoothstep(90.0,200.0,t)),crown,t);
