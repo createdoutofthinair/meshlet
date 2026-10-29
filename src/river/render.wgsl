@@ -110,12 +110,12 @@ struct SprayOut {@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>
  return vec4<f32>(.79,.85,.84,alpha);
 }
 @vertex fn rockVertex(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->VertexOut{
- let rock=rocks[instance];let sectors=16u;let rings=10u;let cell=vertex/6u;let corner=vertex%6u;
+ let rock=rocks[instance];let sectors=24u;let rings=16u;let cell=vertex/6u;let corner=vertex%6u;
  let corners=array<vec2<u32>,6>(vec2<u32>(0u,0u),vec2<u32>(1u,0u),vec2<u32>(0u,1u),vec2<u32>(0u,1u),vec2<u32>(1u,0u),vec2<u32>(1u,1u));
  let grid=vec2<u32>(cell%sectors,cell/sectors)+corners[corner];let theta=f32(grid.x)/f32(sectors)*6.2831853;let phi=f32(grid.y)/f32(rings)*3.14159265;
  let unit=vec3<f32>(sin(phi)*cos(theta),cos(phi),sin(phi)*sin(theta));
  let rockNoise=riverNoise(unit.xz*3.3+vec2<f32>(unit.y*1.7+f32(instance)*2.1,unit.y*2.3+reach.info.w));
- let rough=.84+.28*rockNoise;let bottom=rock.position.y-rock.shape.x-.4;let top=rock.position.y+rock.shape.y;
+ let strata=riverNoise(vec2<f32>(unit.y*5.0+f32(instance),unit.x*2.1+unit.z));let rough=.74+.33*rockNoise+.16*strata;let bottom=rock.position.y-rock.shape.x-.4;let top=rock.position.y+rock.shape.y;
  let axes=vec3<f32>(rock.position.w*rock.shape.z,(top-bottom)*.5,rock.position.w*rock.shape.w);
  let center=vec3<f32>(rock.position.x,(top+bottom)*.5,rock.position.z);let position=center+unit*axes*rough;
  var out:VertexOut;out.position=riverFrame.viewProjection*vec4<f32>(position,1.0);out.world=position;
@@ -180,11 +180,27 @@ fn shadeGround(input:VertexOut)->vec4<f32>{
 @fragment fn reflectionFragment(input:VertexOut)->@location(0) vec4<f32>{
  let color=shadeGround(input);if(input.world.y<riverLevel(input.world.z)+.03){discard;}return color;
 }
+// Rough dielectric Cook-Torrance response for stone and wet surfaces.
+fn stoneLighting(base:vec3<f32>,normal:vec3<f32>,view:vec3<f32>,roughness:f32)->vec3<f32>{
+ let light=normalize(riverFrame.sunSpeed.xyz);let halfVector=normalize(view+light);
+ let nl=max(dot(normal,light),0.0);let nv=max(dot(normal,view),.02);let nh=max(dot(normal,halfVector),0.0);let vh=max(dot(view,halfVector),0.0);
+ let a=roughness*roughness;let a2=a*a;let d=nh*nh*(a2-1.0)+1.0;
+ let distribution=a2/max(.0001,3.14159265*d*d);let k=(roughness+1.0)*(roughness+1.0)*.125;
+ let geometry=(nv/(nv*(1.0-k)+k))*(nl/(nl*(1.0-k)+k));let fresnel=.04+.96*pow(1.0-vh,5.0);
+ let spec=distribution*geometry*fresnel/max(.08,4.0*nv*nl);
+ let ambient=mix(vec3<f32>(.11,.12,.10),vec3<f32>(.28,.34,.37),clamp(normal.y*.5+.5,0.0,1.0));
+ return base*(ambient+vec3<f32>(1.0,.91,.76)*nl*.82)+vec3<f32>(1.0,.91,.77)*min(spec,2.0)*nl;
+}
 fn shadeRock(input:VertexOut)->vec4<f32>{
- let n=normalize(input.normal);let p=input.world;let flecks=riverFbm(p.xz*.28+vec2<f32>(p.y*.17,input.material.x));
- let stone=mix(vec3<f32>(.17,.19,.18),vec3<f32>(.30,.31,.28),flecks);
- let wet=1.0-smoothstep(.08,1.0,p.y-riverLevel(p.z));let light=normalize(riverFrame.sunSpeed.xyz);
- let diffuse=.34+.76*max(dot(n,light),0.0);var color=stone*diffuse*mix(1.0,.67,wet);
+ let p=input.world;let geometric=normalize(cross(dpdx(p),dpdy(p)));let baseNormal=normalize(input.normal);
+ let n=normalize(mix(baseNormal,select(-geometric,geometric,dot(geometric,baseNormal)>0.0),.65));
+ let footprint=max(length(dpdx(p)),length(dpdy(p)));let detail=1.0-smoothstep(.15,1.4,footprint);
+ let broad=riverFbm(p.xz*.20+vec2<f32>(p.y*.12,input.material.x));let layers=riverNoise(vec2<f32>(p.y*.8+broad*1.8,p.x*.14+p.z*.11));
+ let speckle=riverNoise(p.xz*1.1+vec2<f32>(p.y*.71,input.material.x));
+ var stone=mix(vec3<f32>(.105,.125,.12),vec3<f32>(.34,.32,.28),clamp(broad*.68+layers*.32,0.0,1.0));
+ stone*=mix(1.0,.75+.5*speckle,detail);let wet=1.0-smoothstep(.08,1.8,p.y-riverLevel(p.z));
+ stone*=mix(1.0,.65,wet);let view=normalize(riverFrame.cameraDelta.xyz-p);
+ var color=stoneLighting(stone,n,view,mix(.83,.25,wet));
  let dist=length(riverFrame.cameraDelta.xyz-p);color=mix(color,vec3<f32>(.50,.58,.57),(1.0-exp(-dist*.00035))*.45);
  return vec4<f32>(displayColor(color),1.0);
 }
@@ -215,12 +231,13 @@ fn riverAdvectedStreak(across:f32,z:f32,distance:f32,speed:f32)->f32{
 }
 // Approximate a cluster of sub-meter bubbles with irregular cellular edges.
 // This is evaluated only for nearby, visible foam; subpixel bubbles fade out.
-fn riverBubblePattern(p:vec2<f32>)->f32{
+fn riverBubblePattern(p:vec2<f32>,time:f32)->f32{
  let cell=floor(p);let local=fract(p);var first=10.0;var second=10.0;
  for(var y=-1;y<=1;y++){
   for(var x=-1;x<=1;x++){
    let offset=vec2<f32>(f32(x),f32(y));let id=cell+offset;
-   let point=offset+vec2<f32>(riverHash(id+vec2<f32>(9.3,2.1)),riverHash(id+vec2<f32>(3.7,17.0)))*.8+vec2<f32>(.1);
+   let phase=vec2<f32>(riverHash(id+vec2<f32>(9.3,2.1)),riverHash(id+vec2<f32>(3.7,17.0)))*6.2831853;
+   let point=offset+vec2<f32>(.5)+.32*sin(phase+time*vec2<f32>(.61,.83));
    let delta=point-local;let d=dot(delta,delta);
    if(d<first){second=first;first=d;}else if(d<second){second=d;}
   }
@@ -238,14 +255,14 @@ fn riverBubblePattern(p:vec2<f32>)->f32{
  var color=mix(vec3<f32>(.14,.27,.27),vec3<f32>(.76,.81,.79),smoothstep(.27,.76,volume))*light;
  color=mix(color,vec3<f32>(.74,.81,.80),grazing*.35);
  let footprint=max(length(dpdx(input.world)),length(dpdy(input.world)));let bubbles=1.0-smoothstep(.25,1.8,footprint);
- if(bubbles>.01){let cells=1.0-riverBubblePattern(vec2<f32>(across*.9,travel*3.5));color+=vec3<f32>(.12)*cells*bubbles*riverFrame.optics.z;}
+ if(bubbles>.01){let cells=1.0-riverBubblePattern(vec2<f32>(across*.9,travel*3.5),motion[0].y);color+=vec3<f32>(.12)*cells*bubbles*riverFrame.optics.z;}
  return vec4<f32>(displayColor(color),1.0);
 }
 fn riverAdvectedBubbles(across:f32,z:f32,distance:f32,speed:f32)->f32{
  let offset=.17*sin(across*.018+z*.006);let a=fract(distance/32.0+offset);let b=fract(a+.5);let weight=1.0-abs(a*2.0-1.0);
  let pa=vec2<f32>(across,riverFlowCoordinate(z,a*32.0,speed))*4.0;
  let pb=vec2<f32>(across+4.7,riverFlowCoordinate(z,b*32.0,speed)+37.0)*4.0;
- return mix(riverBubblePattern(pb),riverBubblePattern(pa),weight);
+ return mix(riverBubblePattern(pb,motion[0].y),riverBubblePattern(pa,motion[0].y),weight);
 }
 fn waterFresnel(cosine:f32)->f32{return .02037+(1.0-.02037)*pow(1.0-clamp(cosine,0.0,1.0),5.0);}
 fn waterTransmittance(path:f32,clarity:f32)->vec3<f32>{return exp(-vec3<f32>(.18,.085,.052)*max(0.0,path)/max(.2,clarity));}
@@ -294,12 +311,15 @@ fn viewDepth(depth:f32)->f32{return 5000.0/max(.001,10000.0-depth*9999.5);}
  // A multiscale cellular foam field follows the outflow from the impact.
  let splash=riverFrame.waterfall.x*smoothstep(9.0,16.0,p.y)*(1.0-smoothstep(45.0,110.0,p.y))*(1.0-smoothstep(.72,1.0,abs(q)));
  if(splash>.001 && riverFrame.optics.z>.001){
-  let uv=vec2<f32>(across*.15,(p.y-motion[0].x*1.5)*.17);let blotch=riverFbm(uv);
+  let time=motion[0].y;let raw=vec2<f32>(across*.15,(p.y-motion[0].x*1.5)*.17);
+  let warp=vec2<f32>(riverNoise(raw*.47+vec2<f32>(time*.15,3.0)),riverNoise(raw*.53+vec2<f32>(7.0,-time*.12)))-vec2<f32>(.5);
+  let uv=raw+warp*.8;let blotch=riverFbm(uv);
   let fine=riverNoise(uv*2.4+vec2<f32>(9.3,5.7));var breakup=.65*blotch+.35*fine;
   let close=1.0-smoothstep(.35,2.0,footprint);
-  if(close>.01){let cellular=1.0-riverBubblePattern(uv*3.0);breakup+=cellular*close*.32;}
+  if(close>.01){let cellular=1.0-riverBubblePattern(uv*3.0,motion[0].y);breakup+=cellular*close*.32;}
   let impactFoam=splash*smoothstep(.35,.68,breakup)*min(1.0,riverFrame.optics.z*1.2);
-  color=mix(color,vec3<f32>(.73,.79,.76),impactFoam*.75);
+  let foamLight=.55+.45*ndl;let foamShade=mix(vec3<f32>(.32,.42,.41),vec3<f32>(.88,.91,.85),clamp(breakup,0.0,1.0));
+  color=mix(color,foamShade*foamLight,impactFoam*.86);
  }
  if(riverFrame.optics.w>.5){
   let along=riverFlowCoordinate(p.y,motion[0].x,speed);
