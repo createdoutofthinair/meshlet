@@ -2,7 +2,7 @@ import {PlanetRenderer} from './renderer.js';
 import {SurfaceWalker,WALK_EYE_HEIGHT_KM,directionFromCamera,setCameraDirection} from './walk.js';
 import {PlanetInspector} from './inspector.js';
 const $=id=>document.getElementById(id);
-const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','walk','walk-help','generation-status','seed-form','seed','random','orbit','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','transition-error','transition-status','timing-note'];
+const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','walk','walk-help','generation-status','seed-form','seed','river-link','random','orbit','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','transition-error','transition-status','timing-note'];
 const el=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const MIN_ALT=.03,MAX_ALT=30000;
 const fmt=n=>Math.round(n).toLocaleString('en-US');
@@ -89,6 +89,7 @@ function rebuildTerrain(title){
 function setSeed(value){
  if(!renderer)return;
  const seed=value.trim()||'0';el.seed.value=seed;renderer.seed=seedNumber(seed);rebuildTerrain('Creating your world');
+ el['river-link'].href=`./river.html?seed=${encodeURIComponent(seed)}`;
  const url=new URL(location.href);url.searchParams.set('seed',seed);history.replaceState(null,'',url);
 }
 function updateTelemetry(){
@@ -115,7 +116,7 @@ function frame(now){
  }catch(error){fail(error.message);}
 }
 async function start(){
- const params=new URLSearchParams(location.search);if(params.has('seed'))el.seed.value=params.get('seed').slice(0,64);
+ const params=new URLSearchParams(location.search);if(params.has('seed'))el.seed.value=params.get('seed').slice(0,64);el['river-link'].href=`./river.html?seed=${encodeURIComponent(el.seed.value.trim()||'0')}`;
  try{
   renderer=await PlanetRenderer.create(el.view,fail);renderer.seed=seedNumber(el.seed.value);renderer.invalidateTerrain();
   walker=new SurfaceWalker(renderer,inputForWalk,error=>fail(`Walking surface probe: ${error.message}`));

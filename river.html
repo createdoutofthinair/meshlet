@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#080d13"><title>River Lab — Meshlet Engine</title><link rel="stylesheet" href="./src/ui/style.css"><link rel="stylesheet" href="./src/river/style.css"></head>
+<body class="river-lab">
+<div class="app">
+ <header class="topbar">
+  <div class="brand"><span class="brand-icon" aria-hidden="true">✳</span><div><strong>MESHLET</strong><small>ENGINE LAB <span> / </span> 003</small></div></div>
+  <nav class="lab-nav" aria-label="Labs"><a href="./index.html">Meshlet Lab</a><a id="planet-link" href="./planet.html">Planet Lab</a><a class="current" href="./river.html">River Lab</a></nav>
+  <div class="header-center"><span class="status-dot"></span><span id="device-status">INITIALIZING WEBGPU</span></div><div class="header-meta">RIVER REACH <span>·</span> GPU STUDY</div>
+ </header>
+ <main>
+  <section class="viewport river-viewport" aria-label="Procedural river view">
+   <canvas id="view" tabindex="0" aria-label="Interactive procedurally generated river"></canvas>
+   <div class="river-heading"><span class="kicker"><i></i> FIELD STUDY / 03</span><h1>A river<br><em>in motion.</em></h1><p>A local reach from the planet's seeded<br>drainage network, built on the GPU.</p></div>
+   <div class="river-overlay"><span>SELECTED REACH</span><strong id="reach-overlay">FINDING RIVER…</strong><small id="reach-caption">Following the downstream route</small></div>
+   <div class="river-hint">DRAG TO ORBIT <i></i> SCROLL TO ZOOM <i></i> FLOW ARROWS SHOW DOWNSTREAM</div>
+   <div id="loading" class="loading"><div class="spinner"></div><strong id="loading-title">Finding a river</strong><span>Generating drainage and building the reach on the GPU</span></div>
+   <div id="error" class="error" hidden><strong>Unable to start River Lab</strong><p id="error-message"></p><a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API#browser_compatibility" target="_blank" rel="noopener">Check WebGPU browser support ↗</a></div>
+  </section>
+  <aside class="panel river-panel">
+   <div class="panel-head"><div><span class="kicker">PROCEDURAL WATER</span><h2>River lab</h2></div><span class="live"><span></span> LIVE</span></div>
+   <p class="intro">Inspect a selected planet drainage segment as a locally rebuilt reach. The water follows its upstream-to-downstream direction.</p>
+   <div class="section-title"><span>RIVER SOURCE</span><span>01 / 04</span></div>
+   <form id="seed-form" class="seed-form"><label class="sr-only" for="seed">World seed</label><input id="seed" value="918273" maxlength="64" autocomplete="off"><button id="generate" type="submit">GENERATE</button></form>
+   <button id="next-reach" class="secondary-action" type="button">FIND ANOTHER REACH <span>↗</span></button>
+   <div class="reach-stats"><div><span>CHANNEL WIDTH</span><strong id="width-stat">—</strong></div><div><span>REACH SLOPE</span><strong id="slope-stat">—</strong></div><div><span>RUNOFF INDEX</span><strong id="flow-stat">—</strong></div><div><span>FRAME RATE</span><strong id="fps">—</strong></div></div>
+   <p class="metric-note">Slope is the modeled water-surface grade. Runoff is an index from the planet drainage field, not a measured discharge.</p>
+   <div class="section-title"><span>WATER SURFACE</span><span>02 / 04</span></div>
+   <label class="river-slider"><span>FLOW SPEED <strong id="speed-value">1.00 m/s</strong></span><input id="speed" type="range" min="0" max="250" value="100"></label>
+   <label class="river-slider"><span>WATER CLARITY <strong id="clarity-value">1.30×</strong></span><input id="clarity" type="range" min="20" max="300" value="130"></label>
+   <label class="river-slider"><span>RIPPLE STRENGTH <strong id="ripples-value">0.80×</strong></span><input id="ripples" type="range" min="0" max="180" value="80"></label>
+   <label class="river-slider"><span>EDGE FOAM <strong id="foam-value">0.45×</strong></span><input id="foam" type="range" min="0" max="150" value="45"></label>
+   <div class="river-toggles"><label><input id="flow-arrows" type="checkbox"><span>Show downstream flow arrows</span></label><label><input id="paused" type="checkbox"><span>Pause water animation</span></label></div>
+   <div class="section-title"><span>CHANNEL &amp; BANKS</span><span>03 / 04</span></div>
+   <label class="river-slider"><span>CHANNEL WIDTH <strong id="channel-value">1.00×</strong></span><input id="channel" type="range" min="50" max="150" value="100"></label>
+   <label class="river-slider"><span>WATER DEPTH <strong id="depth-value">4.0 m</strong></span><input id="depth" type="range" min="1" max="120" value="40"></label>
+   <label class="river-slider"><span>BANK HEIGHT <strong id="bank-value">12.0 m</strong></span><input id="bank" type="range" min="0" max="300" value="120"></label>
+   <label class="river-slider"><span>GROUND ROUGHNESS <strong id="roughness-value">0.80×</strong></span><input id="roughness" type="range" min="0" max="180" value="80"></label>
+   <div class="section-title"><span>VIEW &amp; DIAGNOSTICS</span><span>04 / 04</span></div>
+   <div class="river-actions"><button id="view-overview" type="button">OVERVIEW</button><button id="view-low" type="button">LOW VIEW</button><button id="view-top" type="button">TOP VIEW</button></div>
+   <p class="metric-note">This is a local visualization, not a fluid-dynamics simulation. Meanders, depth, material and banks are procedural refinements around the selected graph edge.</p>
+   <div class="stat-row"><span>Route nodes</span><strong id="nodes-stat">—</strong></div><div class="stat-row"><span>Source segment</span><strong id="length-stat">—</strong></div><div class="stat-row"><span>GPU geometry</span><strong>≈ 90,000 triangles</strong></div>
+  </aside>
+ </main>
+ <footer><span>SEEDED DRAINAGE <b>→</b> DOWNSTREAM REACH <b>→</b> GPU WATER &amp; BANKS</span><span id="status">PREPARING RIVER</span></footer>
+</div>
+<script type="module" src="./src/river/app.js"></script>
+</body></html>

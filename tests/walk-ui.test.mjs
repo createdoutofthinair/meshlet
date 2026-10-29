@@ -45,7 +45,7 @@ test('page lands, walks, responds to terrain changes and returns to orbit',async
  assert.ok(cameraState.latitude>0,'W moves the camera north');
  key('keyup','KeyW');await tick(420);
  doc.getElementById('seed').value='42';doc.getElementById('seed-form').dispatchEvent(new Event('submit',{cancelable:true}));await flush();
- assert.equal(renderer.seed,42);assert.equal(cameraState.mode,'walk','walk mode relands after a new seed');
+ assert.equal(renderer.seed,42);assert.equal(doc.getElementById('river-link').href,'./river.html?seed=42');assert.equal(cameraState.mode,'walk','walk mode relands after a new seed');
  doc.getElementById('orbit').dispatchEvent(new Event('click'));
  assert.equal(cameraState.mode,'orbit');assert.equal(cameraState.altitude,14000);
  assert.equal(renderer.budget,384);

@@ -31,7 +31,7 @@ jobs:
       - name: Prepare static site
         run: |
           mkdir -p site
-          cp index.html planet.html site/
+          cp index.html planet.html river.html site/
           cp -R src site/src
       - name: Configure Pages
         uses: actions/configure-pages@v5
