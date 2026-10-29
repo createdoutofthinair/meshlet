@@ -177,8 +177,8 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
     let n=normalize(origin+direction*hit-center);let edge=pow(1.0-clamp(dot(n,-direction),0.0,1.0),3.0);
     let sun=normalize(vec3<f32>(-.35,.65,.55));let highlight=pow(max(dot(reflect(-sun,n),-direction),0.0),80.0);
     let p=origin+direction*hit;let optics=splashOptics(p,direction,n);
-    distance=hit;color=optics+vec3<f32>(.75,.83,.80)*highlight*.7;
-    opacity=clamp(.32+edge*.38+highlight*.25,.32,.85);
+    distance=hit;color=mix(optics,foamColor(n),.48)+vec3<f32>(.75,.83,.80)*highlight*.7;
+    opacity=clamp(.48+edge*.28+highlight*.20,.48,.85);
    }}
   }
  }
