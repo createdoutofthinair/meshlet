@@ -122,19 +122,21 @@ fn cubeImpactWash(position:vec2<f32>,faceNormal:vec2<f32>,time:f32)->f32{
  }
  return response;
 }
-// Individual impact-relative rivulets descend toward the waterline and fade.
+// Impact-driven patches: a short upward surge followed by gravity-driven
+// drainage. Each patch has a different path, width and fall speed.
 fn cubeFoamDrain(position:vec2<f32>,faceNormal:vec2<f32>,height:f32,faceCoord:f32,time:f32)->f32{
- var result=0.0;let cell=floor((faceCoord+2.0)*25.0);let offset=fract((faceCoord+2.0)*25.0)-.5;
- let seed=hash(vec2<f32>(cell,18.7));let width=.06+.06*seed;
- let line=1.0-smoothstep(width,width+.08,abs(offset));
+ var result=0.0;let grid=(faceCoord+2.0)*7.0;let cell=floor(grid);let local=fract(grid);
+ let seed=hash(vec2<f32>(cell,18.7));let shift=.25+.5*seed;
  for(var i=0u;i<30u;i++){
   let event=impact[i];let delta=event.xy-position;let dist=length(delta);let elapsed=time-event.z-dist/1.4;
-  if(event.w>0.0 && elapsed>.12 && elapsed<3.0){
+  if(event.w>0.0 && elapsed>=0.0 && elapsed<2.4){
    let facing=smoothstep(.05,.55,dot(faceNormal,delta)/max(.001,dist));let near=1.0-smoothstep(1.5,4.0,dist);
-   let head=.30+.08*seed-max(0.0,elapsed-.15)*(.12+.05*seed);
-   let stream=smoothstep(head-.13,head-.09,height)*(1.0-smoothstep(head,head+.025,height));
-   let fade=(1.0-smoothstep(1.5,3.0,elapsed))*smoothstep(-.03,.025,height);
-   result=max(result,line*stream*fade*facing*near);
+   let movement=elapsed;let head=.035+(.55+.12*seed)*movement-.50*(.8+.25*seed)*movement*movement;
+   let waviness=(noise(vec2<f32>(height*14.0,cell+seed))-.5)*.20;
+   let width=.16+.14*seed;let across=1.0-smoothstep(width,width+.16,abs(local-shift+waviness));
+   let length=.06+.10*clamp(elapsed,0.0,1.0);let vertical=exp(-pow((height-head)/length,2.0));
+   let fade=smoothstep(0.0,.10,elapsed)*(1.0-smoothstep(1.25,2.4,elapsed))*smoothstep(-.03,.025,height);
+   result=max(result,across*vertical*fade*facing*near);
   }
  }
  return result;
@@ -158,20 +160,15 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let time=params.settings.x;let water=wave(p.xz,time,0.0);let height=p.y-water;
  let faceCoord=select(p.x,p.z,abs(n.x)>.5);let response=cubeImpactWash(p.xz,n.xz,time);
  let side=select(1.0,0.0,abs(n.y)>.5);let band=smoothstep(-.025,.02,height)*(1.0-smoothstep(.10,.30,height));
- let cell=floor((faceCoord+2.0)*32.0);let offset=fract((faceCoord+2.0)*32.0)-.5;
- let seed=hash(vec2<f32>(cell,5.4));let lineWidth=.035+.035*seed;
- let line=1.0-smoothstep(lineWidth,lineWidth+.04,abs(offset));
- let fall=fract(time*.48+seed);let yTop=.10+.25*seed-.23*fall;
- let streak=line*smoothstep(yTop-.19,yTop-.14,height)*(1.0-smoothstep(yTop,yTop+.035,height));
- let breakup=noise(vec2<f32>(faceCoord*18.0,p.y*18.0-time*.6));
- let film=clamp((band*(.34+.2*breakup)+streak*.38)*response*side,0.0,.65);
+ let breakup=noise(vec2<f32>(faceCoord*18.0,p.y*18.0+time*.6));
+ let drain=cubeFoamDrain(p.xz,n.xz,height,faceCoord,time);
+ let film=clamp((band*.24*response+drain*.45)*side,0.0,.6);
  let view=normalize(params.eye.xyz-p);let fresnelWet=.04+.96*pow(1.0-abs(dot(n,view)),5.0);
  let halfVector=normalize(light+view);let highlight=pow(max(dot(n,halfVector),0.0),72.0);
  let reflected=sky(reflect(-view,n));
  color=color*(1.0-film*.24)+reflected*film*(.08+.24*fresnelWet)+vec3<f32>(.8,.9,.87)*film*highlight*.45;
  // Use the same breakup and optical response as the impact foam on water.
- let foamUv=vec2<f32>(faceCoord,height)*8.0+vec2<f32>(time*.8,-time*.5);
- let drain=cubeFoamDrain(p.xz,n.xz,height,faceCoord,time);
+ let foamUv=vec2<f32>(faceCoord,height)*8.0+vec2<f32>(time*.15,time*1.2);
  let foam=max(band*response,drain*.85)*smoothstep(.32,.67,foamBreakup(foamUv))*.82*side;
  return foamOptics(color,reflected,n,foam,fresnelWet);
 }
