@@ -4,6 +4,7 @@
 @group(0) @binding(5) var opaqueDepth:texture_depth_2d;
 @group(0) @binding(6) var reflectedScene:texture_2d<f32>;
 @group(0) @binding(7) var sceneSampler:sampler;
+@group(0) @binding(8) var<storage,read> rocks:array<RiverRock>;
 struct VertexOut {
  @builtin(position) position:vec4<f32>,
  @location(0) world:vec3<f32>,
@@ -14,19 +15,73 @@ struct VertexOut {
  let item=geometry[index];var out:VertexOut;out.position=riverFrame.viewProjection*item.position;
  out.world=item.position.xyz;out.normal=item.normal.xyz;out.material=item.material;return out;
 }
-fn riverMacroWave(across:f32,z:f32,distance:f32,speed:f32)->f32{
+// Value noise and its analytical x/y derivatives, for normals matching the displaced mesh.
+fn riverNoiseGradient(p:vec2<f32>)->vec3<f32>{
+ let i=floor(p);let f=fract(p);let s=f*f*(vec2<f32>(3.0)-2.0*f);let ds=6.0*f*(vec2<f32>(1.0)-f);
+ let a=riverHash(i);let b=riverHash(i+vec2<f32>(1.0,0.0));let c=riverHash(i+vec2<f32>(0.0,1.0));let d=riverHash(i+vec2<f32>(1.0,1.0));
+ return vec3<f32>(mix(mix(a,b,s.x),mix(c,d,s.x),s.y),mix(b-a,d-c,s.y)*ds.x,mix(c-a,d-b,s.x)*ds.y);
+}
+// A height and two derivatives, in local cross/along coordinates.
+fn riverWaveLayer(across:f32,along:f32)->vec3<f32>{
+ let noise=riverNoiseGradient(vec2<f32>(across*.045,along*.035)+vec2<f32>(5.3,8.7));let warp=(noise.x-.5)*2.2;
+ let warpX=noise.y*.045*2.2;let warpZ=noise.z*.035*2.2;
+ let a=across*.14+along*.30+warp;let b=across*.27-along*.49+warp*.7;let c=across*.36+along*.76-warp*.5;
+ return vec3<f32>(.32*sin(a)+.15*sin(b)+.07*sin(c),
+  .32*(.14+warpX)*cos(a)+.15*(.27+warpX*.7)*cos(b)+.07*(.36-warpX*.5)*cos(c),
+  .32*(.30+warpZ)*cos(a)+.15*(-.49+warpZ*.7)*cos(b)+.07*(.76-warpZ*.5)*cos(c));
+}
+fn riverSurfaceWaves(across:f32,z:f32,distance:f32,speed:f32)->vec3<f32>{
  let offset=.17*sin(across*.018+z*.006);let a=fract(distance/32.0+offset);let b=fract(a+.5);let weight=1.0-abs(a*2.0-1.0);
  let za=riverFlowCoordinate(z,a*32.0,speed);let zb=riverFlowCoordinate(z,b*32.0,speed)+37.0;
- let waveA=.10*sin(across*.045+za*.16)+.045*sin(across*.09-za*.24);
- let waveB=.10*sin((across+4.7)*.045+zb*.16)+.045*sin((across+4.7)*.09-zb*.24);
- return mix(waveB,waveA,weight);
+ let wa=riverWaveLayer(across,za);let wb=riverWaveLayer(across+4.7,zb);
+ let offsetGrad=.17*cos(across*.018+z*.006)*vec2<f32>(.018,.006);let weightGrad=select(2.0,-2.0,a>.5)*offsetGrad;
+ let alongGrad=vec2<f32>(-32.0*speed*offsetGrad.x,1.0-32.0*speed*offsetGrad.y);
+ let gradA=vec2<f32>(wa.y+wa.z*alongGrad.x,wa.z*alongGrad.y);let gradB=vec2<f32>(wb.y+wb.z*alongGrad.x,wb.z*alongGrad.y);
+ return vec3<f32>(mix(wb.x,wa.x,weight),mix(gradB,gradA,weight)+(wa.x-wb.x)*weightGrad);
+}
+fn riverSmoothDerivative(a:f32,b:f32,value:f32)->f32{let t=clamp((value-a)/(b-a),0.0,1.0);return 6.0*t*(1.0-t)/(b-a);}
+// Standing bow waves and downstream wakes share the same GPU-generated rocks.
+// Only the current and adjacent reach sections can influence this position.
+fn riverRockWaves(p:vec2<f32>,distance:f32)->vec4<f32>{
+ let section=i32(floor((p.y+REACH_LENGTH*.5)/(REACH_LENGTH/f32(RIVER_ROCKS))));var result=vec4<f32>(0.0);
+ for(var offset=-1;offset<=1;offset++){
+  let i=section+offset;if(i<0 || i>=i32(RIVER_ROCKS)){continue;}let rock=rocks[u32(i)];
+  let sx=max(.1,rock.position.w*rock.shape.z);let sz=max(.1,rock.position.w*rock.shape.w);
+  let x=(p.x-rock.position.x)/sx;let z=(p.y-rock.position.z)/sz;
+  if(abs(x)<2.8 && z> -3.0 && z<7.0){
+   let bow=exp(-x*x*1.15-(z+1.0)*(z+1.0)*.75);
+   let bowHeight=.52*bow;let rise=smoothstep(-.1,.65,z);let fall=1.0-smoothstep(4.0,7.0,z);
+   let fade=rise*fall;let fadeSlope=riverSmoothDerivative(-.1,.65,z)*fall-rise*riverSmoothDerivative(4.0,7.0,z);
+   let lateral=exp(-x*x*.32);let wake=fade*lateral;let phase=z*2.4+abs(x)*1.2-distance*.8;
+   let wakeHeight=.30*wake*sin(phase);let wakeSlope=.30*wake*cos(phase);
+   result+=vec4<f32>(bowHeight+wakeHeight,(-2.3*x*bowHeight+1.2*sign(x)*wakeSlope-.64*x*wakeHeight)/sx,
+    (-1.5*(z+1.0)*bowHeight+2.4*wakeSlope+.30*fadeSlope*lateral*sin(phase))/sz,max(.70*bow,.58*wake));
+  }
+ }
+ return result;
 }
 @vertex fn waterVertex(@builtin(vertex_index) index:u32)->VertexOut{
  let item=geometry[index];let q=item.material.x;let z=item.position.z;let slope=riverCenterSlope(z);
  let speed=riverFlowSpeed(q,z)/sqrt(1.0+slope*slope);let across=q*riverHalfWidth();
- let edge=1.0-smoothstep(.70,.98,abs(q));let height=riverMacroWave(across,z,motion[0].x,speed)*edge*riverFrame.optics.y;
+ let edge=1.0-smoothstep(.67,.98,abs(q));let activity=.62+.38*riverRiffle(z);
+ let waves=riverSurfaceWaves(across,z,motion[0].x,speed)*activity;let obstacle=riverRockWaves(item.position.xz,motion[0].x);
+ let scale=edge*riverFrame.optics.y;let height=(waves.x+obstacle.x)*scale;
+ let flow=normalize(vec3<f32>(slope,0.0,1.0));let side=normalize(vec3<f32>(1.0,0.0,-slope));
+ let normal=normalize(vec3<f32>(0.0,1.0,reach.info.y)-side*(waves.y+obstacle.y)*scale-flow*(waves.z+obstacle.z)*scale);
  let position=item.position+vec4<f32>(0.0,height,0.0,0.0);var out:VertexOut;
- out.position=riverFrame.viewProjection*position;out.world=position.xyz;out.normal=item.normal.xyz;out.material=item.material;return out;
+ out.position=riverFrame.viewProjection*position;out.world=position.xyz;out.normal=normal;out.material=vec4<f32>(item.material.xy,obstacle.w*edge,0.0);return out;
+}
+@vertex fn rockVertex(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->VertexOut{
+ let rock=rocks[instance];let sectors=16u;let rings=10u;let cell=vertex/6u;let corner=vertex%6u;
+ let corners=array<vec2<u32>,6>(vec2<u32>(0u,0u),vec2<u32>(1u,0u),vec2<u32>(0u,1u),vec2<u32>(0u,1u),vec2<u32>(1u,0u),vec2<u32>(1u,1u));
+ let grid=vec2<u32>(cell%sectors,cell/sectors)+corners[corner];let theta=f32(grid.x)/f32(sectors)*6.2831853;let phi=f32(grid.y)/f32(rings)*3.14159265;
+ let unit=vec3<f32>(sin(phi)*cos(theta),cos(phi),sin(phi)*sin(theta));
+ let rockNoise=riverNoise(unit.xz*3.3+vec2<f32>(unit.y*1.7+f32(instance)*2.1,unit.y*2.3+reach.info.w));
+ let rough=.84+.28*rockNoise;let bottom=rock.position.y-rock.shape.x-.4;let top=rock.position.y+rock.shape.y;
+ let axes=vec3<f32>(rock.position.w*rock.shape.z,(top-bottom)*.5,rock.position.w*rock.shape.w);
+ let center=vec3<f32>(rock.position.x,(top+bottom)*.5,rock.position.z);let position=center+unit*axes*rough;
+ var out:VertexOut;out.position=riverFrame.viewProjection*vec4<f32>(position,1.0);out.world=position;
+ out.normal=normalize(unit/max(axes,vec3<f32>(.01)));out.material=vec4<f32>(f32(instance),0.0,0.0,0.0);return out;
 }
 struct SkyVertex {@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>};
 @vertex fn skyVertex(@builtin(vertex_index) index:u32)->SkyVertex{
@@ -84,6 +139,18 @@ fn shadeGround(input:VertexOut)->vec4<f32>{
 @fragment fn reflectionFragment(input:VertexOut)->@location(0) vec4<f32>{
  let color=shadeGround(input);if(input.world.y<riverLevel(input.world.z)+.03){discard;}return color;
 }
+fn shadeRock(input:VertexOut)->vec4<f32>{
+ let n=normalize(input.normal);let p=input.world;let flecks=riverFbm(p.xz*.28+vec2<f32>(p.y*.17,input.material.x));
+ let stone=mix(vec3<f32>(.17,.19,.18),vec3<f32>(.30,.31,.28),flecks);
+ let wet=1.0-smoothstep(.08,1.0,p.y-riverLevel(p.z));let light=normalize(riverFrame.sunSpeed.xyz);
+ let diffuse=.34+.76*max(dot(n,light),0.0);var color=stone*diffuse*mix(1.0,.67,wet);
+ let dist=length(riverFrame.cameraDelta.xyz-p);color=mix(color,vec3<f32>(.50,.58,.57),(1.0-exp(-dist*.00035))*.45);
+ return vec4<f32>(displayColor(color),1.0);
+}
+@fragment fn rockFragment(input:VertexOut)->@location(0) vec4<f32>{return shadeRock(input);}
+@fragment fn rockReflectionFragment(input:VertexOut)->@location(0) vec4<f32>{
+ let color=shadeRock(input);if(input.world.y<riverLevel(input.world.z)+.03){discard;}return color;
+}
 // Two independently phased layers hide the reset of a locally advected pattern.
 // The coordinates are in meters; a positive displacement travels downstream.
 fn riverWaveSlopes(across:f32,along:f32,footprint:f32)->vec2<f32>{
@@ -100,8 +167,9 @@ fn riverAdvectedSlopes(across:f32,z:f32,distance:f32,speed:f32,footprint:f32)->v
 fn riverAdvectedStreak(across:f32,z:f32,distance:f32,speed:f32)->f32{
  let offset=.17*sin(across*.018+z*.006);let phaseA=fract(distance/32.0+offset);let phaseB=fract(phaseA+.5);let weightA=1.0-abs(phaseA*2.0-1.0);
  let alongA=riverFlowCoordinate(z,phaseA*32.0,speed);let alongB=riverFlowCoordinate(z,phaseB*32.0,speed)+37.0;
- let streakA=riverNoise(vec2<f32>(across*.17,alongA*.055)+vec2<f32>(11.0,3.0));
- let streakB=riverNoise(vec2<f32>((across+4.7)*.17,alongB*.055)+vec2<f32>(27.0,9.0));
+ let uvA=vec2<f32>(across*.34,alongA*.25)+vec2<f32>(11.0,3.0);let uvB=vec2<f32>((across+4.7)*.34,alongB*.25)+vec2<f32>(27.0,9.0);
+ let streakA=.68*riverNoise(uvA)+.32*riverNoise(uvA*2.13+vec2<f32>(9.0,13.0));
+ let streakB=.68*riverNoise(uvB)+.32*riverNoise(uvB*2.13+vec2<f32>(9.0,13.0));
  return mix(streakB,streakA,weightA);
 }
 // Approximate a cluster of sub-meter bubbles with irregular cellular edges.
@@ -135,8 +203,9 @@ fn viewDepth(depth:f32)->f32{return 5000.0/max(.001,10000.0-depth*9999.5);}
  let tangentSlope=riverCenterSlope(p.y);let speed=riverFlowSpeedAtBend(q,bend)/sqrt(1.0+tangentSlope*tangentSlope);
  let flow=normalize(vec3<f32>(tangentSlope,0.0,1.0));let side=normalize(vec3<f32>(1.0,0.0,-tangentSlope));
  let footprint=max(length(dpdx(p)),length(dpdy(p)));let detail=1.0-smoothstep(.55,2.0,footprint);
- let slopes=riverAdvectedSlopes(across,p.y,motion[0].x,speed,footprint)*riverFrame.optics.y;
- let n=normalize(vec3<f32>(0.0,1.0,reach.info.y)-side*slopes.x-flow*slopes.y);
+ // The vertex normal describes the actual displaced mesh; fine ripples are a smaller layer.
+ let slopes=riverAdvectedSlopes(across,p.y,motion[0].x,speed,footprint)*riverFrame.optics.y*.22;
+ let n=normalize(normalize(input.normal)-side*slopes.x-flow*slopes.y);
  let view=normalize(riverFrame.cameraDelta.xyz-input.world);let light=normalize(riverFrame.sunSpeed.xyz);let ndv=clamp(dot(n,view),0.0,1.0);let ndl=max(dot(n,light),0.0);
  let depth=riverDepthAtBend(q,bend);let refracted=refract(-view,n,1.0/1.333);
  let path=min(60.0,depth/max(.15,-refracted.y));let projected=riverFrame.viewProjection*vec4<f32>(input.world+refracted*path,1.0);
@@ -149,7 +218,7 @@ fn viewDepth(depth:f32)->f32{return 5000.0/max(.001,10000.0-depth*9999.5);}
  let transmittance=waterTransmittance(path,riverFrame.optics.x);
  let transmitted=bottom*transmittance+vec3<f32>(.035,.12,.10)*(vec3<f32>(1.0)-transmittance);
  let reflectionClip=riverFrame.reflectionViewProjection*vec4<f32>(input.world,1.0);
- let reflectionUv=uvFromClip(reflectionClip)+vec2<f32>(slopes.x,-slopes.y)*.018;
+ let reflectionUv=uvFromClip(reflectionClip)+vec2<f32>(n.x,-n.z)*.022;
  let reflected=sceneLinear(textureSampleLevel(reflectedScene,sceneSampler,clamp(reflectionUv,vec2<f32>(0.0),vec2<f32>(1.0)),0.0).rgb);
  let reflectionMask=uvEdge(reflectionUv)*select(0.0,1.0,reflectionClip.w>0.0);
  var environment=reflected;if(reflectionMask<.99){environment=mix(skyColor(reflect(-view,n)),reflected,reflectionMask);}let fresnel=waterFresnel(ndv);
@@ -159,12 +228,14 @@ fn viewDepth(depth:f32)->f32{return 5000.0/max(.001,10000.0-depth*9999.5);}
  let k=(roughness+1.0)*(roughness+1.0)/8.0;let g=(ndv/(ndv*(1.0-k)+k))*(ndl/(ndl*(1.0-k)+k));
  let specular=min(1.5,distribution*g*waterFresnel(vh)/(4.0*max(.08,ndv)));
  var color=mix(transmitted,environment,fresnel)+vec3<f32>(1.0,.94,.80)*specular;
- let streak=riverAdvectedStreak(across,p.y,motion[0].x,speed);let riffle=1.0-smoothstep(.08,.65,abs(bend));
+ let riffle=1.0-smoothstep(.08,.65,abs(bend));
  let edge=smoothstep(.70,.97,abs(q));let shallows=1.0-smoothstep(.35,2.2,depth);
- let turbulence=(.08+.35*riffle+.24*edge*shallows)*smoothstep(.08,.8,riverFrame.sunSpeed.w);
- let patches=smoothstep(.58,.75,streak);var foam=clamp(patches*turbulence*riverFrame.optics.z,0.0,.65);
- let bubbles=1.0-smoothstep(.12,.55,footprint);
- if(foam>.005 && bubbles>.01){foam*=mix(1.0,riverAdvectedBubbles(across,p.y,motion[0].x,speed),bubbles);}
+ let turbulence=(.025*riffle+.10*edge*shallows+input.material.z*.70)*smoothstep(.08,.8,riverFrame.sunSpeed.w);
+ var foam=0.0;if(turbulence>.01 && riverFrame.optics.z>.001){
+  let streak=riverAdvectedStreak(across,p.y,motion[0].x,speed);let patches=smoothstep(.55,.73,streak);
+  foam=clamp(patches*turbulence*riverFrame.optics.z,0.0,.65);let bubbles=1.0-smoothstep(.12,.55,footprint);
+  if(foam>.005 && bubbles>.01){foam*=mix(1.0,riverAdvectedBubbles(across,p.y,motion[0].x,speed),bubbles);}
+ }
  let foamColor=vec3<f32>(.65,.69,.65)*(.58+.42*ndl);color=mix(color,foamColor,foam);
  if(riverFrame.optics.w>.5){
   let along=riverFlowCoordinate(p.y,motion[0].x,speed);

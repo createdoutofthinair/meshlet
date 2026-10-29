@@ -16,11 +16,13 @@ struct Reach {
  ids:vec4<u32>, // upstream node, downstream node, validity, reserved
 };
 struct RiverVertex {position:vec4<f32>,normal:vec4<f32>,material:vec4<f32>};
+struct RiverRock {position:vec4<f32>,shape:vec4<f32>}; // center x, water level, z, radius; depth, exposed height, x/z scales
 @group(0) @binding(0) var<uniform> riverFrame:RiverFrame;
 @group(0) @binding(1) var<storage,read> reach:Reach;
 const TERRAIN_GRID:u32=192u;
-const WATER_ALONG:u32=192u;
-const WATER_ACROSS:u32=48u;
+const WATER_ALONG:u32=384u;
+const WATER_ACROSS:u32=128u;
+const RIVER_ROCKS:u32=12u;
 const REACH_LENGTH:f32=1200.0;
 const REACH_WIDTH:f32=900.0;
 fn riverHash(p:vec2<f32>)->f32{return fract(sin(dot(p,vec2<f32>(127.1,311.7)))*43758.5453);}

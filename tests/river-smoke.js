@@ -20,16 +20,18 @@ try{
  // Exercise the actual material functions, including reset continuity and flow direction.
  const source=await Promise.all(['../src/planet/common.wgsl','../src/river/shared.wgsl','../src/river/render.wgsl','./river-flow-smoke.wgsl'].map(async path=>{const response=await fetch(path);if(!response.ok)throw Error(`Could not load ${path}`);return response.text();}));
  const module=device.createShaderModule({code:source.join('\n')}),pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'probeRiverFlow'}});
- const probe=device.createBuffer({size:128,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC}),probeRead=device.createBuffer({size:128,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
- const group0=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.frameBuffer}}]}),group1=device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[{binding:0,resource:{buffer:probe}}]});
- const command=device.createCommandEncoder(),compute=command.beginComputePass();compute.setPipeline(pipeline);compute.setBindGroup(0,group0);compute.setBindGroup(1,group1);compute.dispatchWorkgroups(1);compute.end();command.copyBufferToBuffer(probe,0,probeRead,0,128);device.queue.submit([command.finish()]);
+ const probe=device.createBuffer({size:192,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC}),probeRead=device.createBuffer({size:192,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+ const group0=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.frameBuffer}},{binding:8,resource:{buffer:renderer.rocks}}]}),group1=device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[{binding:0,resource:{buffer:probe}}]});
+ const command=device.createCommandEncoder(),compute=command.beginComputePass();compute.setPipeline(pipeline);compute.setBindGroup(0,group0);compute.setBindGroup(1,group1);compute.dispatchWorkgroups(1);compute.end();command.copyBufferToBuffer(probe,0,probeRead,0,192);device.queue.submit([command.finish()]);
  await probeRead.mapAsync(GPUMapMode.READ);const values=new Float32Array(probeRead.getMappedRange().slice(0));probeRead.unmap();probeRead.destroy();probe.destroy();
  if(!(values[0]>values[1]&&values[2]>values[3]&&values[6]>values[7]&&Math.abs(values[4]-values[5])<1e-5))throw Error(`Channel or downstream velocity is invalid: ${[...values.slice(0,8)]}`);
  if(Math.hypot(values[8]-values[10],values[9]-values[11])<.005&&Math.abs(values[12]-values[13])<.005)throw Error('Surface detail did not change as water moved');
  if(Math.abs(values[14]-values[15])>.003||Math.hypot(values[16]-values[18],values[17]-values[19])>.003)throw Error('Advected surface popped when its phase reset');
  if(!(values[20]>.019&&values[20]<.022&&values[21]>values[20]&&values[22]>.999&&values[23]>=.54&&values[23]<=1.0))throw Error(`Invalid water Fresnel or foam detail: ${[...values.slice(20,24)]}`);
  if(!(values[24]>.999&&values[24]>values[25]&&values[25]>values[26]&&values[27]>values[26]))throw Error(`Water absorption did not increase with depth: ${[...values.slice(24,28)]}`);
- if(Math.abs(values[28])>.15||Math.abs(values[29])>.15||Math.abs(values[30]-values[31])>.003)throw Error('Water geometry height or animation continuity is invalid');
+ if(Math.abs(values[28])>.55||Math.abs(values[29])>.55||Math.abs(values[30]-values[31])>.003||Math.abs(values[28]-values[29])<.001)throw Error('Water geometry height or animation continuity is invalid');
+ if(!(values[32]>.35&&values[33]>.4&&Math.abs(values[34])<.001&&Math.abs(values[35])<.001&&Math.abs(values[36]-values[37])>.001&&values[38]>0&&values[39]>0))throw Error(`Rock waves or moving wakes are invalid: ${[...values.slice(32,40)]}`);
+ if(Math.abs(values[40]-values[41])>.01||Math.abs(values[42]-values[43])>.01||Math.abs(values[44]-values[45])>.01||Math.abs(values[46]-values[47])>.01)throw Error(`Wave normals do not match the displaced surface: ${[...values.slice(40,48)]}`);
  renderer.resize();const width=canvas.width,height=canvas.height,stride=Math.ceil(width*4/256)*256;
  const color=device.createTexture({size:[width,height],format:renderer.format,usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_SRC});renderer.context={getCurrentTexture:()=>color};
  async function capture(time){
