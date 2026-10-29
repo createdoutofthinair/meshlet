@@ -36,16 +36,20 @@ fn fresnel(cosine:f32)->f32{
 // primary, reflected and refracted rays can all see the same object.
 fn cubeHit(origin:vec3<f32>,direction:vec3<f32>)->f32{
  let safe=select(select(vec3<f32>(-.00001),vec3<f32>(.00001),direction>=vec3<f32>(0.0)),direction,abs(direction)>vec3<f32>(.00001));
- let a=(vec3<f32>(-.65,-.55,-.65)-origin)/safe;let b=(vec3<f32>(.65,.75,.65)-origin)/safe;
+ let a=(vec3<f32>(-.65,-.95,-.65)-origin)/safe;let b=(vec3<f32>(.65,.75,.65)-origin)/safe;
  let near=min(a,b);let far=max(a,b);let enter=max(near.x,max(near.y,near.z));let leave=min(far.x,min(far.y,far.z));
  if(leave<max(enter,0.0)){return -1.0;}return select(leave,enter,enter>0.0);
 }
 fn cubeColor(p:vec3<f32>)->vec3<f32>{
- let q=abs(p-vec3<f32>(0.0,.1,0.0))/vec3<f32>(.65);var n=vec3<f32>(0.0,0.0,sign(p.z));
- if(q.x>q.y&&q.x>q.z){n=vec3<f32>(sign(p.x),0.0,0.0);}else if(q.y>q.z){n=vec3<f32>(0.0,sign(p.y-.1),0.0);}
+ let q=abs(p-vec3<f32>(0.0,-.1,0.0))/vec3<f32>(.65,.85,.65);var n=vec3<f32>(0.0,0.0,sign(p.z));
+ if(q.x>q.y&&q.x>q.z){n=vec3<f32>(sign(p.x),0.0,0.0);}else if(q.y>q.z){n=vec3<f32>(0.0,sign(p.y+.1),0.0);}
  let light=normalize(vec3<f32>(-.35,.65,.55));let lit=.22+.78*max(dot(n,light),0.0);
- let seams=select(.72,1.0,abs(p.x)<.62&&abs(p.y-.1)<.62&&abs(p.z)<.62);
- return vec3<f32>(.68,.40,.19)*lit*seams;
+ // A subtle checker makes the underwater refraction distinguishable from
+ // the reflected upper part without changing the cube's silhouette.
+ let coord=select(select(p.xy,p.zy,abs(n.x)>.5),p.xz,abs(n.y)>.5);
+ let tiles=floor((coord.x+3.0)*4.0)+floor((coord.y+3.0)*4.0);
+ let pattern=select(.68,1.0,fract(tiles*.5)<.25);
+ return vec3<f32>(.80,.48,.23)*lit*pattern;
 }
 fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(0.0)),vec3<f32>(1.0/2.2)),1.0);}
 @fragment fn fragment(input:Screen)->@location(0) vec4<f32>{
@@ -69,7 +73,7 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
  let submergedHit=cubeHit(point-normal*.001,refracted);if(submergedHit>0.0 && submergedHit<travel){seabed=cubeColor(point-normal*.001+refracted*submergedHit);}
  let water=vec3<f32>(.018,.17,.16);
  let path=select(travel,submergedHit,submergedHit>0.0 && submergedHit<travel);
- let attenuation=exp(-vec3<f32>(.34,.15,.08)*path/clarity);
+ let attenuation=exp(-vec3<f32>(.17,.095,.065)*path/clarity);
  let transmitted=seabed*attenuation+water*(vec3<f32>(1.0)-attenuation);
  let sun=normalize(vec3<f32>(-.35,.65,.55));let halfVec=normalize(sun-ray);let spec=pow(max(dot(normal,halfVec),0.0),200.0)*1.2;
  let scatter=pow(max(dot(ray,sun),0.0),5.0)*.07*(1.0-cosView);let f=fresnel(cosView);
