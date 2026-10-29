@@ -170,7 +170,16 @@ try{
   let u=(f32(k%16u)+.5)/8.0-1.0;let v=(f32(k/16u)+.5)/8.0-1.0;
   let p=normalize(facePoint(face,u,v));let zero=vec3<f32>(0.0);let seed=frame.counts.z;
   let h=naturalHeight(terrain(p,seed),p,zero,zero,seed);
-  samples[n]=vec4<f32>(h,select(0.0,1.0,naturalLand(p,seed)),0.0,0.0);
+  let coast=naturalCoast(p,seed);let other=p+vec3<f32>(.000244140625,-.0001220703125,.000244140625);
+  let a=surfaceBase(p,p,zero,zero,seed,false).height;
+  let b=surfaceBase(p,other,p-other,zero,seed,false).height;
+  samples[n]=vec4<f32>(h,coast.x,a,b);
+ }
+ @compute @workgroup_size(64) fn coastShapeCheck(@builtin(global_invocation_id) gid:vec3<u32>){
+  let n=gid.x;if(n>=72u*72u){return;}
+  let u=.2083333333+(f32(n%72u)/71.0-.5)*.06;
+  let v=-.7083333333+(f32(n/72u)/71.0-.5)*.06;
+  let p=normalize(facePoint(5u,u,v));samples[n]=vec4<f32>(terrain(p,frame.counts.z),0.0,0.0,0.0);
  }
  @compute @workgroup_size(1) fn lakeSeparationCheck(){
   let p=normalize(probe.direction.xyz);let lake=worldLake(worldSample(p));
@@ -273,12 +282,32 @@ try{
  await splitRead.mapAsync(GPUMapMode.READ);const splitLake=new Float32Array(splitRead.getMappedRange().slice(0));splitRead.unmap();splitRead.destroy();waterWorld.destroy();
  if(!splitLake.every(Number.isFinite)||splitLake[0]>1e-5)throw new Error(`Separate basins were blended into one lake: ${[...splitLake]}`);
  const coastCount=6*16*16,coastPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'coastStabilityCheck'}});
- const coastBind=device.createBindGroup({layout:coastPipe.getBindGroupLayout(0),entries:[[0,renderer.uniform],[4,renderer.plates],[5,renderer.sampleBuffer]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
+ const coastBind=device.createBindGroup({layout:coastPipe.getBindGroupLayout(0),entries:[[0,renderer.uniform],[4,renderer.plates],[5,renderer.sampleBuffer],[7,renderer.world],[8,renderer.worldDirections],[10,renderer.worldFaces]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
  const coastRead=device.createBuffer({size:coastCount*16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),coastEncoder=device.createCommandEncoder(),coastPass=coastEncoder.beginComputePass();
  coastPass.setPipeline(coastPipe);coastPass.setBindGroup(0,coastBind);coastPass.dispatchWorkgroups(Math.ceil(coastCount/64));coastPass.end();coastEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,coastRead,0,coastCount*16);device.queue.submit([coastEncoder.finish()]);
  await coastRead.mapAsync(GPUMapMode.READ);const coastData=new Float32Array(coastRead.getMappedRange());let coastLand=0,coastSea=0;
- for(let i=0;i<coastData.length;i+=4){const h=coastData[i],classified=coastData[i+1]>.5;if(!Number.isFinite(h)||classified!==(h>=0))throw new Error(`Land/sea classification disagrees with terrain at sample ${i/4}: ${h}/${classified}`);if(classified)coastLand++;else coastSea++;}
+ for(let i=0;i<coastData.length;i+=4){
+  const [h,coast,a,b]=coastData.slice(i,i+4),land=h>=0;
+  if(![h,coast,a,b].every(Number.isFinite)||(coast>=0)!==land||(a>=0)!==land||(b>=0)!==land||Math.abs(a-b)>.00001)throw new Error(`Geographic coast disagrees across terrain representations at sample ${i/4}: ${[h,coast,a,b]}`);
+  if(land)coastLand++;else coastSea++;
+ }
  coastRead.unmap();coastRead.destroy();if(coastLand<100||coastSea<100)throw new Error(`Missing land or sea in coastline check: ${coastLand}/${coastSea}`);
+ // A known coastal region used to fragment into many narrow
+ // water/land transitions. Count edges in its geographic field, independent
+ // of the patch LOD and of the color used to render it.
+ const shapePipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'coastShapeCheck'}});
+ const shapeBind=device.createBindGroup({layout:shapePipe.getBindGroupLayout(0),entries:[[0,renderer.uniform],[4,renderer.plates],[5,renderer.sampleBuffer]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
+ const shapeRead=device.createBuffer({size:72*72*16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),shapeEncoder=device.createCommandEncoder(),shapePass=shapeEncoder.beginComputePass();
+ shapePass.setPipeline(shapePipe);shapePass.setBindGroup(0,shapeBind);shapePass.dispatchWorkgroups(81);shapePass.end();shapeEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,shapeRead,0,72*72*16);device.queue.submit([shapeEncoder.finish()]);
+ await shapeRead.mapAsync(GPUMapMode.READ);const shapeData=new Float32Array(shapeRead.getMappedRange());let landCells=0,seaCells=0,shoreEdges=0;
+ for(let y=0;y<72;y++)for(let x=0;x<72;x++){
+  const i=(y*72+x)*4,h=shapeData[i];if(!Number.isFinite(h))throw new Error('Coastal terrain contains a non-finite height');
+  const land=h>=0;if(land)landCells++;else seaCells++;
+  if(x>0&&land!==(shapeData[i-4]>=0))shoreEdges++;
+  if(y>0&&land!==(shapeData[i-72*4]>=0))shoreEdges++;
+ }
+ shapeRead.unmap();shapeRead.destroy();
+ if(landCells<1000||seaCells<1000||shoreEdges>1200)throw new Error(`Coastal terrain is excessively fragmented: ${JSON.stringify({landCells,seaCells,shoreEdges})}`);
  // The control must change the seeded land geometry, remain reproducible,
  // and leave the fully submerged seabed unchanged.
  renderer.valleys=0;const unshaped=await renderer.sampleTerrain();renderer.valleys=1;const shaped=await renderer.sampleTerrain(),shapedRepeat=await renderer.sampleTerrain();

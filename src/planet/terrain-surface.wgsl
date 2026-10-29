@@ -6,15 +6,18 @@ fn naturalHeight(base:f32,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32)
           +localNoise(high,low,delta,8388608.0,seed+421u)*.00005;
  return base+micro*smoothstep(-.05,.25,base);
 }
-// Bound all omitted ridge, detail, valley and micro amplitudes before doing
-// expensive full-resolution work. Ambiguous locations use the exact field.
-fn naturalLand(direction:vec3<f32>,seed:u32)->bool{
+// A geographic coast field is shared by land classification and shading.
+// The sign is exact and the shoreline value is capped to avoid derivative
+// jumps at the fast-path boundary. The second component is a smooth,
+// inexpensive broad-bed estimate for ocean color.
+fn naturalCoast(direction:vec3<f32>,seed:u32)->vec2<f32>{
  let base=terrainBase(direction,seed);let coarse=mix(base.basin,base.plain,base.land);
  let lower=coarse-(.393+.295*max(0.0,frame.settings.w))*base.roughness-.043*base.land-.00338;
  let upper=coarse+9.4*base.roughness+.043*base.land+.00338;
- if(lower>0.0){return true;}if(upper<0.0){return false;}
+ if(lower>0.0){return vec2<f32>(.05,coarse);}if(upper<0.0){return vec2<f32>(-.05,coarse);}
  let height=terrainShapeFromBase(base,seed,frame.settings.w).x;
- return naturalHeight(height,direction,vec3<f32>(0.0),vec3<f32>(0.0),seed)>=0.0;
+ let seaLevel=naturalHeight(height,direction,vec3<f32>(0.0),vec3<f32>(0.0),seed);
+ return vec2<f32>(clamp(seaLevel,-.05,.05),coarse);
 }
 // A world-space, slope-oriented procedural approximation of fluvial detail.
 // Sampling in 3D, rather than per patch, preserves shared vertices across LODs

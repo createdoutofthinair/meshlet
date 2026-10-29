@@ -220,8 +220,19 @@ fn terrainShapeFromBaseDetail(base:TerrainBase,seed:u32,valleyStrength:f32,direc
   let b=terrainPreciseLattice(d,detailOffset.direction,5000.0,vec3<f32>(0.0),vec3<f32>(0.0));
   plainsDetail=cellNoise(a.cell,a.fraction,seed+311u)*.035+cellNoise(b.cell,b.fraction,seed+313u)*.008;
  }else{plainsDetail=noise3(d*900.0,seed+311u)*.035+noise3(d*5000.0,seed+313u)*.008;}
- let unshaped=mix(basin,plain,land)+mountains+roughness*fine+directional+plainsDetail*land;
  let broadUnshaped=mix(basin,plain,land)+mountains;
+ // Full-strength ridge detail crossing sea level creates a dense maze of
+ // parallel islets and channels. Limit only part of that detail near the
+ // broad coastline, while preserving high coastal mountains and the same
+ // geographic height field at every LOD. This is not a hydraulic simulation.
+ let rawDetail=roughness*fine+directional+plainsDetail*land;
+ let rawHeight=broadUnshaped+rawDetail;
+ let coast=1.0-smoothstep(.15,.80,abs(broadUnshaped));
+ let lowRelief=1.0-smoothstep(.25,.80,abs(rawHeight));
+ let limit=.08+.25*abs(broadUnshaped);
+ let rounded=rawDetail*limit/(limit+abs(rawDetail));
+ let correction=clamp(rawDetail-rounded,-.20,.20)*coast*lowRelief;
+ let unshaped=rawHeight-correction;
  var valleys=0.0;
  if(valleyEnabled){
   let tangent=ridgeGradient-d*dot(ridgeGradient,d);let magnitude=length(tangent);

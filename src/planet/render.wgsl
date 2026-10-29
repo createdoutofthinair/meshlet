@@ -58,7 +58,10 @@ fn fs(in:Output)->@location(0) vec4<f32> {
  let radial=normalize(in.direction);let light=normalize(frame.sun.xyz);
  // Classify the sea from the same seeded world at every LOD, rather than
  // from interpolated heights of the triangles currently on screen.
- let land=naturalLand(radial,frame.counts.z);let h=select(min(in.height,0.0),max(in.height,0.0),land);
+ let coast=naturalCoast(radial,frame.counts.z);let land=coast.x>=0.0;let h=select(min(in.height,0.0),max(in.height,0.0),land);
+ // Filter the geographic sea boundary over its pixel footprint. This only
+ // antialiases the edge; it does not move the seeded shoreline with LOD.
+ let coastWidth=max(.00001,fwidth(coast.x)*.55);let seaCoverage=1.0-smoothstep(-coastWidth,coastWidth,coast.x);
  let pixelKm=max(length(dpdx(in.direction)),length(dpdy(in.direction)))*6371.0;var waterField=vec2<f32>(0.0);
  if(frame.hydrology.y>.5 && frame.hydrology.x>0.0 && land){
   // Query the seeded world at the fragment's location, not a water mask
@@ -66,8 +69,8 @@ fn fs(in:Output)->@location(0) vec4<f32> {
   waterField=worldSurfaceWater(radial,pixelKm);
  }
  let water=smoothstep(.1,.6,max(waterField.x,waterField.y));
- let flatOcean=!land && frame.settings.z>.5;
- var n=select(normalize(mix(in.normal,radial,water*.8)),radial,flatOcean);let slope=1.0-clamp(dot(n,radial),0.0,1.0);
+ let oceanFlatness=seaCoverage*select(0.0,1.0,frame.settings.z>.5);
+ var n=normalize(mix(normalize(mix(in.normal,radial,water*.8)),radial,oceanFlatness));let slope=1.0-clamp(dot(n,radial),0.0,1.0);
  let deep=vec3<f32>(0.012,0.055,0.092);let ocean=vec3<f32>(0.025,0.17,0.23);
  let lowland=vec3<f32>(0.25,0.31,0.20);let upland=vec3<f32>(0.30,0.28,0.22);
  let rock=vec3<f32>(0.34,0.34,0.32);let snow=vec3<f32>(0.66,0.71,0.72);
@@ -85,8 +88,11 @@ fn fs(in:Output)->@location(0) vec4<f32> {
  // steep mountain faces instead of painting the whole highland white.
  let snowCover=max(smoothstep(7.0,9.3,h),coldSnow)*(1.0-smoothstep(.03,.32,slope)*.85);
  base=mix(base,snow,snowCover);
- if(!land){base=mix(deep,ocean,smoothstep(-4.0,0.0,h));}
  if(land){base=mix(base,vec3<f32>(.025,.16,.19),water);}
+ // Color the sea from a continuous, seeded broad-bed field. Interpolated
+ // patch heights make the same ocean look different as terrain LOD changes.
+ let seaColor=mix(deep,ocean,smoothstep(-4.0,0.0,min(coast.y,0.0)));
+ base=mix(base,seaColor,seaCoverage);
  // A single filtered mineral band adds subtle variation without an expensive
  // extra normal-noise evaluation at every close-up pixel.
  let footprint=max(length(dpdx(in.relative)),length(dpdy(in.relative)));
@@ -101,7 +107,7 @@ fn fs(in:Output)->@location(0) vec4<f32> {
  }
  if((frame.counts.w&2u)!=0u){base=levelColor(in.level);}
  let diffuse=max(dot(n,light),0.0);let fill=.22+.10*max(n.y,0.0);
- var color=base*(fill+diffuse*.95)*(1.0-select(in.cavity,0.0,flatOcean)*.30);
+ var color=base*(fill+diffuse*.95)*(1.0-in.cavity*(1.0-oceanFlatness)*.30);
  let view=normalize(-in.relative);let rim=pow(1.0-clamp(dot(radial,view),0.0,1.0),4.0)*.055;
  color+=vec3<f32>(.10,.38,.58)*rim;
  // Compress highlights before display encoding so bright snow keeps
