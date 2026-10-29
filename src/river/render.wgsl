@@ -75,7 +75,16 @@ fn waterfallPosition(q:f32,t:f32,time:f32)->vec3<f32>{
  let y0=riverLevel(-8.0);let y1=riverLevel(10.0);let middle=sin(t*3.14159265);
  let across=q*riverHalfWidth();let fingers=sin(across*.12+time*.65)+.45*sin(across*.27-time*.38+t*5.0);
  let along=mix(-8.0,10.0,t)+middle*(2.2+1.2*fingers)+t*(1.0-t)*sin(across*.42+t*7.0-time*1.1)*1.1;
- let x=riverCenter(along)+across;let y=mix(y0,y1,t);
+ let x=riverCenter(along)+across;
+ // Join the upper and lower surfaces at their animated heights. A smooth
+ // profile rolls over the lip rather than meeting at a hard angular corner.
+ let upperSpeed=riverFlowSpeed(q,-8.0)/sqrt(1.0+pow(riverCenterSlope(-8.0),2.0));
+ let lowerSpeed=riverFlowSpeed(q,10.0)/sqrt(1.0+pow(riverCenterSlope(10.0),2.0));
+ let edge=1.0-smoothstep(.67,.98,abs(q));
+ let upper=riverSurfaceWaves(across,-8.0,motion[0].x,upperSpeed).x*(.62+.38*riverRiffle(-8.0));
+ let lower=riverSurfaceWaves(across,10.0,motion[0].x,lowerSpeed).x*(.62+.38*riverRiffle(10.0));
+ let wave=mix(upper,lower,t)*edge*riverFrame.optics.y;
+ let y=mix(y0,y1,smoothstep(0.0,1.0,t))+wave;
  return vec3<f32>(x,y,along);
 }
 // A separately tessellated falling sheet joins the upper and lower water meshes.
@@ -250,7 +259,7 @@ fn riverBubblePattern(p:vec2<f32>,time:f32)->f32{
   }
  }
  let edge=smoothstep(.015,.16,sqrt(second)-sqrt(first));
- return mix(.54,1.0,edge);
+ return mix(.88,1.0,edge);
 }
 @fragment fn fallFragment(input:VertexOut)->@location(0) vec4<f32>{
  let q=input.material.x;let across=q*riverHalfWidth();let travel=input.world.y*.12+motion[0].y*1.8;
@@ -332,7 +341,7 @@ fn viewDepth(depth:f32)->f32{return 5000.0/max(.001,10000.0-depth*9999.5);}
   let uv=raw+warp*.8;let blotch=riverFbm(uv);
   let fine=riverNoise(uv*2.4+vec2<f32>(9.3,5.7));var breakup=.65*blotch+.35*fine;
   let close=1.0-smoothstep(.35,2.0,footprint);
-  if(close>.01){let cellular=1.0-riverBubblePattern(uv*3.0,motion[0].y);breakup+=cellular*close*.32;}
+  if(close>.01){let cellular=1.0-riverBubblePattern(uv*3.0,motion[0].y);breakup+=cellular*close*.08;}
   let impactFoam=splash*smoothstep(.35,.68,breakup)*min(1.0,riverFrame.optics.z*1.2);
   let foamLight=.55+.45*ndl;let foamShade=mix(vec3<f32>(.32,.42,.41),vec3<f32>(.88,.91,.85),clamp(breakup,0.0,1.0));
   color=mix(color,foamShade*foamLight,impactFoam*.86);
