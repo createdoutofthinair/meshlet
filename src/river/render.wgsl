@@ -283,6 +283,47 @@ fn riverBubblePattern(p:vec2<f32>,time:f32)->f32{
  let alpha=edge*smoothstep(.46,.72,streak)*.28;
  return vec4<f32>(.77,.83,.81,alpha);
 }
+// Procedural density in a genuinely three-dimensional waterfall volume.
+// This models aerated falling water; it is not a fluid solver.
+fn waterfallDensity(p:vec3<f32>,time:f32)->f32{
+ let top=riverLevel(-8.0);let bottom=riverLevel(10.0);let height=max(1.0,top-bottom);
+ let t=(top-p.y)/height;let v=clamp(t,0.0,1.0);
+ let center=riverCenter(mix(-8.0,10.0,v));let across=p.x-center;let q=across/riverHalfWidth();
+ let curtain=mix(-8.0,10.0,v)+sin(v*3.14159265)*(2.0+1.2*sin(across*.12+time*.65));
+ let thickness=1.1+2.8*sin(v*3.14159265)+v*1.7;
+ let strand=riverFbm(vec2<f32>(across*.085,p.y*.08+time*1.3));
+ let depthNoise=riverNoise(vec2<f32>(p.z*.28+across*.035,p.y*.15+time*1.7));
+ let profile=1.0-smoothstep(thickness*.25,thickness*1.7,abs(p.z-curtain));
+ let banks=1.0-smoothstep(.89,1.02,abs(q));
+ let vertical=smoothstep(-.06,.035,t)*(1.0-smoothstep(.94,1.08,t));
+ return profile*banks*vertical*clamp(.2+strand*.9+depthNoise*.3,0.0,1.2);
+}
+fn safeRayDirection(d:vec3<f32>)->vec3<f32>{
+ return select(select(vec3<f32>(-.00001),vec3<f32>(.00001),d>=vec3<f32>(0.0)),d,abs(d)>vec3<f32>(.00001));
+}
+@fragment fn waterfallVolumeFragment(input:SkyVertex)->@location(0) vec4<f32>{
+ let eye=riverFrame.cameraDelta.xyz;let forward=normalize(-eye);let right=normalize(cross(forward,vec3<f32>(0.0,1.0,0.0)));let up=normalize(cross(right,forward));
+ let aspect=f32(riverFrame.config.z)/max(1.0,f32(riverFrame.config.w));
+ let ray=normalize(forward+right*input.uv.x*aspect*.57735027+up*input.uv.y*.57735027);
+ let width=riverHalfWidth()+120.0;let lower=riverLevel(10.0)-5.0;let upper=riverLevel(-8.0)+5.0;
+ let lo=vec3<f32>(-width,lower,-15.0);let hi=vec3<f32>(width,upper,30.0);
+ let inv=1.0/safeRayDirection(ray);let aa=(lo-eye)*inv;let bb=(hi-eye)*inv;
+ let near3=min(aa,bb);let far3=max(aa,bb);let start=max(0.0,max(near3.x,max(near3.y,near3.z)));
+ let end=min(far3.x,min(far3.y,far3.z));
+ let pixel=clamp(vec2<i32>(input.position.xy),vec2<i32>(0),vec2<i32>(textureDimensions(opaqueDepth))-vec2<i32>(1));
+ let depth=textureLoad(opaqueDepth,pixel,0);let sceneDistance=select(10000.0,viewDepth(depth)/max(.01,dot(ray,forward)),depth<.999999);
+ let stop=min(end,sceneDistance);if(stop<=start){return vec4<f32>(0.0);}
+ let stepSize=(stop-start)/48.0;var transmittance=1.0;var scattering=vec3<f32>(0.0);
+ let sun=normalize(riverFrame.sunSpeed.xyz);let phase=.55+.45*pow(max(dot(ray,sun),0.0),4.0);
+ for(var i=0u;i<48u;i++){
+  let p=eye+ray*(start+(f32(i)+.5)*stepSize);let density=waterfallDensity(p,motion[0].y);
+  let absorb=1.0-exp(-density*stepSize*.34);let variation=riverNoise(vec2<f32>(p.x*.12+p.z*.11,p.y*.14+motion[0].y));
+  let light=mix(vec3<f32>(.18,.30,.29),vec3<f32>(.68,.77,.75),variation)*phase;
+  scattering+=transmittance*absorb*light;transmittance*=1.0-absorb;
+ }
+ let alpha=1.0-transmittance;if(alpha<.001){return vec4<f32>(0.0);}
+ return vec4<f32>(displayColor(scattering/alpha)*alpha,alpha);
+}
 fn riverAdvectedBubbles(across:f32,z:f32,distance:f32,speed:f32)->f32{
  let offset=.17*sin(across*.018+z*.006);let a=fract(distance/32.0+offset);let b=fract(a+.5);let weight=1.0-abs(a*2.0-1.0);
  let pa=vec2<f32>(across,riverFlowCoordinate(z,a*32.0,speed))*4.0;
