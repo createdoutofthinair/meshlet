@@ -155,12 +155,17 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
  }
  // Small ballistic droplets, emitted at the detected surface crossing.
  let age=params.settings.x-impact[0].z;
- if(impact[0].w>0.0 && age>=0.0 && age<1.15){
+ if(includeCrown && impact[0].w>0.0 && age>=0.0 && age<1.15){
   for(var k=0u;k<12u;k++){
    let angle=f32(k)*2.399963;let speed=1.2+.12*f32(k%5u);let rise=2.6+.18*f32(k%4u);
    let center=vec3<f32>(impact[0].x+cos(angle)*speed*age, wave(impact[0].xy,impact[0].z,0.0)+rise*age-4.905*age*age,impact[0].y+sin(angle)*speed*age);
    if(center.y<0.0){continue;}let delta=origin-center;let b=dot(delta,direction);let disc=b*b-dot(delta,delta)+.0003;
-   if(disc>0.0){let hit= -b-sqrt(disc);if(hit>.001 && (distance<0.0||hit<distance)){distance=hit;color=vec3<f32>(.65,.82,.83);opacity=1.0;}}
+   if(disc>0.0){let hit= -b-sqrt(disc);if(hit>.001 && (distance<0.0||hit<distance)){
+    let n=normalize(origin+direction*hit-center);let edge=pow(1.0-clamp(dot(n,-direction),0.0,1.0),3.0);
+    let sun=normalize(vec3<f32>(-.35,.65,.55));let highlight=pow(max(dot(reflect(-sun,n),-direction),0.0),80.0);
+    distance=hit;color=mix(vec3<f32>(.20,.43,.44),vec3<f32>(.85,.95,.96),clamp(edge*.65+highlight,0.0,1.0));
+    opacity=clamp(.12+edge*.35+highlight*.42,.12,.75);
+   }}
   }
  }
  return ObjectHit(distance,color,opacity);
