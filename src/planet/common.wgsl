@@ -5,7 +5,7 @@ struct PlanetFrame {
   settings: vec4<f32>, // radius km, relief multiplier, ocean 0/1, valley detail
   counts: vec4<u32>, // active patches, new patches, seed, debug flags
   queueCounts: vec4<u32>, // normal updates, regional work, viewport width and height
-  hydrology: vec4<f32>, // erosion strength, rivers enabled, drainage detail enabled, reserved
+  hydrology: vec4<f32>, // erosion strength, rivers enabled, drainage detail enabled, overlay opacity
 };
 struct Patch {
   cube: vec4<f32>, // unnormalized cube-face center, face-space span

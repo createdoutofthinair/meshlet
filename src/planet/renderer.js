@@ -28,7 +28,7 @@ export class PlanetRenderer {
  constructor(canvas,adapter,device,context,timing,onError){
   Object.assign(this,{canvas,adapter,device,context,timing,onError});this.format=navigator.gpu.getPreferredCanvasFormat();
   this.cameraState={longitude:.8,latitude:.4,altitude:14000,surfaceHeight:0,mode:'orbit',heading:.45,pitch:.3};
-  this.seed=918273;this.relief=1;this.valleys=1;this.erosion=1;this.regional=true;this.rivers=true;this.biomes=true;this.ocean=true;this.followSun=true;this.culling=true;this.lodColors=false;this.wireframe=false;this.patchLines=false;
+  this.seed=918273;this.relief=1;this.valleys=1;this.erosion=1;this.regional=true;this.rivers=true;this.biomes=true;this.ocean=true;this.followSun=true;this.culling=true;this.lodColors=false;this.patchColors=false;this.meshletColors=false;this.wireframe=false;this.patchLines=false;this.meshletLines=false;this.debugOpacity=.75;
   this.budget=384;this.pixelSize=6;this.resolution=1;this.maxDepth=20;
   this.patchBytes=new ArrayBuffer(CAPACITY*PATCH_BYTES);this.patchFloats=new Float32Array(this.patchBytes);this.patchUints=new Uint32Array(this.patchBytes);
   this.slotByKey=new Map();this.stitchByKey=new Map();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.patches=[];this.pending=[];this.normalPending=[];
@@ -398,11 +398,11 @@ export class PlanetRenderer {
    sun=normalize(add(add(scale(camera.radial,low ? .32 : .72),scale(camera.right,low ? .9 : .55)),scale(camera.up,low ? .22 : .25)));
   }
   f.set([...sun,0],36);f.set([RADIUS_KM,this.relief,this.ocean?1:0,this.valleys],40);
-  const separateOcean=this.ocean&&!this.lodColors&&!this.wireframe&&!this.patchLines;
-  const flags=(this.culling?1:0)|(this.lodColors?2:0)|(this.wireframe?4:0)|(this.patchLines?8:0)|(this.biomes?16:0)|(separateOcean?32:0);
+  const separateOcean=this.ocean&&!this.lodColors&&!this.patchColors&&!this.meshletColors&&!this.wireframe&&!this.patchLines&&!this.meshletLines;
+  const flags=(this.culling?1:0)|(this.lodColors?2:0)|(this.wireframe?4:0)|(this.patchLines?8:0)|(this.biomes?16:0)|(separateOcean?32:0)|(this.patchColors?64:0)|(this.meshletColors?128:0)|(this.meshletLines?256:0);
   u.set([this.patches.length,this.pending.length,this.seed>>>0,flags],44);
   u.set([normals.length,this.regionPending.length,camera.width,camera.height],48);
-  f.set([this.erosion,this.rivers?1:0,this.regional?1:0,0],52);
+  f.set([this.erosion,this.rivers?1:0,this.regional?1:0,this.debugOpacity],52);
   const d=this.device;d.queue.writeBuffer(this.uniform,0,raw);d.queue.writeBuffer(this.patchBuffer,0,this.patchBytes);
   if(separateOcean){
    const view=new Float32Array(20);view.set([...camera.radial,camera.altitude],0);view.set([...camera.forward,camera.tanY],4);view.set([...camera.right,camera.tanX],8);view.set([...camera.up,camera.width],12);view[16]=camera.height;view[17]=camera.near;d.queue.writeBuffer(this.oceanView,0,view);

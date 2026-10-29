@@ -35,6 +35,8 @@ test('water reads terrain depth in a separate render pass',async()=>{
  assert.equal(renderPasses[0].colorAttachments.length,2);assert.equal(renderPasses[0].depthStencilAttachment.depthStoreOp,'store');
  assert.equal(renderPasses[1].colorAttachments.length,1);assert.equal(renderPasses[1].colorAttachments[0].loadOp,'load');assert.equal(renderPasses[1].depthStencilAttachment.depthLoadOp,'load');
  renderPasses.length=0;r.wireframe=true;r.frame(1200);await flush();assert.equal(renderPasses.length,1);
+ renderPasses.length=0;r.wireframe=false;r.meshletLines=true;r.meshletColors=true;r.debugOpacity=.4;r.frame(1400);await flush();assert.equal(renderPasses.length,1);
+ const bits=new Uint32Array(r.uniform.data)[47];assert.ok(bits&256);assert.ok(bits&128);assert.equal(bits&32,0);assert.ok(Math.abs(new Float32Array(r.uniform.data)[55]-.4)<.0001);
 });
 
 test('renderer prepares new geometry before swapping and keeps coverage while measuring',async()=>{

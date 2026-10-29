@@ -7,13 +7,17 @@ import {PlanetRenderer} from '../src/planet/renderer.js';
 class MockElement extends EventTarget {
  constructor(id=''){
   super();this.id=id;this.value='';this.textContent='';this.innerHTML='orbit hint';this.hidden=false;this.disabled=false;this.dataset={};
-  const classes=new Set();this.parentElement={classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)}};
+  this.checked=false;this.attributes={};this.style={};this.clientWidth=500;this.clientHeight=150;
+  const classes=new Set(),classList={add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x),toggle:(x,on)=>on?classes.add(x):classes.delete(x)};
+  this.classList=classList;this.parentElement={classList};
  }
- focus(){} closest(){return null;} setPointerCapture(){} querySelectorAll(){return [];}
+ focus(){} closest(){return null;} setPointerCapture(){} querySelectorAll(){return [];} setAttribute(key,value){this.attributes[key]=value;} click(){this.dispatchEvent(new Event('click'));}
+ getContext(){return {setTransform(){},clearRect(){},beginPath(){},moveTo(){},lineTo(){},stroke(){},fillText(){},setLineDash(){}};}
 }
 class MockDocument extends EventTarget {
- constructor(){super();this.elements=new Map();this.hidden=false;this.pointerLockElement=null;}
+ constructor(){super();this.elements=new Map();this.created=[];this.hidden=false;this.pointerLockElement=null;}
  getElementById(id){if(!this.elements.has(id))this.elements.set(id,new MockElement(id));return this.elements.get(id);}
+ createElement(tag){const element=new MockElement(tag);this.created.push(element);return element;}
  exitPointerLock(){this.pointerLockElement=null;}
 }
 const doc=new MockDocument();globalThis.document=doc;globalThis.Element=MockElement;globalThis.window=new EventTarget();
@@ -26,7 +30,7 @@ const renderer={cameraState,adapter:{info:{}},timing:false,seed:918273,relief:1,
  async sampleTerrain(direction){return direction?new Float32Array([...direction,1]):new Float32Array([1,0,0,1]);},
  async sampleRenderedSurface(){return 1;}};
 PlanetRenderer.create=async()=>renderer;
-doc.getElementById('seed').value='918273';doc.getElementById('error').hidden=true;
+doc.getElementById('seed').value='918273';doc.getElementById('error').hidden=true;doc.getElementById('planet-inspector').hidden=true;doc.getElementById('inspect-color').value='none';doc.getElementById('inspect-opacity').value='75';doc.getElementById('inspect-metric').value='frame';
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const tick=async time=>{const callback=animation;assert.ok(callback);callback(time);await flush();};
 const key=(type,code)=>{const event=new Event(type,{cancelable:true});Object.defineProperty(event,'code',{value:code});doc.dispatchEvent(event);};
@@ -69,4 +73,20 @@ test('a patch budget chosen while walking remains selected after returning to or
  doc.getElementById('walk').dispatchEvent(new Event('click'));await flush();
  doc.getElementById('quality').value='240';doc.getElementById('quality').dispatchEvent(new Event('change'));
  assert.equal(renderer.budget,240);doc.getElementById('orbit').dispatchEvent(new Event('click'));assert.equal(renderer.budget,240);
+});
+
+test('inspector opens, controls real renderer overlays and can pause its graph',async()=>{
+ const element=id=>doc.getElementById(id),change=id=>element(id).dispatchEvent(new Event('change'));
+ element('inspect-open').dispatchEvent(new Event('click'));assert.equal(element('planet-inspector').hidden,false);assert.equal(element('inspect-open').attributes['aria-expanded'],'true');
+ element('inspect-color').value='lod';change('inspect-color');assert.equal(renderer.lodColors,true);assert.equal(renderer.patchColors,false);
+ element('inspect-color').value='meshlet';change('inspect-color');assert.equal(renderer.meshletColors,true);assert.equal(renderer.lodColors,false);
+ element('inspect-patch-lines').checked=true;change('inspect-patch-lines');element('inspect-meshlet-lines').checked=true;change('inspect-meshlet-lines');
+ assert.equal(renderer.patchLines,true);assert.equal(renderer.meshletLines,true);
+ element('inspect-opacity').value='40';element('inspect-opacity').dispatchEvent(new Event('input'));assert.equal(renderer.debugOpacity,.4);
+ element('inspect-pause').dispatchEvent(new Event('click'));assert.equal(element('inspect-pause').textContent,'RESUME');
+ element('inspect-pause').dispatchEvent(new Event('click'));assert.equal(element('inspect-pause').textContent,'PAUSE');
+ element('inspect-export').dispatchEvent(new Event('click'));const link=doc.created.at(-1),exported=await (await fetch(link.href)).json();
+ assert.equal(link.download,'planet-inspector.json');assert.equal(exported.settings.colorOverlay,'meshlet');assert.equal(exported.settings.meshletLines,true);assert.ok(exported.samples.length>0);
+ element('inspect-close').dispatchEvent(new Event('click'));assert.equal(element('planet-inspector').hidden,true);assert.equal(element('inspect-open').attributes['aria-expanded'],'false');
+ assert.equal(renderer.meshletColors,true,'closing the window leaves the chosen overlay visible');
 });

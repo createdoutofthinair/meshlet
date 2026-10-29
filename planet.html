@@ -14,6 +14,38 @@
    <div class="planet-heading"><span class="kicker"><i></i> WORLD GENERATOR / 01</span><h1>Worlds from<br><em>one seed.</em></h1><p>Continents, mountain belts and ridges.<br>Generated as geometry on the GPU.</p></div>
    <div class="planet-readout"><span id="clearance-label">CAMERA CLEARANCE</span><strong id="altitude-overlay">—</strong><small id="clearance-note">above sampled surface near ground</small></div>
    <div id="planet-hint" class="planet-hint">DRAG TO TRAVEL <i></i> SCROLL TO CHANGE ALTITUDE <i></i> SHIFT + DRAG TO LOOK</div>
+   <button id="inspect-open" class="inspector-launch" type="button" aria-controls="planet-inspector" aria-expanded="false"><span>◫</span> INSPECTOR</button>
+   <aside id="planet-inspector" class="planet-inspector" role="dialog" aria-labelledby="inspect-title" hidden>
+    <header id="inspect-drag" class="inspector-head">
+     <div><span class="inspector-kicker">PLANET LAB / DIAGNOSTICS</span><h2 id="inspect-title">Terrain inspector <span>LIVE</span></h2></div>
+     <button id="inspect-close" type="button" aria-label="Close inspector">×</button>
+    </header>
+    <div class="inspector-body">
+     <div class="inspector-stats">
+      <div><span>FRAME</span><strong id="inspect-frame">—</strong><small>ms average</small></div>
+      <div><span>GPU RENDER</span><strong id="inspect-gpu">—</strong><small>ms sampled</small></div>
+      <div><span>PATCHES</span><strong id="inspect-patches">—</strong><small>active</small></div>
+      <div><span>LOD CHANGE</span><strong id="inspect-error">—</strong><small id="inspect-lod-status">px measured</small></div>
+     </div>
+     <div class="inspector-section-head"><div><span class="inspector-kicker">ROLLING HISTORY</span><h3>Measurements</h3></div><span id="inspect-recording" class="inspector-recording">● LIVE · 60 SEC</span></div>
+     <div class="inspector-chart-controls">
+      <label><span class="sr-only">Graph measurement</span><select id="inspect-metric"><option value="frame">Frame &amp; CPU time</option><option value="gpu">GPU pass times</option><option value="lod">LOD difference</option><option value="patches">Active patches</option><option value="meshlets">Visible meshlets</option></select></label>
+      <button id="inspect-pause" type="button">PAUSE</button><button id="inspect-clear" type="button">CLEAR</button><button id="inspect-export" type="button">EXPORT</button>
+     </div>
+     <div class="inspector-chart-wrap"><canvas id="inspect-chart" class="inspector-chart" role="img" aria-label="Scrolling measurement graph for the last 60 seconds"></canvas></div>
+     <div id="inspect-chart-legend" class="inspector-chart-legend"></div><p id="inspect-chart-note" class="inspector-note">Frame times include display pacing.</p>
+     <div class="inspector-section-head inspector-overlay-head"><div><span class="inspector-kicker">GEOMETRY ON SCREEN</span><h3>Visual overlays</h3></div></div>
+     <div class="inspector-overlay-controls">
+      <label class="inspector-select"><span>COLOR BY</span><select id="inspect-color"><option value="none">Natural terrain</option><option value="lod">Quadtree level</option><option value="patch">Patch identity</option><option value="meshlet">Meshlet identity</option></select></label>
+      <label class="inspector-opacity"><span>COLOR STRENGTH <b id="inspect-opacity-value">75%</b></span><input id="inspect-opacity" type="range" min="0" max="100" value="75"></label>
+     </div>
+     <div class="inspector-toggles"><label><input id="inspect-patch-lines" type="checkbox"><span>Patch boundaries</span></label><label><input id="inspect-meshlet-lines" type="checkbox"><span>Meshlet boundaries</span></label><label><input id="inspect-wireframe" type="checkbox"><span>Triangle wireframe</span></label></div>
+     <p id="inspect-overlay-note" class="inspector-note">Color and lines show the actual terrain mesh. Overlays can affect GPU timings.</p>
+     <div class="inspector-level-head"><span>ACTIVE PATCHES BY LEVEL</span><span id="inspect-level-total">—</span></div>
+     <div id="inspect-levels" class="inspector-levels"><span class="inspector-note">Waiting for terrain…</span></div>
+     <p class="inspector-note">Colors repeat every six quadtree levels. Counts describe selected patches, not visible pixels.</p>
+    </div>
+   </aside>
    <div id="walk-controls" class="walk-controls" role="group" aria-label="Walk direction" hidden>
     <button type="button" data-walk="forward" aria-label="Walk forward">↑</button>
     <button type="button" data-walk="left" aria-label="Walk left">←</button><button type="button" data-walk="back" aria-label="Walk backward">↓</button><button type="button" data-walk="right" aria-label="Walk right">→</button>
@@ -38,8 +70,9 @@
    <div class="section-title"><span>DETAIL &amp; DEBUG</span><span>03 / 04</span></div>
    <label class="planet-field"><span>PATCH BUDGET</span><select id="quality"><option value="120">Fast · 120 patches</option><option value="240">Balanced · 240 patches</option><option value="384" selected>High · 384 patches</option><option value="512">Extreme · 512 patches</option></select></label>
    <label class="planet-field"><span>RENDER SCALE</span><select id="render-scale"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></label>
-   <div class="debug-toggles planet-toggles"><label><input id="culling" type="checkbox" checked><span>GPU meshlet frustum culling</span></label><label><input id="lod-colors" type="checkbox"><span>Color quadtree levels</span></label><label><input id="patch-lines" type="checkbox"><span>Patch boundaries</span></label><label><input id="wireframe" type="checkbox"><span>Triangle wireframe</span></label></div>
-   <p class="metric-note">Walking keeps your selected budget. Choose Extreme for more ground detail or Balanced for less GPU work. LOD colors repeat every six levels.</p>
+   <div class="debug-toggles planet-toggles"><label><input id="culling" type="checkbox" checked><span>GPU meshlet frustum culling</span></label></div>
+   <button id="inspect-open-panel" class="inspector-panel-button" type="button" aria-controls="planet-inspector" aria-expanded="false">OPEN TERRAIN INSPECTOR <span>↗</span></button>
+   <p class="metric-note">Walking keeps your selected budget. The inspector shows LODs, patch and meshlet overlays, and measurement history.</p>
    <div class="section-title"><span>LIVE PERFORMANCE</span><span>04 / 04</span></div>
    <div class="planet-stats"><div><span>FRAME RATE</span><strong><b id="fps">—</b> <small>FPS</small></strong></div><div><span>FRAME TIME</span><strong><b id="frame-ms">—</b> <small>ms</small></strong></div></div>
    <div class="stat-row"><span>Visible patches</span><strong id="patches">—</strong></div><div class="stat-row"><span>Quadtree levels</span><strong id="depth">—</strong></div><div class="stat-row"><span>Visible meshlets</span><strong id="meshlets">—</strong></div><div class="stat-row"><span>Submitted triangles</span><strong id="triangles">—</strong></div><div class="stat-row"><span>CPU patch selection</span><strong id="selection-ms">—</strong></div><div class="stat-row"><span id="compute-label">GPU visibility</span><strong id="compute-ms">—</strong></div><div class="stat-row"><span>GPU rendering</span><strong id="render-ms">—</strong></div>

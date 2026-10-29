@@ -17,10 +17,17 @@ struct Output {
  @location(9) @interpolate(flat) detailHigh:vec3<f32>,
  @location(10) @interpolate(flat) detailLow:vec3<f32>,
  @location(11) detailOffset:vec3<f32>,
+ @location(12) @interpolate(flat) debugIds:vec2<u32>,
 };
 struct TerrainPixel {@location(0) color:vec4<f32>,@location(1) waterDepth:f32};
 fn onPatchEdge(a:vec2<u32>,b:vec2<u32>)->bool {
  return (a.x==b.x && (a.x==0u || a.x==CELLS)) || (a.y==b.y && (a.y==0u || a.y==CELLS));
+}
+fn onMeshletEdge(a:vec2<u32>,b:vec2<u32>)->bool {
+ return (a.x==b.x && a.x%4u==0u)||(a.y==b.y && a.y%4u==0u);
+}
+fn debugHash(value:u32)->u32{
+ var x=value;x=(x^(x>>16u))*2246822519u;x=(x^(x>>13u))*3266489917u;return x^(x>>16u);
 }
 fn stitchCoord(point:vec2<u32>,stitch:u32)->vec2<u32>{
  var p=point;
@@ -43,12 +50,22 @@ fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->
  let relative=tile.relative.xyz+vert.position.xyz;
  var mask=0u;
  if((frame.counts.w & 8u)!=0u){if(onPatchEdge(b,c)){mask|=1u;}if(onPatchEdge(c,a)){mask|=2u;}if(onPatchEdge(a,b)){mask|=4u;}}
+ if((frame.counts.w & 256u)!=0u){if(onMeshletEdge(b,c)){mask|=8u;}if(onMeshletEdge(c,a)){mask|=16u;}if(onMeshletEdge(a,b)){mask|=32u;}}
  var bary=vec3<f32>(0.0,0.0,1.0);if(corner%3u==0u){bary=vec3<f32>(1.0,0.0,0.0);}else if(corner%3u==1u){bary=vec3<f32>(0.0,1.0,0.0);}
  var out:Output;out.position=frame.viewProjection*vec4<f32>(relative,1.0);out.normal=vert.normal.xyz;
  out.direction=normalize(tile.centerDirection.xyz+vert.position.xyz/frame.settings.x);out.relative=relative;out.height=vert.position.w;
  out.level=tile.details.y;out.bary=bary;out.edgeMask=mask;out.cavity=vert.normal.w;out.surface=vert.surface;
  out.detailHigh=tile.centerDirection.xyz;out.detailLow=tile.centerLow.xyz;out.detailOffset=vert.position.xyz/frame.settings.x;
+ out.debugIds=vec2<u32>(0u);
+ if((frame.counts.w&192u)!=0u){
+  let patchId=debugHash(bitcast<u32>(tile.cube.x)^debugHash(bitcast<u32>(tile.cube.y))^debugHash(bitcast<u32>(tile.cube.z))^tile.details.y);
+  out.debugIds=vec2<u32>(patchId,debugHash(patchId^(meshlet+1u)*2654435761u));
+ }
  return out;
+}
+fn identityColor(id:u32)->vec3<f32>{
+ let palette=array<vec3<f32>,10>(vec3<f32>(.20,.75,.90),vec3<f32>(.35,.80,.48),vec3<f32>(.94,.70,.24),vec3<f32>(.89,.42,.36),vec3<f32>(.72,.44,.88),vec3<f32>(.41,.55,.92),vec3<f32>(.24,.81,.72),vec3<f32>(.91,.53,.70),vec3<f32>(.78,.80,.32),vec3<f32>(.53,.68,.91));
+ return palette[id%10u];
 }
 fn levelColor(level:u32)->vec3<f32>{
  let palette=array<vec3<f32>,6>(vec3<f32>(0.12,0.66,0.80),vec3<f32>(0.23,0.75,0.48),vec3<f32>(0.85,0.67,0.20),vec3<f32>(0.90,0.36,0.20),vec3<f32>(0.73,0.27,0.68),vec3<f32>(0.36,0.37,0.90));
@@ -113,7 +130,6 @@ fn fs(in:Output)->TerrainPixel {
   let variation=medium*.075*mediumFilter;
   base=max(vec3<f32>(0.0),base*(1.0+variation)+vec3<f32>(.012,.005,-.008)*medium*mediumFilter);
  }
- if((frame.counts.w&2u)!=0u){base=levelColor(in.level);}
  let diffuse=max(dot(n,light),0.0);let fill=.22+.10*max(n.y,0.0);
  var color=base*(fill+diffuse*.95)*(1.0-in.cavity*(1.0-oceanFlatness)*.30);
  let view=normalize(-in.relative);let rim=pow(1.0-clamp(dot(radial,view),0.0,1.0),4.0)*.055;
@@ -122,9 +138,15 @@ fn fs(in:Output)->TerrainPixel {
  // shading detail instead of clipping against the canvas's white limit.
  color=color/(vec3<f32>(1.0)+color*.28);
  color=pow(max(color,vec3<f32>(0.0)),vec3<f32>(1.0/2.2));
- if((frame.counts.w&12u)!=0u){
+ var debugColor=vec3<f32>(0.0);var hasColor=false;
+ if((frame.counts.w&2u)!=0u){debugColor=levelColor(in.level);hasColor=true;}
+ if((frame.counts.w&64u)!=0u){debugColor=identityColor(in.debugIds.x);hasColor=true;}
+ if((frame.counts.w&128u)!=0u){debugColor=identityColor(in.debugIds.y);hasColor=true;}
+ if(hasColor){color=mix(color,debugColor,clamp(frame.hydrology.w,0.0,1.0));}
+ if((frame.counts.w&268u)!=0u){
   let edge=vec3<f32>(1.0)-smoothstep(vec3<f32>(.55),vec3<f32>(1.7),in.bary/max(fwidth(in.bary),vec3<f32>(.00001)));
   if((frame.counts.w&4u)!=0u){color=mix(color,vec3<f32>(.02,.03,.04),max(edge.x,max(edge.y,edge.z))*.75);}
+  if((frame.counts.w&256u)!=0u){var e=0.0;if((in.edgeMask&8u)!=0u){e=max(e,edge.x);}if((in.edgeMask&16u)!=0u){e=max(e,edge.y);}if((in.edgeMask&32u)!=0u){e=max(e,edge.z);}color=mix(color,vec3<f32>(1.0,.68,.23),e*.88);}
   if((frame.counts.w&8u)!=0u){var e=0.0;if((in.edgeMask&1u)!=0u){e=max(e,edge.x);}if((in.edgeMask&2u)!=0u){e=max(e,edge.y);}if((in.edgeMask&4u)!=0u){e=max(e,edge.z);}color=mix(color,vec3<f32>(.9,.98,1.0),e*.85);}
  }
  // The second target retains the fragment depth and flags geographic lake

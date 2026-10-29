@@ -1,7 +1,8 @@
 import {PlanetRenderer} from './renderer.js';
 import {SurfaceWalker,WALK_EYE_HEIGHT_KM,directionFromCamera,setCameraDirection} from './walk.js';
+import {PlanetInspector} from './inspector.js';
 const $=id=>document.getElementById(id);
-const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','walk','walk-help','generation-status','seed-form','seed','random','orbit','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','lod-colors','patch-lines','wireframe','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','transition-error','transition-status','timing-note'];
+const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','walk','walk-help','generation-status','seed-form','seed','random','orbit','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','transition-error','transition-status','timing-note'];
 const el=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const MIN_ALT=.03,MAX_ALT=30000;
 const fmt=n=>Math.round(n).toLocaleString('en-US');
@@ -14,6 +15,7 @@ function seedNumber(value){
  let h=2166136261;for(const byte of new TextEncoder().encode(value)){h^=byte;h=Math.imul(h,16777619);}return h>>>0;
 }
 let renderer,walker,previous=0,frames=[],cpuFrames=[],ready=false,findBusy=false,walkEpoch=0,walkLanding=false;
+const inspector=new PlanetInspector(()=>renderer);
 const keys=new Set(),touchWalk=new Set(),orbitHint=el['planet-hint'].innerHTML;
 const inputForWalk=()=>({forward:Number(keys.has('KeyW')||keys.has('ArrowUp')||touchWalk.has('forward'))-Number(keys.has('KeyS')||keys.has('ArrowDown')||touchWalk.has('back')),strafe:Number(keys.has('KeyD')||keys.has('ArrowRight')||touchWalk.has('right'))-Number(keys.has('KeyA')||keys.has('ArrowLeft')||touchWalk.has('left')),fast:keys.has('ShiftLeft')||keys.has('ShiftRight')});
 function loading(show,title='Creating your world',detail='Generating terrain on the GPU'){el.loading.hidden=!show;el['loading-title'].textContent=title;el['loading-detail'].textContent=detail;}
@@ -107,7 +109,7 @@ function frame(now){
   walker?.advance(now);
   const cpu=renderer.frame(now);
   if(cpu!=null)walker?.afterFrame();
-  if(cpu!=null){const delta=previous?now-previous:0;previous=now;if(delta>0&&delta<5000){frames.push(delta);if(frames.length>60)frames.shift();}cpuFrames.push(cpu);if(cpuFrames.length>60)cpuFrames.shift();}
+  if(cpu!=null){const delta=previous?now-previous:0;previous=now;if(delta>0&&delta<5000){frames.push(delta);if(frames.length>60)frames.shift();}cpuFrames.push(cpu);if(cpuFrames.length>60)cpuFrames.shift();inspector.record(now,delta,cpu);}
   if(!ready&&renderer.latest.visibleMeshlets!=null){ready=true;loading(false);}
   updateTelemetry();
  }catch(error){fail(error.message);}
@@ -172,7 +174,7 @@ el.ocean.addEventListener('change',()=>{if(!renderer)return;renderer.ocean=el.oc
 el['sun-follow'].addEventListener('change',()=>{if(renderer)renderer.followSun=el['sun-follow'].checked;});
 el.quality.addEventListener('change',()=>{if(renderer){renderer.budget=Number(el.quality.value);renderer.needsSelection=true;}});
 el['render-scale'].addEventListener('change',()=>{if(renderer){renderer.resolution=Number(el['render-scale'].value);renderer.needsSelection=true;}});
-for(const [id,key] of [['culling','culling'],['lod-colors','lodColors'],['patch-lines','patchLines'],['wireframe','wireframe']])el[id].addEventListener('change',()=>{if(renderer)renderer[key]=el[id].checked;});
+el.culling.addEventListener('change',()=>{if(renderer)renderer.culling=el.culling.checked;});
 let drag=null;
 function look(dx,dy){
  const camera=renderer.cameraState;camera.heading-=dx*.004;camera.pitch=Math.max(-1.35,Math.min(1.35,camera.pitch+dy*.004));renderer.needsSelection=true;
