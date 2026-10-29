@@ -29,7 +29,7 @@ const H:f32=.23;
 struct Out{@builtin(position) pos:vec4<f32>,@location(0) uv:vec2<f32>,@location(1) world:vec3<f32>};
 @vertex fn vertex(@builtin(vertex_index) index:u32,@builtin(instance_index) instance:u32)->Out{
  let corners=array<vec2<f32>,6>(vec2<f32>(-1.0,-1.0),vec2<f32>(1.0,-1.0),vec2<f32>(-1.0,1.0),vec2<f32>(-1.0,1.0),vec2<f32>(1.0,-1.0),vec2<f32>(1.0,1.0));
- let uv=corners[index];let p=particles[instance].position.xyz;let forward=normalize(params.eye.xyz);let right=normalize(cross(vec3<f32>(0.0,1.0,0.0),forward));let up=normalize(cross(forward,right));
+ let uv=corners[index];let p=particles[instance].position.xyz;let forward=normalize(params.eye.xyz-vec3<f32>(0.0,1.0,0.0));let right=normalize(cross(vec3<f32>(0.0,1.0,0.0),forward));let up=normalize(cross(forward,right));
  let world=p+(right*uv.x+up*uv.y)*.09;return Out(params.view*vec4<f32>(world,1.0),uv,p);
 }
 @fragment fn fragment(input:Out)->@location(0) vec4<f32>{
@@ -37,4 +37,11 @@ struct Out{@builtin(position) pos:vec4<f32>,@location(0) uv:vec2<f32>,@location(
  let right=normalize(cross(vec3<f32>(0.0,1.0,0.0),view));let up=normalize(cross(view,right));let n=normalize(right*input.uv.x+up*input.uv.y+view*z);
  let light=normalize(vec3<f32>(-.4,.8,.5));let diffuse=max(dot(n,light),0.0);let spec=pow(max(dot(n,normalize(light+view)),0.0),70.0);let fresnel=pow(1.0-max(dot(n,view),0.0),5.0);
  return vec4<f32>(vec3<f32>(.035,.20,.23)*(.5+diffuse*.75)+vec3<f32>(.86,.95,1.0)*spec*.9+vec3<f32>(.18,.29,.3)*fresnel,1.0);
+}
+struct DepthOut{@location(0) depth:f32,@builtin(frag_depth) z:f32};
+@fragment fn particleDepth(input:Out)->DepthOut{
+ let r=dot(input.uv,input.uv);if(r>1.0){discard;}
+ let view=normalize(params.eye.xyz-input.world);let front=input.world+view*(sqrt(max(0.0,1.0-r))*.09);
+ let projected=params.view*vec4<f32>(front,1.0);
+ return DepthOut(length(params.eye.xyz-front),projected.z/projected.w);
 }
