@@ -243,9 +243,12 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
  for(var eventIndex=0u;eventIndex<30u;eventIndex++){
  let event=impact[eventIndex];
  let foamAge=time-event.z;
- if(event.w>0.0 && foamAge>=0.0 && foamAge<3.0){
-  let relative=point.xz-event.xy;let radius=length(relative);let front=.16+foamAge*.65;
-  let envelope=exp(-pow((radius-front)/(.18+foamAge*.12),2.0))*(1.0-smoothstep(1.3,3.0,foamAge));
+ if(event.w>0.0 && foamAge>=0.0 && foamAge<6.0){
+  let relative=point.xz-event.xy-vec2<f32>(.08,.025)*foamAge;let radius=length(relative);let front=.16+foamAge*.48;
+  let lifetime=1.0-smoothstep(3.6,6.0,foamAge);
+  let outer=exp(-pow((radius-front)/(.20+foamAge*.10),2.0));
+  let trailing=exp(-pow(radius/(.30+foamAge*.22),2.0))*.45;
+  let envelope=max(outer,trailing)*lifetime;
   let uv=relative*8.0+vec2<f32>(foamAge*.8,-foamAge*.5);let broken=noise(uv)*.40+noise(uv*2.4+vec2<f32>(4.2,6.1))*.30+noise(uv*5.3+vec2<f32>(8.1,4.9))*.20+noise(uv*10.0+vec2<f32>(2.1,11.0))*.10;
   let foam=envelope*smoothstep(.32,.67,broken)*.82;
   color=mix(color,foamColor(normal),foam);
