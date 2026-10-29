@@ -2,6 +2,8 @@
 // and Martins Upitis' ocean shader. Independent WGSL implementation.
 struct Params {eye:vec4<f32>, settings:vec4<f32>, viewport:vec4<f32>};
 @group(0) @binding(0) var<uniform> params:Params;
+struct FloatingBall {position:vec4<f32>,velocity:vec4<f32>};
+@group(0) @binding(1) var<storage,read_write> balls:array<FloatingBall>;
 struct Screen {@builtin(position) pos:vec4<f32>};
 @vertex fn vertex(@builtin(vertex_index) id:u32)->Screen{
  let p=array<vec2<f32>,3>(vec2<f32>(-1.0,-1.0),vec2<f32>(3.0,-1.0),vec2<f32>(-1.0,3.0));return Screen(vec4<f32>(p[id],0.0,1.0));
@@ -14,6 +16,19 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
  let large=1.0-smoothstep(25.0,120.0,dist);let mid=1.0-smoothstep(10.0,48.0,dist);let fine=1.0-smoothstep(4.0,18.0,dist);
  let a=sin(p.x*.57+p.y*.32+time*.72)*.12*large;let b=sin(p.x*1.3-p.y*.8-time*1.05)*.055*mid;
  let c=sin(p.x*2.6+p.y*2.05+time*1.5)*.018*fine;return (a+b+c)*params.settings.y;
+}
+// Buoyancy, drag and a gentle prescribed current are integrated on the GPU.
+@compute @workgroup_size(8) fn updateBalls(@builtin(global_invocation_id) id:vec3<u32>){
+ if(id.x>=6u){return;}var ball=balls[id.x];let dt=min(.033,params.settings.w);
+ let water=wave(ball.position.xz,params.settings.x,0.0);let radius=ball.position.w;
+ let submerged=clamp((water-(ball.position.y-radius))/(2.0*radius),0.0,1.0);
+ let force=9.81*(submerged*2.0-1.0);ball.velocity.y=(ball.velocity.y+force*dt)*exp(-2.5*dt);
+ let current=vec2<f32>(.18,.06);let drift=mix(ball.velocity.xz,current,1.0-exp(-.45*dt));ball.velocity.x=drift.x;ball.velocity.z=drift.y;
+ ball.position=vec4<f32>(ball.position.xyz+ball.velocity.xyz*dt,radius);
+ // Keep the objects in the test area without teleportation.
+ if(abs(ball.position.x)>3.0){ball.position.x=clamp(ball.position.x,-3.0,3.0);ball.velocity.x*= -.7;}
+ if(abs(ball.position.z)>2.5){ball.position.z=clamp(ball.position.z,-2.5,2.5);ball.velocity.z*= -.7;}
+ balls[id.x]=ball;
 }
 fn waveNormal(p:vec2<f32>,time:f32,dist:f32)->vec3<f32>{
  let e=.035;let dx=(wave(p+vec2<f32>(e,0.0),time,dist)-wave(p-vec2<f32>(e,0.0),time,dist))/(2.0*e);
@@ -56,28 +71,45 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let pattern=select(.68,1.0,fract(tiles*.5)<.25);
  return vec3<f32>(.80,.48,.23)*lit*pattern;
 }
+struct ObjectHit {distance:f32,color:vec3<f32>};
+fn objectHit(origin:vec3<f32>,direction:vec3<f32>)->ObjectHit{
+ var distance=cubeHit(origin,direction);var color=vec3<f32>(0.0);
+ if(distance>0.0){color=cubeColor(origin+direction*distance);}
+ for(var i=0u;i<6u;i++){
+  let ball=balls[i];let delta=origin-ball.position.xyz;let b=dot(delta,direction);let discriminant=b*b-dot(delta,delta)+ball.position.w*ball.position.w;
+  if(discriminant>0.0){let root=sqrt(discriminant);var hit= -b-root;if(hit<=.001){hit= -b+root;}
+   if(hit>.001 && (distance<0.0 || hit<distance)){
+    distance=hit;let normal=normalize(origin+direction*hit-ball.position.xyz);let sun=normalize(vec3<f32>(-.35,.65,.55));
+    let palette=array<vec3<f32>,6>(vec3<f32>(.85,.24,.08),vec3<f32>(.95,.71,.13),vec3<f32>(.18,.53,.70),vec3<f32>(.78,.28,.18),vec3<f32>(.80,.76,.50),vec3<f32>(.24,.56,.42));
+    let diffuse=.28+.72*max(dot(normal,sun),0.0);let spec=pow(max(dot(reflect(-sun,normal),-direction),0.0),50.0);
+    color=palette[i]*diffuse+vec3<f32>(.55)*spec;
+   }
+  }
+ }
+ return ObjectHit(distance,color);
+}
 fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(0.0)),vec3<f32>(1.0/2.2)),1.0);}
 @fragment fn fragment(input:Screen)->@location(0) vec4<f32>{
  let size=params.viewport.xy;let xy=vec2<f32>(input.pos.x/size.x*2.0-1.0,1.0-input.pos.y/size.y*2.0);
  let eye=params.eye.xyz;let forward=normalize(vec3<f32>(0.0,0.0,0.0)-eye);let right=normalize(cross(forward,vec3<f32>(0.0,1.0,0.0)));let up=normalize(cross(right,forward));
  let ray=normalize(forward+right*xy.x*(size.x/size.y)*.57735027+up*xy.y*.57735027);let time=params.settings.x;
- let direct=cubeHit(eye,ray);
- if(ray.y>=-.001){if(direct>0.0){return display(cubeColor(eye+ray*direct));}return display(sky(ray));}
+ let direct=objectHit(eye,ray);
+ if(ray.y>=-.001){if(direct.distance>0.0){return display(direct.color);}return display(sky(ray));}
  var t= -eye.y/ray.y;for(var i=0u;i<5u;i++){let p=eye+ray*t;t=(wave(p.xz,time,t)-eye.y)/ray.y;}
- if(direct>0.0 && (t<=0.0 || direct<t)){return display(cubeColor(eye+ray*direct));}
+ if(direct.distance>0.0 && (t<=0.0 || direct.distance<t)){return display(direct.color);}
  if(t<=0.0 || t>200.0){return display(sky(ray));}
  let point=eye+ray*t;let normal=waveNormal(point.xz,time,t);
  let cosView=max(dot(-ray,normal),0.0);let reflectedRay=reflect(ray,normal);var reflection=sky(reflectedRay);
- let reflectedHit=cubeHit(point+normal*.001,reflectedRay);if(reflectedHit>0.0){reflection=cubeColor(point+normal*.001+reflectedRay*reflectedHit);}
+ let reflectedHit=objectHit(point+normal*.001,reflectedRay);if(reflectedHit.distance>0.0){reflection=reflectedHit.color;}
  let refracted=refract(ray,normal,1.0/1.333);
  let floorDepth=2.2;let travel=min(50.0,(floorDepth+point.y)/max(.05,-refracted.y));let bottom=point+refracted*travel;
  let clarity=max(.2,params.settings.z);
  let causticWave=sin(bottom.x*3.3+time*1.2+sin(bottom.z*2.4-time))*sin(bottom.z*3.0-time*.9+sin(bottom.x*2.0+time));
  let caustics=pow(max(0.0,causticWave),5.0)*.22*exp(-floorDepth*.35);
  var seabed=ground(bottom.xz)*(1.0+caustics);
- let submergedHit=cubeHit(point-normal*.001,refracted);if(submergedHit>0.0 && submergedHit<travel){seabed=cubeColor(point-normal*.001+refracted*submergedHit);}
+ let submergedHit=objectHit(point-normal*.001,refracted);if(submergedHit.distance>0.0 && submergedHit.distance<travel){seabed=submergedHit.color;}
  let water=vec3<f32>(.018,.17,.16);
- let path=select(travel,submergedHit,submergedHit>0.0 && submergedHit<travel);
+ let path=select(travel,submergedHit.distance,submergedHit.distance>0.0 && submergedHit.distance<travel);
  let attenuation=exp(-vec3<f32>(.17,.095,.065)*path/clarity);
  let transmitted=seabed*attenuation+water*(vec3<f32>(1.0)-attenuation);
  let sun=normalize(vec3<f32>(-.35,.65,.55));let halfVec=normalize(sun-ray);
