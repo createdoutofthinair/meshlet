@@ -9,7 +9,7 @@ function harness(){
  device.createCommandEncoder=()=>({beginComputePass(){return {setPipeline(p){operations.push(['compute',p]);},setBindGroup(){},dispatchWorkgroups(n){operations.push(['dispatch',n]);},end(){}};},beginRenderPass(descriptor){operations.push(['pass',descriptor]);return {setPipeline(p){operations.push(['render',p]);},setBindGroup(){},setIndexBuffer(){},draw(n,instances){operations.push(['draw',n,instances]);},drawIndexed(n){operations.push(['drawIndexed',n]);},end(){}};},finish(){return {};}});
  const canvas={width:800,height:500},context={getCurrentTexture:()=>({createView:()=>({})})},r=new RiverRenderer(canvas,{},device,context,()=>{});
  const texture=()=>({createView:()=>({})});
- Object.assign(r,{ready:true,dirty:true,frameBuffer:{data:new ArrayBuffer(224)},reflectionFrame:{data:new ArrayBuffer(224)},depthTexture:texture(),sceneTexture:texture(),reflectionTexture:texture(),reflectionDepth:texture(),geometryPipes:['bankCompute','waterCompute','rockCompute'],geometryBinds:[{},{},{}],flowPipe:'flowCompute',flowBind:{},skyPipe:'sky',skyBinds:[{},{}],compositePipe:'composite',compositeBind:{},renderPipes:['bankRender','waterRender','reflectionRender','rockRender','rockReflectionRender'],renderBinds:[{},{},{},{},{}],indices:[{},{}]});
+ Object.assign(r,{ready:true,dirty:true,frameBuffer:{data:new ArrayBuffer(224)},reflectionFrame:{data:new ArrayBuffer(224)},depthTexture:texture(),sceneTexture:texture(),reflectionTexture:texture(),reflectionDepth:texture(),geometryPipes:['bankCompute','waterCompute','rockCompute'],geometryBinds:[{},{},{}],flowPipe:'flowCompute',flowBind:{},skyPipe:'sky',skyBinds:[{},{}],compositePipe:'composite',compositeBind:{},fallPipe:'fallRender',fallBind:{},sprayPipe:'sprayRender',sprayBind:{},renderPipes:['bankRender','waterRender','reflectionRender','rockRender','rockReflectionRender'],renderBinds:[{},{},{},{},{}],indices:[{},{}]});
  r.resize=()=>{};return {r,operations};
 }
 test('GPU frame builds separate bank and water meshes and advances only unpaused water',async()=>{
@@ -26,6 +26,13 @@ test('GPU frame builds separate bank and water meshes and advances only unpaused
  assert.equal(r.frame(1516),true);await flush();frame=new Float32Array(r.frameBuffer.data);assert.ok(Math.abs(frame[19]-.5)<1e-6,'slow frames still advance the correct elapsed time');
  r.paused=true;r.dirty=true;assert.equal(r.frame(1532),true);await flush();frame=new Float32Array(r.frameBuffer.data);assert.equal(frame[19],0);
  assert.equal(operations.filter(x=>x[0]==='compute'&&x[1]==='bankCompute').length,1);
+});
+
+test('waterfall draws its water sheet and three-dimensional spray only when enabled',async()=>{
+ const {r,operations}=harness();r.waterfall=true;assert.equal(r.frame(1000),true);await flush();
+ assert.deepEqual(operations.filter(x=>x[0]==='render').slice(-3).map(x=>x[1]),['waterRender','fallRender','sprayRender']);
+ assert.ok(operations.some(x=>x[0]==='draw'&&x[1]===80*48*6));assert.ok(operations.some(x=>x[0]==='draw'&&x[1]===6&&x[2]===1536));
+ operations.length=0;r.spray=0;assert.equal(r.frame(1016),true);await flush();assert.ok(!operations.some(x=>x[0]==='render'&&x[1]==='sprayRender'));
 });
 
 test('reflection quality recreates and rebinds appropriately sized GPU targets',()=>{

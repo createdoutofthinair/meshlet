@@ -22,6 +22,7 @@ test('river page selects reaches and applies controls to the GPU renderer',async
  e('flow-arrows').checked=true;e('flow-arrows').dispatchEvent(new Event('change'));assert.equal(renderer.showFlow,true);
  e('waterfall').checked=true;e('waterfall').dispatchEvent(new Event('change'));assert.equal(renderer.waterfall,true);assert.equal(renderer.dirty,true);assert.equal(renderer.camera.yaw,2.8);
  e('drop').value='500';e('drop').dispatchEvent(new Event('input'));assert.equal(renderer.drop,50);
+ e('spray').value='120';e('spray').dispatchEvent(new Event('input'));assert.equal(renderer.spray,1.2);
  e('paused').checked=true;e('paused').dispatchEvent(new Event('change'));assert.equal(renderer.paused,true);
  e('next-reach').dispatchEvent(new Event('click'));await flush();assert.equal(renderer.variant,1);
  e('seed').value='42';e('seed-form').dispatchEvent(new Event('submit',{cancelable:true}));await flush();assert.equal(renderer.seed,42);assert.equal(renderer.variant,0);assert.equal(e('planet-link').href,'./planet.html?seed=42');

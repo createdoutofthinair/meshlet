@@ -7,7 +7,7 @@ struct RiverFrame {
  optics:vec4<f32>, // clarity, ripple strength, foam, flow arrows
  config:vec4<u32>, // seed, reach variant, viewport width and height
  reflectionViewProjection:mat4x4<f32>, // view reflected in the sloped river plane
- waterfall:vec4<f32>, // enabled, drop height in meters, reserved, reserved
+ waterfall:vec4<f32>, // enabled, drop height in meters, spray strength, reserved
 };
 struct Reach {
  info:vec4<f32>, // half width m, surface slope, discharge, local phase
@@ -81,7 +81,9 @@ fn riverGround(p:vec2<f32>)->f32{
  let fine=(riverNoise(p*.055+vec2<f32>(11.2,reach.info.w))-.5)*riverFrame.shape.w*.8*smoothstep(1.01,1.45,side);
  let ridge=riverFrame.waterfall.x*smoothstep(1.0,2.0,side)*exp(-pow((p.y+95.0)/260.0,2.0));
  let mountain=ridge*(24.0+85.0*riverFbm(p*.003+vec2<f32>(reach.info.w,8.1)));
- return riverLevel(p.y)-riverDepth(q,p.y)+bank+terrain+fine+mountain;
+ let cliff=riverFrame.waterfall.x*exp(-pow(p.y/58.0,2.0))*smoothstep(1.02,1.6,side);
+ let crags=cliff*(riverFbm(p*.025+vec2<f32>(12.4,reach.info.w))-.5)*14.0;
+ return riverLevel(p.y)-riverDepth(q,p.y)+bank+terrain+fine+mountain+crags;
 }
 fn riverNormal(p:vec2<f32>)->vec3<f32>{
  let step=1.0;let left=riverGround(p-vec2<f32>(step,0.0));let right=riverGround(p+vec2<f32>(step,0.0));

@@ -1,6 +1,6 @@
 import {RiverRenderer} from './renderer.js';
 const $=id=>document.getElementById(id);
-const ids=['view','device-status','loading','loading-title','error','error-message','reach-overlay','reach-caption','status','seed-form','seed','planet-link','generate','next-reach','width-stat','slope-stat','flow-stat','nodes-stat','length-stat','fps','speed','clarity','ripples','foam','waterfall','drop','drop-value','reflection-quality','channel','depth','bank','roughness','speed-value','clarity-value','ripples-value','foam-value','channel-value','depth-value','bank-value','roughness-value','flow-arrows','paused','view-overview','view-low','view-top'];
+const ids=['view','device-status','loading','loading-title','error','error-message','reach-overlay','reach-caption','status','seed-form','seed','planet-link','generate','next-reach','width-stat','slope-stat','flow-stat','nodes-stat','length-stat','fps','speed','clarity','ripples','foam','waterfall','drop','drop-value','spray','spray-value','reflection-quality','channel','depth','bank','roughness','speed-value','clarity-value','ripples-value','foam-value','channel-value','depth-value','bank-value','roughness-value','flow-arrows','paused','view-overview','view-low','view-top'];
 const el=Object.fromEntries(ids.map(id=>[id,$(id)]));
 let renderer,drag=null,previous=0,lastFps=0,frames=[];
 function seedNumber(value){
@@ -45,7 +45,7 @@ async function start(){
 el['seed-form'].addEventListener('submit',event=>{event.preventDefault();generate(seedNumber(el.seed.value.trim()||'0'),0);});
 el['next-reach'].addEventListener('click',()=>{if(renderer)generate(renderer.seed,(renderer.variant+1)>>>0);});
 const sliders=[
- ['speed','speed',100,'m/s',false],['clarity','clarity',100,'×',false],['ripples','ripples',100,'×',false],['foam','foam',100,'×',false],
+ ['speed','speed',100,'m/s',false],['clarity','clarity',100,'×',false],['ripples','ripples',100,'×',false],['foam','foam',100,'×',false],['spray','spray',100,'×',false],
  ['channel','width',100,'×',true],['depth','depth',10,'m',true],['bank','bank',10,'m',true],['roughness','roughness',100,'×',true],['drop','drop',10,'m',true]
 ];
 for(const [id,key,divisor,unit,geometry] of sliders)el[id].addEventListener('input',()=>{

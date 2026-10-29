@@ -71,6 +71,44 @@ fn riverRockWaves(p:vec2<f32>,distance:f32)->vec4<f32>{
  let position=item.position+vec4<f32>(0.0,height,0.0,0.0);var out:VertexOut;
  out.position=riverFrame.viewProjection*position;out.world=position.xyz;out.normal=normal;out.material=vec4<f32>(item.material.xy,obstacle.w*edge,0.0);return out;
 }
+fn waterfallPosition(q:f32,t:f32,time:f32)->vec3<f32>{
+ let y0=riverLevel(-8.0);let y1=riverLevel(10.0);let middle=sin(t*3.14159265);
+ let along=mix(-8.0,10.0,t)+middle*(2.0+.50*sin(q*11.0+t*12.0+time*2.0));
+ let x=riverCenter(along)+q*riverHalfWidth();let y=mix(y0,y1,t);
+ return vec3<f32>(x,y,along);
+}
+// A separately tessellated falling sheet joins the upper and lower water meshes.
+@vertex fn fallVertex(@builtin(vertex_index) vertex:u32)->VertexOut{
+ let columns=80u;let rows=48u;let cell=vertex/6u;let corner=vertex%6u;
+ let corners=array<vec2<u32>,6>(vec2<u32>(0u,0u),vec2<u32>(0u,1u),vec2<u32>(1u,0u),vec2<u32>(1u,0u),vec2<u32>(0u,1u),vec2<u32>(1u,1u));
+ let grid=vec2<u32>(cell%columns,cell/columns)+corners[corner];let q=(f32(grid.x)/f32(columns)*2.0-1.0)*.99;let t=f32(grid.y)/f32(rows);
+ let position=waterfallPosition(q,t,motion[0].y);let normal=normalize(vec3<f32>(0.0,18.0,riverLevel(-8.0)-riverLevel(10.0)));
+ var out:VertexOut;out.position=riverFrame.viewProjection*vec4<f32>(position,1.0);out.world=position;out.normal=normal;out.material=vec4<f32>(q,t,0.0,0.0);return out;
+}
+struct SprayState {position:vec3<f32>,radius:f32,opacity:f32};
+// Ballistic secondary droplets: stable, stateless trajectories evaluated on the GPU.
+fn waterfallSpray(id:u32,time:f32)->SprayState{
+ let key=f32(id)+f32(riverFrame.config.x%4093u)*.03;
+ let a=riverHash(vec2<f32>(key,1.7));let b=riverHash(vec2<f32>(key+9.3,7.4));let c=riverHash(vec2<f32>(key+27.1,18.0));
+ let d=riverHash(vec2<f32>(key+13.0,27.3));let mist=(id%5u)==0u;
+ let velocity=4.0+8.0*b;let lifetime=2.0*velocity/9.81;let age=fract(time/lifetime+a)*lifetime;
+ let z0=12.0+9.0*c;let x0=riverCenter(z0)+(a-.5)*riverHalfWidth()*1.55;
+ let position=vec3<f32>(x0+(b-.5)*4.0*age,riverLevel(z0)+.15+velocity*age-4.905*age*age,z0+(c-.25)*5.0*age);
+ let fade=smoothstep(0.0,.12,age)*(1.0-smoothstep(lifetime-.25,lifetime,age));
+ return SprayState(position,select(.18+.45*d,1.4+2.0*d,mist),fade*select(.45,.10,mist)*riverFrame.waterfall.z);
+}
+struct SprayOut {@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>,@location(1) opacity:f32};
+@vertex fn sprayVertex(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->SprayOut{
+ let uv=array<vec2<f32>,6>(vec2<f32>(-1.0,-1.0),vec2<f32>(1.0,-1.0),vec2<f32>(-1.0,1.0),vec2<f32>(-1.0,1.0),vec2<f32>(1.0,-1.0),vec2<f32>(1.0,1.0))[vertex];
+ let particle=waterfallSpray(instance,motion[0].y);let view=normalize(riverFrame.cameraDelta.xyz-particle.position);
+ var right=cross(vec3<f32>(0.0,1.0,0.0),view);if(length(right)<.0001){right=vec3<f32>(1.0,0.0,0.0);}right=normalize(right);let up=normalize(cross(view,right));
+ let world=particle.position+(right*uv.x+up*uv.y)*particle.radius;
+ return SprayOut(riverFrame.viewProjection*vec4<f32>(world,1.0),uv,particle.opacity);
+}
+@fragment fn sprayFragment(input:SprayOut)->@location(0) vec4<f32>{
+ let radius=length(input.uv);let alpha=(1.0-smoothstep(.25,1.0,radius))*input.opacity;
+ return vec4<f32>(.79,.85,.84,alpha);
+}
 @vertex fn rockVertex(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->VertexOut{
  let rock=rocks[instance];let sectors=16u;let rings=10u;let cell=vertex/6u;let corner=vertex%6u;
  let corners=array<vec2<u32>,6>(vec2<u32>(0u,0u),vec2<u32>(1u,0u),vec2<u32>(0u,1u),vec2<u32>(0u,1u),vec2<u32>(1u,0u),vec2<u32>(1u,1u));
@@ -131,6 +169,9 @@ fn shadeGround(input:VertexOut)->vec4<f32>{
  let barEnd=mix(1.25,1.90,inside);let slope=1.0-clamp(n.y,0.0,1.0);
  var bank=mix(earth,vegetation,smoothstep(barEnd,barEnd+.55,q));bank=mix(bank,gravel,smoothstep(.18,.55,slope)*.30);
  var base=mix(gravel,bank,smoothstep(1.03,barEnd,q));base=mix(base,base*.70,wet*.55);
+ let cliff=riverFrame.waterfall.x*(1.0-smoothstep(30.0,100.0,abs(p.y)))*smoothstep(.16,.60,slope);
+ let rockBand=riverNoise(vec2<f32>(p.x*.045+input.world.y*.018,input.world.y*.13+riverNoise(p*.035)*2.0));
+ base=mix(base,mix(vec3<f32>(.15,.17,.16),vec3<f32>(.32,.31,.27),rockBand),cliff*.82);
  let light=normalize(riverFrame.sunSpeed.xyz);let diffuse=.32+.78*max(dot(n,light),0.0);
  var color=base*diffuse;let dist=length(riverFrame.cameraDelta.xyz-input.world);let fog=1.0-exp(-dist*.00035);color=mix(color,vec3<f32>(.50,.58,.57),fog*.45);
  return vec4<f32>(displayColor(color),1.0);
@@ -187,6 +228,19 @@ fn riverBubblePattern(p:vec2<f32>)->f32{
  let edge=smoothstep(.015,.16,sqrt(second)-sqrt(first));
  return mix(.54,1.0,edge);
 }
+@fragment fn fallFragment(input:VertexOut)->@location(0) vec4<f32>{
+ let q=input.material.x;let across=q*riverHalfWidth();let travel=input.world.y*.12+motion[0].y*1.8;
+ let warp=riverNoise(vec2<f32>(across*.055,travel*.38)+vec2<f32>(3.4,7.2));
+ let coarse=riverFbm(vec2<f32>(across*.10+warp*1.5,travel*.52));
+ let fine=riverNoise(vec2<f32>(across*.34+warp*2.0,travel*1.10));
+ let volume=clamp(coarse*.72+fine*.28,0.0,1.0);let view=normalize(riverFrame.cameraDelta.xyz-input.world);
+ let n=normalize(input.normal);let grazing=waterFresnel(abs(dot(view,n)));let light=.50+.50*max(dot(n,normalize(riverFrame.sunSpeed.xyz)),0.0);
+ var color=mix(vec3<f32>(.14,.27,.27),vec3<f32>(.76,.81,.79),smoothstep(.27,.76,volume))*light;
+ color=mix(color,vec3<f32>(.74,.81,.80),grazing*.35);
+ let footprint=max(length(dpdx(input.world)),length(dpdy(input.world)));let bubbles=1.0-smoothstep(.25,1.8,footprint);
+ if(bubbles>.01){let cells=1.0-riverBubblePattern(vec2<f32>(across*.9,travel*3.5));color+=vec3<f32>(.12)*cells*bubbles*riverFrame.optics.z;}
+ return vec4<f32>(displayColor(color),1.0);
+}
 fn riverAdvectedBubbles(across:f32,z:f32,distance:f32,speed:f32)->f32{
  let offset=.17*sin(across*.018+z*.006);let a=fract(distance/32.0+offset);let b=fract(a+.5);let weight=1.0-abs(a*2.0-1.0);
  let pa=vec2<f32>(across,riverFlowCoordinate(z,a*32.0,speed))*4.0;
@@ -237,15 +291,16 @@ fn viewDepth(depth:f32)->f32{return 5000.0/max(.001,10000.0-depth*9999.5);}
   if(foam>.005 && bubbles>.01){foam*=mix(1.0,riverAdvectedBubbles(across,p.y,motion[0].x,speed),bubbles);}
  }
  let foamColor=vec3<f32>(.65,.69,.65)*(.58+.42*ndl);color=mix(color,foamColor,foam);
- // Water follows the steep drop; its streaks travel downward with time.
- let fall=riverFrame.waterfall.x*(1.0-smoothstep(6.0,12.0,abs(p.y)));
- let falling=input.world.y*.20+motion[0].y*2.6;
- let threads=riverNoise(vec2<f32>(across*.19,falling*.17))+riverNoise(vec2<f32>(across*.43+7.0,falling*.40))*.35;
- let curtain=mix(vec3<f32>(.29,.43,.43),vec3<f32>(.79,.84,.81),smoothstep(.28,.92,threads));
- color=mix(color,curtain,fall*.88);
- let splash=riverFrame.waterfall.x*smoothstep(5.0,14.0,p.y)*(1.0-smoothstep(18.0,65.0,p.y));
- let splashNoise=riverNoise(vec2<f32>(across*.23,(p.y-motion[0].x*2.0)*.17));
- color=mix(color,vec3<f32>(.72,.78,.75),splash*smoothstep(.42,.76,splashNoise)*.55);
+ // A multiscale cellular foam field follows the outflow from the impact.
+ let splash=riverFrame.waterfall.x*smoothstep(9.0,16.0,p.y)*(1.0-smoothstep(45.0,110.0,p.y))*(1.0-smoothstep(.72,1.0,abs(q)));
+ if(splash>.001 && riverFrame.optics.z>.001){
+  let uv=vec2<f32>(across*.15,(p.y-motion[0].x*1.5)*.17);let blotch=riverFbm(uv);
+  let fine=riverNoise(uv*2.4+vec2<f32>(9.3,5.7));var breakup=.65*blotch+.35*fine;
+  let close=1.0-smoothstep(.35,2.0,footprint);
+  if(close>.01){let cellular=1.0-riverBubblePattern(uv*3.0);breakup+=cellular*close*.32;}
+  let impactFoam=splash*smoothstep(.35,.68,breakup)*min(1.0,riverFrame.optics.z*1.2);
+  color=mix(color,vec3<f32>(.73,.79,.76),impactFoam*.75);
+ }
  if(riverFrame.optics.w>.5){
   let along=riverFlowCoordinate(p.y,motion[0].x,speed);
   let gx=abs(fract(across/34.0+.5)-.5);let gy=fract(along/72.0)-.5;
@@ -254,5 +309,6 @@ fn viewDepth(depth:f32)->f32{return 5000.0/max(.001,10000.0-depth*9999.5);}
   color=mix(color,vec3<f32>(.35,1.0,.74),max(shaft,head)*.90);
  }
  let dist=length(riverFrame.cameraDelta.xyz-input.world);let fog=1.0-exp(-dist*.00035);color=mix(color,vec3<f32>(.50,.58,.57),fog*.38);
+ if(riverFrame.waterfall.x>.5 && p.y> -8.0 && p.y<10.0){discard;}
  return vec4<f32>(displayColor(color),1.0);
 }
