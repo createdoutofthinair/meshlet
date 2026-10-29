@@ -18,8 +18,13 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
 fn waveNormal(p:vec2<f32>,time:f32,dist:f32)->vec3<f32>{
  let e=.035;let dx=(wave(p+vec2<f32>(e,0.0),time,dist)-wave(p-vec2<f32>(e,0.0),time,dist))/(2.0*e);
  let dz=(wave(p+vec2<f32>(0.0,e),time,dist)-wave(p-vec2<f32>(0.0,e),time,dist))/(2.0*e);
- let detail=1.0-smoothstep(4.0,15.0,dist);let fine=(noise(p*6.0+vec2<f32>(time*.25,time*.13))-.5)*.11*detail;
- return normalize(vec3<f32>(-dx+fine,1.0,-dz-fine));
+ // Smooth, independent ripple bands avoid square value-noise cells in highlights.
+ let medium=1.0-smoothstep(3.0,12.0,dist);let tiny=1.0-smoothstep(1.5,6.0,dist);
+ let a=p.x*5.4+p.y*2.1+time*1.7;let b=p.x*2.8-p.y*6.2-time*1.15;
+ let c=p.x*11.3+p.y*7.1+time*2.2;
+ let rippleX=medium*(.032*cos(a)+.014*cos(b))+tiny*.014*cos(c);
+ let rippleZ=medium*(.012*cos(a)-.031*cos(b))+tiny*.009*cos(c);
+ return normalize(vec3<f32>(-dx-rippleX,1.0,-dz-rippleZ));
 }
 fn sky(ray:vec3<f32>)->vec3<f32>{
  let y=max(ray.y,0.0);let sun=normalize(vec3<f32>(-.35,.65,.55));
@@ -75,7 +80,11 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
  let path=select(travel,submergedHit,submergedHit>0.0 && submergedHit<travel);
  let attenuation=exp(-vec3<f32>(.17,.095,.065)*path/clarity);
  let transmitted=seabed*attenuation+water*(vec3<f32>(1.0)-attenuation);
- let sun=normalize(vec3<f32>(-.35,.65,.55));let halfVec=normalize(sun-ray);let spec=pow(max(dot(normal,halfVec),0.0),200.0)*1.2;
+ let sun=normalize(vec3<f32>(-.35,.65,.55));let halfVec=normalize(sun-ray);
+ // A broader microfacet highlight reduces high-contrast sparkling artifacts.
+ let nh=max(dot(normal,halfVec),0.0);let roughness=.16;let alpha=roughness*roughness;
+ let denom=max(.0001,nh*nh*(alpha*alpha-1.0)+1.0);let distribution=alpha*alpha/(3.14159265*denom*denom);
+ let spec=min(1.2,distribution*.018)*max(dot(normal,sun),0.0);
  let scatter=pow(max(dot(ray,sun),0.0),5.0)*.07*(1.0-cosView);let f=fresnel(cosView);
  let color=mix(transmitted,reflection,f)+vec3<f32>(1.0,.91,.72)*spec+vec3<f32>(.05,.3,.24)*scatter;
  let horizon=mix(color,sky(ray),smoothstep(90.0,200.0,t));
