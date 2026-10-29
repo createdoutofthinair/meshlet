@@ -129,15 +129,24 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let tiles=floor((coord.x+3.0)*4.0)+floor((coord.y+3.0)*4.0);
  let pattern=select(.68,1.0,fract(tiles*.5)<.25);
  var color=vec3<f32>(.80,.48,.23)*lit*pattern;
- // A thin, irregular wash follows the animated waterline up the cube walls.
- // Face-local coordinates avoid seams from a single world-space projection.
- let water=wave(p.xz,params.settings.x,0.0);let height=p.y-water;
- let faceCoord=select(p.x,p.z,abs(n.x)>.5);let uv=vec2<f32>(faceCoord*9.0+params.settings.x*.5,p.y*10.0-params.settings.x*1.8);
- let froth=noise(uv)*.55+noise(uv*2.3+vec2<f32>(3.7,8.1))*.3+noise(uv*4.7+vec2<f32>(9.0,2.2))*.15;
- let response=cubeImpactWash(p.xz,params.settings.x);let washHeight=.04+.18*response;
- let vertical=smoothstep(-.025,.025,height)*(1.0-smoothstep(washHeight,washHeight+.10,height));
- let foam=vertical*smoothstep(.35,.69,froth)*.85*response*select(1.0,0.0,abs(n.y)>.5);
- let wet=(1.0-smoothstep(.06,.38,height))*smoothstep(-.18,.02,height)*response;color*=1.0-wet*.12;
+ // A translucent wet film and sparse draining rivulets respond only to
+ // nearby impacts. The underlying cube remains visible through the film.
+ let time=params.settings.x;let water=wave(p.xz,time,0.0);let height=p.y-water;
+ let faceCoord=select(p.x,p.z,abs(n.x)>.5);let response=cubeImpactWash(p.xz,time);
+ let side=select(1.0,0.0,abs(n.y)>.5);let band=smoothstep(-.025,.02,height)*(1.0-smoothstep(.10,.30,height));
+ let cell=floor((faceCoord+2.0)*32.0);let offset=fract((faceCoord+2.0)*32.0)-.5;
+ let seed=hash(vec2<f32>(cell,5.4));let lineWidth=.035+.035*seed;
+ let line=1.0-smoothstep(lineWidth,lineWidth+.04,abs(offset));
+ let fall=fract(time*.48+seed);let yTop=.10+.25*seed-.23*fall;
+ let streak=line*smoothstep(yTop-.19,yTop-.14,height)*(1.0-smoothstep(yTop,yTop+.035,height));
+ let breakup=noise(vec2<f32>(faceCoord*18.0,p.y*18.0-time*.6));
+ let film=clamp((band*(.34+.2*breakup)+streak*.38)*response*side,0.0,.65);
+ let view=normalize(params.eye.xyz-p);let fresnelWet=.04+.96*pow(1.0-abs(dot(n,view)),5.0);
+ let halfVector=normalize(light+view);let highlight=pow(max(dot(n,halfVector),0.0),72.0);
+ let reflected=sky(reflect(-view,n));
+ color=color*(1.0-film*.24)+reflected*film*(.08+.24*fresnelWet)+vec3<f32>(.8,.9,.87)*film*highlight*.45;
+ // Sparse bright bubbles sit at the waterline, not across the whole wash.
+ let foam=band*smoothstep(.72,.90,breakup)*response*.34*side;
  return mix(color,foamColor(n),foam);
 }
 // Thin expanding crown surface, expressed as a 3D implicit sheet.
