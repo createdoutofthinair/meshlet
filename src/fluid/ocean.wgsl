@@ -167,14 +167,14 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let side=select(1.0,0.0,abs(n.y)>.5);let band=smoothstep(-.025,.02,height)*(1.0-smoothstep(.10,.30,height));
  let breakup=noise(vec2<f32>(faceCoord*18.0,p.y*18.0));
  let drain=cubeFoamDrain(p.xz,n.xz,height,faceCoord,time);
- let film=clamp((band*.24*response+drain*.45)*side,0.0,.6);
+ let film=clamp((band*.30*response+drain*.53)*side,0.0,.68);
  let view=normalize(params.eye.xyz-p);let fresnelWet=.04+.96*pow(1.0-abs(dot(n,view)),5.0);
  let halfVector=normalize(light+view);let highlight=pow(max(dot(n,halfVector),0.0),72.0);
  let reflected=sky(reflect(-view,n));
  color=color*(1.0-film*.24)+reflected*film*(.08+.24*fresnelWet)+vec3<f32>(.8,.9,.87)*film*highlight*.45;
  // Use the same breakup and optical response as the impact foam on water.
  let foamUv=vec2<f32>(faceCoord,height)*8.0;
- let foam=max(band*response,drain*.85)*smoothstep(.48,.77,foamBreakup(foamUv))*.24*side;
+ let foam=max(band*response,drain*.85)*smoothstep(.48,.77,foamBreakup(foamUv))*.30*side;
  let tintedFoam=mix(color,foamColor(n),.32);
  return mix(color,tintedFoam,foam);
 }
