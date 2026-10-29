@@ -115,7 +115,17 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let coord=select(select(p.xy,p.zy,abs(n.x)>.5),p.xz,abs(n.y)>.5);
  let tiles=floor((coord.x+3.0)*4.0)+floor((coord.y+3.0)*4.0);
  let pattern=select(.68,1.0,fract(tiles*.5)<.25);
- return vec3<f32>(.80,.48,.23)*lit*pattern;
+ var color=vec3<f32>(.80,.48,.23)*lit*pattern;
+ // A thin, irregular wash follows the animated waterline up the cube walls.
+ // Face-local coordinates avoid seams from a single world-space projection.
+ let water=wave(p.xz,params.settings.x,0.0);let height=p.y-water;
+ let faceCoord=select(p.x,p.z,abs(n.x)>.5);let uv=vec2<f32>(faceCoord*9.0+params.settings.x*.5,p.y*10.0-params.settings.x*1.8);
+ let froth=noise(uv)*.55+noise(uv*2.3+vec2<f32>(3.7,8.1))*.3+noise(uv*4.7+vec2<f32>(9.0,2.2))*.15;
+ let pulse=.5+.5*sin(params.settings.x*2.2+faceCoord*3.1);let washHeight=.08+.13*pulse;
+ let vertical=smoothstep(-.025,.025,height)*(1.0-smoothstep(washHeight,washHeight+.10,height));
+ let foam=vertical*smoothstep(.35,.69,froth)*.85*select(1.0,0.0,abs(n.y)>.5);
+ let wet=(1.0-smoothstep(.06,.38,height))*smoothstep(-.18,.02,height);color*=1.0-wet*.12;
+ return mix(color,foamColor(n),foam);
 }
 // Thin expanding crown surface, expressed as a 3D implicit sheet.
 fn crownField(p:vec3<f32>,age:f32,base:f32,position:vec2<f32>)->f32{
@@ -239,6 +249,15 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
  let spec=min(1.2,distribution*.018)*max(dot(normal,sun),0.0);
  let scatter=pow(max(dot(ray,sun),0.0),5.0)*.07*(1.0-cosView);let f=fresnel(cosView);
  var color=mix(transmitted,reflection,f)+vec3<f32>(1.0,.91,.72)*spec+vec3<f32>(.05,.3,.24)*scatter;
+ // Foam gathers where waves meet the cube and thins outward.
+ let cubeDistance=max(abs(point.x),abs(point.z))-.65;
+ if(cubeDistance>=0.0 && cubeDistance<.55){
+  let near=1.0-smoothstep(.05,.50,cubeDistance);
+  let uv=point.xz*8.0+vec2<f32>(time*.55,-time*.3);
+  let texture=noise(uv)*.52+noise(uv*2.6+vec2<f32>(4.8,2.3))*.30+noise(uv*6.0+vec2<f32>(8.0,5.0))*.18;
+  let crest=.55+.45*sin(time*1.7+point.x*2.0+point.z*1.5);
+  color=mix(color,foamColor(normal),near*smoothstep(.38,.71,texture)*(.32+.4*crest));
+ }
  // Advected multiscale breakup creates foam around the expanding impact.
  for(var eventIndex=0u;eventIndex<30u;eventIndex++){
  let event=impact[eventIndex];
