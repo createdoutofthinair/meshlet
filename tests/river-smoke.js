@@ -16,7 +16,17 @@ try{
  if(u[4]!==meta.end||f[5]<=f[17])throw Error(`Chosen flow is not the downhill route: ${u[4]}/${meta.end}, ${f[5]}/${f[17]}`);
  const tangent=[f[32]-f[24],f[33]-f[25],f[34]-f[26]],alignment=tangent.reduce((sum,v,i)=>sum+v*meta.downstream[i],0);
  if(!(alignment>0))throw Error(`Flow tangent points upstream: ${alignment}`);
- if(Math.abs(f[36])>.01||Math.abs(f[38])>.01||Math.abs(f[37]+renderer.depth)>.05||Math.abs(f[40])>.01||Math.abs(f[41])>.01)throw Error(`Bed and water did not meet at the river center: ${[...f.slice(36,44)]}`);
+ if(Math.abs(f[36])>.01||Math.abs(f[38])>.01||f[37]>=-.5||Math.abs(f[40])>.01||Math.abs(f[41])>.01)throw Error(`Bed and water did not meet at the river center: ${[...f.slice(36,44)]}`);
+ // Exercise the actual material functions, including reset continuity and flow direction.
+ const source=await Promise.all(['../src/planet/common.wgsl','../src/river/shared.wgsl','../src/river/render.wgsl','./river-flow-smoke.wgsl'].map(async path=>{const response=await fetch(path);if(!response.ok)throw Error(`Could not load ${path}`);return response.text();}));
+ const module=device.createShaderModule({code:source.join('\n')}),pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'probeRiverFlow'}});
+ const probe=device.createBuffer({size:80,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC}),probeRead=device.createBuffer({size:80,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+ const group0=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.frameBuffer}}]}),group1=device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[{binding:0,resource:{buffer:probe}}]});
+ const command=device.createCommandEncoder(),compute=command.beginComputePass();compute.setPipeline(pipeline);compute.setBindGroup(0,group0);compute.setBindGroup(1,group1);compute.dispatchWorkgroups(1);compute.end();command.copyBufferToBuffer(probe,0,probeRead,0,80);device.queue.submit([command.finish()]);
+ await probeRead.mapAsync(GPUMapMode.READ);const values=new Float32Array(probeRead.getMappedRange().slice(0));probeRead.unmap();probeRead.destroy();probe.destroy();
+ if(!(values[0]>values[1]&&values[2]>values[3]&&values[6]>values[7]&&Math.abs(values[4]-values[5])<1e-5))throw Error(`Channel or downstream velocity is invalid: ${[...values.slice(0,8)]}`);
+ if(Math.hypot(values[8]-values[10],values[9]-values[11])<.005&&Math.abs(values[12]-values[13])<.005)throw Error('Surface detail did not change as water moved');
+ if(Math.abs(values[14]-values[15])>.003||Math.hypot(values[16]-values[18],values[17]-values[19])>.003)throw Error('Advected surface popped when its phase reset');
  renderer.resize();const width=canvas.width,height=canvas.height,stride=Math.ceil(width*4/256)*256;
  const color=device.createTexture({size:[width,height],format:renderer.format,usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_SRC});renderer.context={getCurrentTexture:()=>color};
  async function capture(time){
@@ -29,8 +39,10 @@ try{
  for(let y=0;y<height;y++)for(let x=0;x<width;x++){const i=y*stride+x*4;if(Math.max(...[0,1,2].map(k=>Math.abs(plain[i+k]-arrows[i+k])))>3)changed++;}
  if(changed<20)throw Error(`Downstream arrows did not affect the rendered water: ${changed} pixels`);
  async function phase(){const b=device.createBuffer({size:16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),e=device.createCommandEncoder();e.copyBufferToBuffer(renderer.motion,0,b,0,16);device.queue.submit([e.finish()]);await b.mapAsync(GPUMapMode.READ);const p=new Float32Array(b.getMappedRange())[0];b.unmap();b.destroy();return p;}
- const before=await phase();renderer.paused=false;renderer.frame(1200);await device.queue.onSubmittedWorkDone();const after=await phase();
- if(!(after>before))throw Error(`Water advection did not move downstream: ${before}/${after}`);
- renderer.paused=true;renderer.frame(1300);await device.queue.onSubmittedWorkDone();const paused=await phase();if(Math.abs(paused-after)>.000001)throw Error('Paused water continued to move');
- if(errors.length)throw Error(errors.join('; '));const result={ok:true,start:meta.start,end:meta.end,alignment,bed:f[37],water:f[41],arrowPixels:changed,advection:after-before};status.textContent=JSON.stringify(result);window.__riverSmokeDone=result;
+ renderer.showFlow=false;renderer.paused=false;const before=await phase(),first=await capture(1200),moving=await capture(2200),after=await phase();let movingPixels=0;
+ for(let y=0;y<height;y++)for(let x=0;x<width;x++){const i=y*stride+x*4;if(Math.max(...[0,1,2].map(k=>Math.abs(first[i+k]-moving[i+k])))>2)movingPixels++;}
+ if(!(after-before>.9&&after-before<1.2))throw Error(`Water did not advance by the expected distance at 1 fps: ${before}/${after}`);
+ if(movingPixels<50)throw Error(`Advected water did not visibly change without arrows: ${movingPixels} pixels`);
+ renderer.paused=true;renderer.frame(2300);await device.queue.onSubmittedWorkDone();const paused=await phase();if(Math.abs(paused-after)>.000001)throw Error('Paused water continued to move');
+ if(errors.length)throw Error(errors.join('; '));const result={ok:true,start:meta.start,end:meta.end,alignment,bed:f[37],water:f[41],arrowPixels:changed,movingPixels,advection:after-before};status.textContent=JSON.stringify(result);window.__riverSmokeDone=result;
 }catch(error){status.textContent=error.stack;window.__riverSmokeDone={ok:false,error:error.stack};}

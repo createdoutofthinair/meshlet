@@ -18,6 +18,7 @@ test('GPU frame builds separate bank and water meshes and advances only unpaused
  operations.length=0;r.showFlow=true;assert.equal(r.frame(1016),true);await flush();
  assert.deepEqual(operations.filter(x=>x[0]==='compute').map(x=>x[1]),['flowCompute']);
  let frame=new Float32Array(r.frameBuffer.data);assert.ok(Math.abs(frame[19]-.016)<1e-6);assert.equal(frame[31],1);
- r.paused=true;r.dirty=true;assert.equal(r.frame(1032),true);await flush();frame=new Float32Array(r.frameBuffer.data);assert.equal(frame[19],0);
+ assert.equal(r.frame(1516),true);await flush();frame=new Float32Array(r.frameBuffer.data);assert.ok(Math.abs(frame[19]-.5)<1e-6,'slow frames still advance the correct elapsed time');
+ r.paused=true;r.dirty=true;assert.equal(r.frame(1532),true);await flush();frame=new Float32Array(r.frameBuffer.data);assert.equal(frame[19],0);
  assert.equal(operations.filter(x=>x[0]==='compute'&&x[1]==='bankCompute').length,1);
 });

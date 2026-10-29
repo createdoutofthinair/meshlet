@@ -13,7 +13,7 @@ function setBusy(busy,title='Finding a river'){
 }
 function updateMetadata(){
  if(!renderer?.metadata)return;const m=renderer.metadata;
- el['width-stat'].textContent=`${Math.round(m.halfWidth*renderer.width*2)} m`;el['slope-stat'].textContent=`${(m.slope*100).toFixed(2)}%`;
+ el['width-stat'].textContent=`${Math.round(Math.max(20,Math.min(280,m.halfWidth*renderer.width))*2)} m`;el['slope-stat'].textContent=`${(m.slope*100).toFixed(2)}%`;
  el['flow-stat'].textContent=m.discharge.toFixed(1);el['nodes-stat'].textContent=`${m.start} → ${m.end}`;el['length-stat'].textContent=`${(m.segmentLength/1000).toFixed(1)} km`;
  el['reach-overlay'].textContent=`REACH ${m.start} → ${m.end}`;el['reach-caption'].textContent='Water travels toward the downstream node';
  el.status.textContent=`SEED ${renderer.seed} · REACH ${renderer.variant+1} · GPU WATER`;
@@ -54,7 +54,7 @@ for(const [id,key,divisor,unit,geometry] of sliders)el[id].addEventListener('inp
 });
 el['flow-arrows'].addEventListener('change',()=>{if(renderer)renderer.showFlow=el['flow-arrows'].checked;});
 el.paused.addEventListener('change',()=>{if(renderer)renderer.paused=el.paused.checked;});
-for(const [id,yaw,pitch,distance] of [['view-overview',-.55,.72,850],['view-low',-.35,.27,450],['view-top',0,1.47,950]])el[id].addEventListener('click',()=>{if(renderer)Object.assign(renderer.camera,{yaw,pitch,distance});});
+for(const [id,yaw,pitch,distance] of [['view-overview',-.55,.58,560],['view-low',-.35,.27,240],['view-top',0,1.47,850]])el[id].addEventListener('click',()=>{if(renderer)Object.assign(renderer.camera,{yaw,pitch,distance});});
 el.view.addEventListener('pointerdown',event=>{if(!renderer)return;drag={x:event.clientX,y:event.clientY};el.view.setPointerCapture(event.pointerId);el.view.focus({preventScroll:true});});
 el.view.addEventListener('pointermove',event=>{if(!renderer||!drag)return;renderer.camera.yaw-=(event.clientX-drag.x)*.005;renderer.camera.pitch=Math.max(.12,Math.min(1.49,renderer.camera.pitch+(event.clientY-drag.y)*.005));drag={x:event.clientX,y:event.clientY};});
 for(const type of ['pointerup','pointercancel','lostpointercapture'])el.view.addEventListener(type,()=>{drag=null;});

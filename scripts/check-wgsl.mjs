@@ -43,6 +43,7 @@ const modules={
 };
 const riverShared=await read('src/river/shared.wgsl');
 for(const name of ['select','geometry','animate','render'])modules[`river-${name}`]=[common,name==='select'?riverShared.replace('var<storage,read> reach:','var<storage,read_write> reach:'):riverShared,await read(`src/river/${name}.wgsl`)];
+modules['river-flow-smoke']=[common,riverShared,await read('src/river/render.wgsl'),await read('tests/river-flow-smoke.wgsl')];
 const meshletCommon=await read('src/gpu/common.wgsl');
 for(const name of ['cull','render','projection'])modules[`meshlet-${name}`]=[meshletCommon,await read(`src/gpu/${name}.wgsl`)];
 // The browser smoke tests append their own WGSL to the same source modules.

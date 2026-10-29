@@ -20,7 +20,7 @@ export class RiverRenderer {
  constructor(canvas,adapter,device,context,onError){
   Object.assign(this,{canvas,adapter,device,context,onError});this.format=navigator.gpu.getPreferredCanvasFormat();
   this.seed=918273;this.variant=0;this.width=1;this.depth=4;this.bank=12;this.roughness=.8;this.speed=1;this.clarity=1.3;this.ripples=.8;this.foam=.45;this.showFlow=false;this.paused=false;
-  this.camera={yaw:-.55,pitch:.72,distance:850};this.ready=false;this.dirty=false;this.lastTime=0;this.busy=false;this.metadata=null;this.inFlight=0;
+  this.camera={yaw:-.55,pitch:.58,distance:560};this.ready=false;this.dirty=false;this.lastTime=0;this.busy=false;this.metadata=null;this.inFlight=0;
  }
  async init(){
   const d=this.device,U=GPUBufferUsage;d.addEventListener('uncapturederror',e=>this.onError?.(`WebGPU: ${e.error.message}`));
@@ -88,7 +88,7 @@ export class RiverRenderer {
   }finally{this.busy=false;}
  }
  frame(now){
-  if(!this.ready||this.inFlight>=2)return false;this.resize();const dt=this.lastTime?Math.min(.1,Math.max(0,(now-this.lastTime)/1000)):0;this.lastTime=now;this.writeFrame(dt);
+  if(!this.ready||this.inFlight>=2)return false;this.resize();const dt=this.lastTime?Math.min(1,Math.max(0,(now-this.lastTime)/1000)):0;this.lastTime=now;this.writeFrame(dt);
   const d=this.device,encoder=d.createCommandEncoder({label:'River view frame'}),compute=encoder.beginComputePass();
   if(this.dirty){this.buildGeometry(compute);this.dirty=false;}
   compute.setPipeline(this.flowPipe);compute.setBindGroup(0,this.flowBind);compute.dispatchWorkgroups(1);compute.end();
