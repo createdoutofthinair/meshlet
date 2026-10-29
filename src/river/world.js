@@ -9,7 +9,8 @@ export async function checkedShader(device,code,label){
  const module=device.createShaderModule({label,code});const info=await module.getCompilationInfo();const errors=info.messages.filter(x=>x.type==='error');
  if(errors.length)throw new Error(`${label}: ${errors.map(x=>`${x.lineNum}:${x.linePos} ${x.message}`).join('; ')}`);return module;
 }
-export async function readShader(path){const response=await fetch(new URL(path,import.meta.url));if(!response.ok)throw new Error(`Could not load shader ${path}`);return response.text();}
+// Revalidate even on legacy unversioned URLs so stale WGSL is not paired with new JS.
+export async function readShader(path){const response=await fetch(new URL(path,import.meta.url),{cache:'no-cache'});if(!response.ok)throw new Error(`Could not load shader ${path}`);return response.text();}
 export class RiverWorld {
  static async create(device){const world=new RiverWorld(device);await world.init();return world;}
  constructor(device){this.device=device;this.seed=null;}

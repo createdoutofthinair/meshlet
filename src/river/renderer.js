@@ -35,6 +35,7 @@ export class RiverRenderer {
   d.lost.then(info=>this.onError?.(`WebGPU device lost: ${info.message||info.reason}`));this.context.configure({device:d,format:this.format,alphaMode:'opaque'});
   this.world=await RiverWorld.create(d);
   const [common,shared,selection,geometry,animation,render]=await Promise.all(['../planet/common.wgsl','./shared.wgsl','./select.wgsl','./geometry.wgsl','./animate.wgsl','./render.wgsl'].map(readShader));
+  if(!/\bfn\s+makeRocks\s*\(/.test(geometry))throw new Error('The river geometry shader is out of date. Reload this page to download matching files.');
   const writable=shared.replace('var<storage,read> reach:','var<storage,read_write> reach:');
   const modules=await Promise.all([
    checkedShader(d,[common,writable,selection].join('\n'),'River selection'),

@@ -68,6 +68,8 @@ Source layout:
 - `src/main.js`, `src/ui/` — benchmark, controls and interface.
 - `tests/` — geometry, bounds and frustum tests plus offscreen WebGPU smoke tests.
 
+GitHub Pages publishes each source tree under a commit-specific `releases/<sha>/` path, so its JavaScript, workers, WASM and WGSL are loaded from the same revision. The deployment includes up to seven preceding revisions for recently cached pages, and keeps `src/` temporarily for older unversioned pages. River shader requests also revalidate their cache.
+
 ## Verification
 
 ```sh
