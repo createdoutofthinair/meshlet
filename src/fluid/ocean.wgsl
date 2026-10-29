@@ -32,21 +32,45 @@ fn fresnel(cosine:f32)->f32{
  let c=clamp(cosine,0.0,1.0);let eta=1.333;let g=sqrt(max(0.0,eta*eta-1.0+c*c));
  let a=(g-c)/(g+c);let b=(c*(g+c)-1.0)/(c*(g-c)+1.0);return clamp(.5*a*a*(1.0+b*b),0.0,1.0);
 }
+// Ray-box intersection places a real 3D cube across the waterline, so
+// primary, reflected and refracted rays can all see the same object.
+fn cubeHit(origin:vec3<f32>,direction:vec3<f32>)->f32{
+ let safe=select(select(vec3<f32>(-.00001),vec3<f32>(.00001),direction>=vec3<f32>(0.0)),direction,abs(direction)>vec3<f32>(.00001));
+ let a=(vec3<f32>(-.65,-.55,-.65)-origin)/safe;let b=(vec3<f32>(.65,.75,.65)-origin)/safe;
+ let near=min(a,b);let far=max(a,b);let enter=max(near.x,max(near.y,near.z));let leave=min(far.x,min(far.y,far.z));
+ if(leave<max(enter,0.0)){return -1.0;}return select(leave,enter,enter>0.0);
+}
+fn cubeColor(p:vec3<f32>)->vec3<f32>{
+ let q=abs(p-vec3<f32>(0.0,.1,0.0))/vec3<f32>(.65);var n=vec3<f32>(0.0,0.0,sign(p.z));
+ if(q.x>q.y&&q.x>q.z){n=vec3<f32>(sign(p.x),0.0,0.0);}else if(q.y>q.z){n=vec3<f32>(0.0,sign(p.y-.1),0.0);}
+ let light=normalize(vec3<f32>(-.35,.65,.55));let lit=.22+.78*max(dot(n,light),0.0);
+ let seams=select(.72,1.0,abs(p.x)<.62&&abs(p.y-.1)<.62&&abs(p.z)<.62);
+ return vec3<f32>(.68,.40,.19)*lit*seams;
+}
+fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(0.0)),vec3<f32>(1.0/2.2)),1.0);}
 @fragment fn fragment(input:Screen)->@location(0) vec4<f32>{
  let size=params.viewport.xy;let xy=vec2<f32>(input.pos.x/size.x*2.0-1.0,1.0-input.pos.y/size.y*2.0);
  let eye=params.eye.xyz;let forward=normalize(vec3<f32>(0.0,0.0,0.0)-eye);let right=normalize(cross(forward,vec3<f32>(0.0,1.0,0.0)));let up=normalize(cross(right,forward));
  let ray=normalize(forward+right*xy.x*(size.x/size.y)*.57735027+up*xy.y*.57735027);let time=params.settings.x;
- if(ray.y>=-.001){return vec4<f32>(pow(max(sky(ray),vec3<f32>(0.0)),vec3<f32>(1.0/2.2)),1.0);}
+ let direct=cubeHit(eye,ray);
+ if(ray.y>=-.001){if(direct>0.0){return display(cubeColor(eye+ray*direct));}return display(sky(ray));}
  var t= -eye.y/ray.y;for(var i=0u;i<5u;i++){let p=eye+ray*t;t=(wave(p.xz,time,t)-eye.y)/ray.y;}
- if(t<=0.0 || t>200.0){return vec4<f32>(pow(max(sky(ray),vec3<f32>(0.0)),vec3<f32>(1.0/2.2)),1.0);}
+ if(direct>0.0 && (t<=0.0 || direct<t)){return display(cubeColor(eye+ray*direct));}
+ if(t<=0.0 || t>200.0){return display(sky(ray));}
  let point=eye+ray*t;let normal=waveNormal(point.xz,time,t);
- let cosView=max(dot(-ray,normal),0.0);let reflection=sky(reflect(ray,normal));let refracted=refract(ray,normal,1.0/1.333);
+ let cosView=max(dot(-ray,normal),0.0);let reflectedRay=reflect(ray,normal);var reflection=sky(reflectedRay);
+ let reflectedHit=cubeHit(point+normal*.001,reflectedRay);if(reflectedHit>0.0){reflection=cubeColor(point+normal*.001+reflectedRay*reflectedHit);}
+ let refracted=refract(ray,normal,1.0/1.333);
  let floorDepth=2.2;let travel=min(50.0,(floorDepth+point.y)/max(.05,-refracted.y));let bottom=point+refracted*travel;
- let clarity=max(.2,params.settings.z);let transmission=exp(-vec3<f32>(.34,.15,.08)*travel/clarity);
+ let clarity=max(.2,params.settings.z);
  let causticWave=sin(bottom.x*3.3+time*1.2+sin(bottom.z*2.4-time))*sin(bottom.z*3.0-time*.9+sin(bottom.x*2.0+time));
  let caustics=pow(max(0.0,causticWave),5.0)*.22*exp(-floorDepth*.35);
- let seabed=ground(bottom.xz)*(1.0+caustics);let water=vec3<f32>(.018,.17,.16);
- let transmitted=seabed*transmission+water*(vec3<f32>(1.0)-transmission);
+ var seabed=ground(bottom.xz)*(1.0+caustics);
+ let submergedHit=cubeHit(point-normal*.001,refracted);if(submergedHit>0.0 && submergedHit<travel){seabed=cubeColor(point-normal*.001+refracted*submergedHit);}
+ let water=vec3<f32>(.018,.17,.16);
+ let path=select(travel,submergedHit,submergedHit>0.0 && submergedHit<travel);
+ let attenuation=exp(-vec3<f32>(.34,.15,.08)*path/clarity);
+ let transmitted=seabed*attenuation+water*(vec3<f32>(1.0)-attenuation);
  let sun=normalize(vec3<f32>(-.35,.65,.55));let halfVec=normalize(sun-ray);let spec=pow(max(dot(normal,halfVec),0.0),200.0)*1.2;
  let scatter=pow(max(dot(ray,sun),0.0),5.0)*.07*(1.0-cosView);let f=fresnel(cosView);
  let color=mix(transmitted,reflection,f)+vec3<f32>(1.0,.91,.72)*spec+vec3<f32>(.05,.3,.24)*scatter;
