@@ -17,18 +17,51 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
  let a=sin(p.x*.57+p.y*.32+time*.72)*.12*large;let b=sin(p.x*1.3-p.y*.8-time*1.05)*.055*mid;
  let c=sin(p.x*2.6+p.y*2.05+time*1.5)*.018*fine;return (a+b+c)*params.settings.y;
 }
-// Buoyancy, drag and a gentle prescribed current are integrated on the GPU.
-@compute @workgroup_size(8) fn updateBalls(@builtin(global_invocation_id) id:vec3<u32>){
- if(id.x>=6u){return;}var ball=balls[id.x];let dt=min(.033,params.settings.w);
- let water=wave(ball.position.xz,params.settings.x,0.0);let radius=ball.position.w;
- let submerged=clamp((water-(ball.position.y-radius))/(2.0*radius),0.0,1.0);
- let force=9.81*(submerged*2.0-1.0);ball.velocity.y=(ball.velocity.y+force*dt)*exp(-2.5*dt);
- let current=vec2<f32>(.18,.06);let drift=mix(ball.velocity.xz,current,1.0-exp(-.45*dt));ball.velocity.x=drift.x;ball.velocity.z=drift.y;
- ball.position=vec4<f32>(ball.position.xyz+ball.velocity.xyz*dt,radius);
- // Keep the objects in the test area without teleportation.
- if(abs(ball.position.x)>3.0){ball.position.x=clamp(ball.position.x,-3.0,3.0);ball.velocity.x*= -.7;}
- if(abs(ball.position.z)>2.5){ball.position.z=clamp(ball.position.z,-2.5,2.5);ball.velocity.z*= -.7;}
- balls[id.x]=ball;
+// Six bodies fit in one invocation: pair resolution is deterministic and
+// never reads another invocation's partially updated state.
+@compute @workgroup_size(1) fn updateBalls(){
+ let dt=min(.033,params.settings.w);if(dt<=0.0){return;}
+ for(var i=0u;i<6u;i++){
+  var ball=balls[i];let water=wave(ball.position.xz,params.settings.x,0.0);let radius=ball.position.w;
+  let submerged=clamp((water-(ball.position.y-radius))/(2.0*radius),0.0,1.0);
+  ball.velocity.y=(ball.velocity.y+9.81*(submerged*2.0-1.0)*dt)*exp(-2.5*dt);
+  let drift=mix(ball.velocity.xz,vec2<f32>(.18,.06),1.0-exp(-.45*dt));ball.velocity.x=drift.x;ball.velocity.z=drift.y;
+  ball.position=vec4<f32>(ball.position.xyz+ball.velocity.xyz*dt,radius);balls[i]=ball;
+ }
+ // Several sequential projections handle chains of simultaneous contacts.
+ for(var iteration=0u;iteration<4u;iteration++){
+  for(var i=0u;i<6u;i++){
+   var ball=balls[i];let r=ball.position.w;let lo=vec3<f32>(-.65,-.95,-.65);let hi=vec3<f32>(.65,.75,.65);
+   let closest=clamp(ball.position.xyz,lo,hi);let delta=ball.position.xyz-closest;let d=length(delta);
+   if(d<r){
+    var normal=vec3<f32>(1.0,0.0,0.0);var penetration=r-d;
+    if(d>.00001){normal=delta/d;}else{
+     let left=ball.position.x-lo.x;let right=hi.x-ball.position.x;let bottom=ball.position.y-lo.y;let top=hi.y-ball.position.y;let back=ball.position.z-lo.z;let front=hi.z-ball.position.z;
+     var side=left;normal=vec3<f32>(-1.0,0.0,0.0);
+     if(right<side){side=right;normal=vec3<f32>(1.0,0.0,0.0);}if(bottom<side){side=bottom;normal=vec3<f32>(0.0,-1.0,0.0);}
+     if(top<side){side=top;normal=vec3<f32>(0.0,1.0,0.0);}if(back<side){side=back;normal=vec3<f32>(0.0,0.0,-1.0);}
+     if(front<side){side=front;normal=vec3<f32>(0.0,0.0,1.0);}penetration=r+side;
+    }
+    ball.position=vec4<f32>(ball.position.xyz+normal*penetration,r);
+    let vn=dot(ball.velocity.xyz,normal);if(vn<0.0){ball.velocity=vec4<f32>(ball.velocity.xyz-normal*vn*1.15,0.0);}
+   }
+   balls[i]=ball;
+   for(var j=i+1u;j<6u;j++){
+    var other=balls[j];ball=balls[i];let deltaPair=other.position.xyz-ball.position.xyz;let dPair=length(deltaPair);let overlap=ball.position.w+other.position.w-dPair;
+    if(overlap>0.0){
+     var normal=vec3<f32>(1.0,0.0,0.0);if(dPair>.00001){normal=deltaPair/dPair;}
+     ball.position=vec4<f32>(ball.position.xyz-normal*overlap*.5,ball.position.w);other.position=vec4<f32>(other.position.xyz+normal*overlap*.5,other.position.w);
+     let closing=dot(other.velocity.xyz-ball.velocity.xyz,normal);
+     if(closing<0.0){let impulse= -.575*closing;ball.velocity=vec4<f32>(ball.velocity.xyz-normal*impulse,0.0);other.velocity=vec4<f32>(other.velocity.xyz+normal*impulse,0.0);}
+     balls[i]=ball;balls[j]=other;
+    }
+   }
+  }
+ }
+ for(var i=0u;i<6u;i++){
+  var ball=balls[i];if(abs(ball.position.x)>3.0){ball.position.x=clamp(ball.position.x,-3.0,3.0);ball.velocity.x*= -.7;}
+  if(abs(ball.position.z)>2.5){ball.position.z=clamp(ball.position.z,-2.5,2.5);ball.velocity.z*= -.7;}balls[i]=ball;
+ }
 }
 fn waveNormal(p:vec2<f32>,time:f32,dist:f32)->vec3<f32>{
  let e=.035;let dx=(wave(p+vec2<f32>(e,0.0),time,dist)-wave(p-vec2<f32>(e,0.0),time,dist))/(2.0*e);
