@@ -122,6 +122,23 @@ fn cubeImpactWash(position:vec2<f32>,faceNormal:vec2<f32>,time:f32)->f32{
  }
  return response;
 }
+// Individual impact-relative rivulets descend toward the waterline and fade.
+fn cubeFoamDrain(position:vec2<f32>,faceNormal:vec2<f32>,height:f32,faceCoord:f32,time:f32)->f32{
+ var result=0.0;let cell=floor((faceCoord+2.0)*25.0);let offset=fract((faceCoord+2.0)*25.0)-.5;
+ let seed=hash(vec2<f32>(cell,18.7));let width=.06+.06*seed;
+ let line=1.0-smoothstep(width,width+.08,abs(offset));
+ for(var i=0u;i<30u;i++){
+  let event=impact[i];let delta=event.xy-position;let dist=length(delta);let elapsed=time-event.z-dist/1.4;
+  if(event.w>0.0 && elapsed>.12 && elapsed<3.0){
+   let facing=smoothstep(.05,.55,dot(faceNormal,delta)/max(.001,dist));let near=1.0-smoothstep(1.5,4.0,dist);
+   let head=.30+.08*seed-max(0.0,elapsed-.15)*(.12+.05*seed);
+   let stream=smoothstep(head-.13,head-.09,height)*(1.0-smoothstep(head,head+.025,height));
+   let fade=(1.0-smoothstep(1.5,3.0,elapsed))*smoothstep(-.03,.025,height);
+   result=max(result,line*stream*fade*facing*near);
+  }
+ }
+ return result;
+}
 // Shared multiscale foam field, evaluated in each surface's local coordinates.
 fn foamBreakup(uv:vec2<f32>)->f32{
  return noise(uv)*.40+noise(uv*2.4+vec2<f32>(4.2,6.1))*.30+noise(uv*5.3+vec2<f32>(8.1,4.9))*.20+noise(uv*10.0+vec2<f32>(2.1,11.0))*.10;
@@ -154,7 +171,8 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  color=color*(1.0-film*.24)+reflected*film*(.08+.24*fresnelWet)+vec3<f32>(.8,.9,.87)*film*highlight*.45;
  // Use the same breakup and optical response as the impact foam on water.
  let foamUv=vec2<f32>(faceCoord,height)*8.0+vec2<f32>(time*.8,-time*.5);
- let foam=band*smoothstep(.32,.67,foamBreakup(foamUv))*.82*response*side;
+ let drain=cubeFoamDrain(p.xz,n.xz,height,faceCoord,time);
+ let foam=max(band*response,drain*.85)*smoothstep(.32,.67,foamBreakup(foamUv))*.82*side;
  return foamOptics(color,reflected,n,foam,fresnelWet);
 }
 // Thin expanding crown surface, expressed as a 3D implicit sheet.
