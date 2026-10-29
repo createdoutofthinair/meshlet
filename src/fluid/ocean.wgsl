@@ -110,6 +110,14 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let pattern=select(.68,1.0,fract(tiles*.5)<.25);
  return vec3<f32>(.80,.48,.23)*lit*pattern;
 }
+// Thin expanding crown surface, expressed as a 3D implicit sheet.
+fn crownField(p:vec3<f32>,age:f32,base:f32)->f32{
+ let local=p-vec3<f32>(impact[0].x,base,impact[0].y);let radial=length(local.xz);let angle=atan2(local.z,local.x);
+ let growth=smoothstep(0.0,.15,age);let fade=1.0-smoothstep(.38,.9,age);
+ let height=(.34+.09*sin(angle*13.0+age*4.0)+.045*sin(angle*23.0-age*3.0))*growth*fade;
+ let radius=.16+age*.52+max(0.0,local.y)*.55;
+ return max(abs(radial-radius)-.028,max(-local.y,local.y-height));
+}
 struct ObjectHit {distance:f32,color:vec3<f32>};
 fn objectHit(origin:vec3<f32>,direction:vec3<f32>)->ObjectHit{
  var distance=cubeHit(origin,direction);var color=vec3<f32>(0.0);
@@ -125,30 +133,31 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>)->ObjectHit{
    }
   }
  }
- // A short-lived ring of overlapping, irregular foam lobes gives the impact
- // a visible three-dimensional crown rather than only isolated droplets.
+ // Trace a continuous curved sheet with an irregular, moving rim.
  let crownAge=params.settings.x-impact[0].z;
  if(impact[0].w>0.0 && crownAge>=0.0 && crownAge<.9){
-  let growth=smoothstep(0.0,.15,crownAge);let fade=1.0-smoothstep(.42,.9,crownAge);
-  let ringRadius=.16+crownAge*.52;let base=wave(impact[0].xy,impact[0].z,0.0);
-  for(var k=0u;k<16u;k++){
-   let angle=f32(k)*6.2831853/16.0;let variation=.8+.4*hash(vec2<f32>(f32(k),9.3));
-   let center=vec3<f32>(impact[0].x+cos(angle)*ringRadius,base+.06+growth*fade*(.10+.14*variation),impact[0].y+sin(angle)*ringRadius);
-   let radius=(.10+.035*variation)*growth*fade;let delta=origin-center;let b=dot(delta,direction);let disc=b*b-dot(delta,delta)+radius*radius;
-   if(disc>0.0){let hit= -b-sqrt(disc);if(hit>.001 && (distance<0.0||hit<distance)){
-    let normal=normalize(origin+direction*hit-center);let light=max(dot(normal,normalize(vec3<f32>(-.35,.65,.55))),0.0);
-    let texture=noise((origin+direction*hit).xz*24.0+vec2<f32>(f32(k),crownAge*2.0));
-    color=mix(vec3<f32>(.48,.61,.59),vec3<f32>(.88,.94,.91),texture)*(.65+.35*light);distance=hit;
-   }}
+  let base=wave(impact[0].xy,impact[0].z,0.0);let center=vec3<f32>(impact[0].x,base+.16,impact[0].y);
+  let delta=origin-center;let projection=dot(delta,direction);let bound=projection*projection-dot(delta,delta)+1.44;
+  if(bound>0.0){var t=max(.001,-projection-sqrt(bound));let stop= -projection+sqrt(bound);
+   for(var step=0u;step<64u;step++){
+    if(t>stop || (distance>0.0 && t>distance)){break;}let p=origin+direction*t;let field=crownField(p,crownAge,base);
+    if(field<.003){
+     let e=.008;let normal=normalize(vec3<f32>(crownField(p+vec3<f32>(e,0.0,0.0),crownAge,base)-crownField(p-vec3<f32>(e,0.0,0.0),crownAge,base),crownField(p+vec3<f32>(0.0,e,0.0),crownAge,base)-crownField(p-vec3<f32>(0.0,e,0.0),crownAge,base),crownField(p+vec3<f32>(0.0,0.0,e),crownAge,base)-crownField(p-vec3<f32>(0.0,0.0,e),crownAge,base)));
+     let light=.48+.52*abs(dot(normal,normalize(vec3<f32>(-.35,.65,.55))));
+     let fine=noise(p.xz*55.0+vec2<f32>(p.y*12.0,crownAge*3.0))*.55+noise(p.xz*117.0+vec2<f32>(p.y*22.0,8.0))*.45;
+     color=mix(vec3<f32>(.32,.52,.50),vec3<f32>(.87,.94,.91),smoothstep(.28,.75,fine))*light;distance=t;break;
+    }
+    t+=clamp(field*.65,.012,.12);
+   }
   }
  }
  // Small ballistic droplets, emitted at the detected surface crossing.
  let age=params.settings.x-impact[0].z;
  if(impact[0].w>0.0 && age>=0.0 && age<1.15){
-  for(var k=0u;k<18u;k++){
+  for(var k=0u;k<12u;k++){
    let angle=f32(k)*2.399963;let speed=1.2+.12*f32(k%5u);let rise=2.6+.18*f32(k%4u);
    let center=vec3<f32>(impact[0].x+cos(angle)*speed*age, wave(impact[0].xy,impact[0].z,0.0)+rise*age-4.905*age*age,impact[0].y+sin(angle)*speed*age);
-   if(center.y<0.0){continue;}let delta=origin-center;let b=dot(delta,direction);let disc=b*b-dot(delta,delta)+.0025;
+   if(center.y<0.0){continue;}let delta=origin-center;let b=dot(delta,direction);let disc=b*b-dot(delta,delta)+.0003;
    if(disc>0.0){let hit= -b-sqrt(disc);if(hit>.001 && (distance<0.0||hit<distance)){distance=hit;color=vec3<f32>(.65,.82,.83);}}
   }
  }
@@ -190,7 +199,7 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
  if(impact[0].w>0.0 && foamAge>=0.0 && foamAge<3.0){
   let relative=point.xz-impact[0].xy;let radius=length(relative);let front=.16+foamAge*.65;
   let envelope=exp(-pow((radius-front)/(.18+foamAge*.12),2.0))*(1.0-smoothstep(1.3,3.0,foamAge));
-  let uv=relative*8.0+vec2<f32>(foamAge*.8,-foamAge*.5);let broken=noise(uv)*.65+noise(uv*2.4+vec2<f32>(4.2,6.1))*.35;
+  let uv=relative*8.0+vec2<f32>(foamAge*.8,-foamAge*.5);let broken=noise(uv)*.40+noise(uv*2.4+vec2<f32>(4.2,6.1))*.30+noise(uv*5.3+vec2<f32>(8.1,4.9))*.20+noise(uv*10.0+vec2<f32>(2.1,11.0))*.10;
   let foam=envelope*smoothstep(.32,.67,broken)*.82;
   color=mix(color,vec3<f32>(.76,.85,.82),foam);
  }
