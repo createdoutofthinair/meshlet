@@ -122,6 +122,10 @@ fn cubeImpactWash(position:vec2<f32>,faceNormal:vec2<f32>,time:f32)->f32{
  }
  return response;
 }
+// Shared multiscale foam field, evaluated in each surface's local coordinates.
+fn foamBreakup(uv:vec2<f32>)->f32{
+ return noise(uv)*.40+noise(uv*2.4+vec2<f32>(4.2,6.1))*.30+noise(uv*5.3+vec2<f32>(8.1,4.9))*.20+noise(uv*10.0+vec2<f32>(2.1,11.0))*.10;
+}
 fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let q=abs(p-vec3<f32>(0.0,-.1,0.0))/vec3<f32>(.65,.85,.65);var n=vec3<f32>(0.0,0.0,sign(p.z));
  if(q.x>q.y&&q.x>q.z){n=vec3<f32>(sign(p.x),0.0,0.0);}else if(q.y>q.z){n=vec3<f32>(0.0,sign(p.y+.1),0.0);}
@@ -148,9 +152,10 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let halfVector=normalize(light+view);let highlight=pow(max(dot(n,halfVector),0.0),72.0);
  let reflected=sky(reflect(-view,n));
  color=color*(1.0-film*.24)+reflected*film*(.08+.24*fresnelWet)+vec3<f32>(.8,.9,.87)*film*highlight*.45;
- // Sparse bright bubbles sit at the waterline, not across the whole wash.
- let foam=band*smoothstep(.72,.90,breakup)*response*.34*side;
- return mix(color,foamColor(n),foam);
+ // Use the same breakup and optical response as the impact foam on water.
+ let foamUv=vec2<f32>(faceCoord,height)*8.0+vec2<f32>(time*.8,-time*.5);
+ let foam=band*smoothstep(.32,.67,foamBreakup(foamUv))*.82*response*side;
+ return foamOptics(color,reflected,n,foam,fresnelWet);
 }
 // Thin expanding crown surface, expressed as a 3D implicit sheet.
 fn crownField(p:vec3<f32>,age:f32,base:f32,position:vec2<f32>)->f32{
@@ -302,7 +307,7 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
   let outer=exp(-pow((radius-front)/(.20+foamAge*.10),2.0));
   let trailing=exp(-pow(radius/(.30+foamAge*.22),2.0))*.45;
   let envelope=max(outer,trailing)*lifetime;
-  let uv=relative*8.0+vec2<f32>(foamAge*.8,-foamAge*.5);let broken=noise(uv)*.40+noise(uv*2.4+vec2<f32>(4.2,6.1))*.30+noise(uv*5.3+vec2<f32>(8.1,4.9))*.20+noise(uv*10.0+vec2<f32>(2.1,11.0))*.10;
+  let uv=relative*8.0+vec2<f32>(foamAge*.8,-foamAge*.5);let broken=foamBreakup(uv);
   let foam=envelope*smoothstep(.32,.67,broken)*.82;
   color=foamOptics(color,reflection,normal,foam,f);
  }
