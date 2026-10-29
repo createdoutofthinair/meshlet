@@ -13,13 +13,20 @@ fn hash(p:vec2<f32>)->f32{return fract(sin(dot(p,vec2<f32>(127.1,311.7)))*43758.
 fn noise(p:vec2<f32>)->f32{let i=floor(p);let f=fract(p);let w=f*f*(3.0-2.0*f);return mix(mix(hash(i),hash(i+vec2<f32>(1.0,0.0)),w.x),mix(hash(i+vec2<f32>(0.0,1.0)),hash(i+vec2<f32>(1.0,1.0)),w.x),w.y);}
 // Dampen each wave band before it becomes smaller than a pixel. Distance
 // also stabilizes the iterative surface intersection near the horizon.
-fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
+fn baseWave(p:vec2<f32>,time:f32,dist:f32)->f32{
  let large=1.0-smoothstep(25.0,120.0,dist);let mid=1.0-smoothstep(10.0,48.0,dist);let fine=1.0-smoothstep(4.0,18.0,dist);
  let a=sin(p.x*.57+p.y*.32+time*.72)*.12*large;let b=sin(p.x*1.3-p.y*.8-time*1.05)*.055*mid;
  let c=sin(p.x*2.6+p.y*2.05+time*1.5)*.018*fine;
- let age=time-impact[0].z;var ring=0.0;
- if(impact[0].w>0.0 && age>=0.0 && age<4.0){let radius=length(p-impact[0].xy);let front=radius-age*1.4;ring=.045*sin(front*13.0)*exp(-front*front*3.0)*exp(-age*.8);}
- return (a+b+c)*params.settings.y+ring;
+ return (a+b+c)*params.settings.y;
+}
+fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
+ var ring=0.0;
+ for(var eventIndex=0u;eventIndex<30u;eventIndex++){
+  let event=impact[eventIndex];let age=time-event.z;
+  if(event.w>0.0 && age>=0.0 && age<4.0){let radius=length(p-event.xy);let front=radius-age*1.4;ring+=.045*sin(front*13.0)*exp(-front*front*3.0)*exp(-age*.8);}
+ }
+ ring=clamp(ring,-.15,.15);
+ return baseWave(p,time,dist)+ring;
 }
 // The bounded test bodies fit in one invocation: pair resolution is deterministic and
 // never reads another invocation's partially updated state.
@@ -31,7 +38,7 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
   ball.velocity.y=(ball.velocity.y+9.81*(submerged*2.0-1.0)*dt)*exp(-2.5*dt);
   let drift=mix(ball.velocity.xz,vec2<f32>(.18,.06),1.0-exp(-.45*dt));ball.velocity.x=drift.x;ball.velocity.z=drift.y;
   let previousY=ball.position.y;ball.position=vec4<f32>(ball.position.xyz+ball.velocity.xyz*dt,radius);
-  if(previousY-radius>water && ball.position.y-radius<=water && ball.velocity.y< -1.2){impact[0]=vec4<f32>(ball.position.x,ball.position.z,params.settings.x,1.0);}
+  if(previousY-radius>water && ball.position.y-radius<=water && ball.velocity.y< -1.2){impact[i]=vec4<f32>(ball.position.x,ball.position.z,params.settings.x,1.0);}
   balls[i]=ball;
  }
  // Several sequential projections handle chains of simultaneous contacts.
@@ -111,8 +118,8 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  return vec3<f32>(.80,.48,.23)*lit*pattern;
 }
 // Thin expanding crown surface, expressed as a 3D implicit sheet.
-fn crownField(p:vec3<f32>,age:f32,base:f32)->f32{
- let local=p-vec3<f32>(impact[0].x,base,impact[0].y);let radial=length(local.xz);let angle=atan2(local.z,local.x);
+fn crownField(p:vec3<f32>,age:f32,base:f32,position:vec2<f32>)->f32{
+ let local=p-vec3<f32>(position.x,base,position.y);let radial=length(local.xz);let angle=atan2(local.z,local.x);
  let growth=smoothstep(0.0,.15,age);let fade=1.0-smoothstep(.38,.9,age);
  let height=(.34+.09*sin(angle*13.0+age*4.0)+.045*sin(angle*23.0-age*3.0))*growth*fade;
  let radius=.16+age*.52+max(0.0,local.y)*.55;
@@ -146,16 +153,18 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
    }
   }
  }
+ for(var eventIndex=0u;eventIndex<30u;eventIndex++){
+ let event=impact[eventIndex];
  // Trace a continuous curved sheet with an irregular, moving rim.
- let crownAge=params.settings.x-impact[0].z;
- if(includeCrown && impact[0].w>0.0 && crownAge>=0.0 && crownAge<.9){
-  let base=wave(impact[0].xy,impact[0].z,0.0);let center=vec3<f32>(impact[0].x,base+.16,impact[0].y);
+ let crownAge=params.settings.x-event.z;
+ if(includeCrown && event.w>0.0 && crownAge>=0.0 && crownAge<.9){
+  let base=baseWave(event.xy,event.z,0.0);let center=vec3<f32>(event.x,base+.16,event.y);
   let delta=origin-center;let projection=dot(delta,direction);let bound=projection*projection-dot(delta,delta)+1.44;
   if(bound>0.0){var t=max(.001,-projection-sqrt(bound));let stop= -projection+sqrt(bound);
    for(var step=0u;step<64u;step++){
-    if(t>stop || (distance>0.0 && t>distance)){break;}let p=origin+direction*t;let field=crownField(p,crownAge,base);
+    if(t>stop || (distance>0.0 && t>distance)){break;}let p=origin+direction*t;let field=crownField(p,crownAge,base,event.xy);
     if(field<.003){
-     let e=.008;let normal=normalize(vec3<f32>(crownField(p+vec3<f32>(e,0.0,0.0),crownAge,base)-crownField(p-vec3<f32>(e,0.0,0.0),crownAge,base),crownField(p+vec3<f32>(0.0,e,0.0),crownAge,base)-crownField(p-vec3<f32>(0.0,e,0.0),crownAge,base),crownField(p+vec3<f32>(0.0,0.0,e),crownAge,base)-crownField(p-vec3<f32>(0.0,0.0,e),crownAge,base)));
+     let e=.008;let normal=normalize(vec3<f32>(crownField(p+vec3<f32>(e,0.0,0.0),crownAge,base,event.xy)-crownField(p-vec3<f32>(e,0.0,0.0),crownAge,base,event.xy),crownField(p+vec3<f32>(0.0,e,0.0),crownAge,base,event.xy)-crownField(p-vec3<f32>(0.0,e,0.0),crownAge,base,event.xy),crownField(p+vec3<f32>(0.0,0.0,e),crownAge,base,event.xy)-crownField(p-vec3<f32>(0.0,0.0,e),crownAge,base,event.xy)));
      let fine=noise(p.xz*55.0+vec2<f32>(p.y*12.0,crownAge*3.0))*.55+noise(p.xz*117.0+vec2<f32>(p.y*22.0,8.0))*.45;
      let rim=smoothstep(.16,.32,p.y-base);let edge=pow(1.0-abs(dot(normal,-direction)),3.0);
      let optics=splashOptics(p,direction,normal);let coverage=clamp(.28+rim*.44+smoothstep(.48,.85,fine)*.20,0.0,.9);
@@ -167,11 +176,11 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
   }
  }
  // Small ballistic droplets, emitted at the detected surface crossing.
- let age=params.settings.x-impact[0].z;
- if(includeCrown && impact[0].w>0.0 && age>=0.0 && age<1.15){
+ let age=params.settings.x-event.z;
+ if(includeCrown && event.w>0.0 && age>=0.0 && age<1.15){
   for(var k=0u;k<16u;k++){
    let angle=f32(k)*2.399963;let speed=1.2+.12*f32(k%5u);let rise=2.6+.18*f32(k%4u);
-   let center=vec3<f32>(impact[0].x+cos(angle)*speed*age, wave(impact[0].xy,impact[0].z,0.0)+rise*age-4.905*age*age,impact[0].y+sin(angle)*speed*age);
+   let center=vec3<f32>(event.x+cos(angle)*speed*age, baseWave(event.xy,event.z,0.0)+rise*age-4.905*age*age,event.y+sin(angle)*speed*age);
    if(center.y<0.0){continue;}
    // Ellipsoids stretch along their ballistic velocity and gently oscillate.
    // Transform the ray into the ellipsoid's local unit sphere for one
@@ -192,6 +201,7 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
     opacity=clamp(.48+edge*.28+highlight*.20,.48,.85);
    }}
   }
+ }
  }
  return ObjectHit(distance,color,opacity);
 }
@@ -230,13 +240,16 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
  let scatter=pow(max(dot(ray,sun),0.0),5.0)*.07*(1.0-cosView);let f=fresnel(cosView);
  var color=mix(transmitted,reflection,f)+vec3<f32>(1.0,.91,.72)*spec+vec3<f32>(.05,.3,.24)*scatter;
  // Advected multiscale breakup creates foam around the expanding impact.
- let foamAge=time-impact[0].z;
- if(impact[0].w>0.0 && foamAge>=0.0 && foamAge<3.0){
-  let relative=point.xz-impact[0].xy;let radius=length(relative);let front=.16+foamAge*.65;
+ for(var eventIndex=0u;eventIndex<30u;eventIndex++){
+ let event=impact[eventIndex];
+ let foamAge=time-event.z;
+ if(event.w>0.0 && foamAge>=0.0 && foamAge<3.0){
+  let relative=point.xz-event.xy;let radius=length(relative);let front=.16+foamAge*.65;
   let envelope=exp(-pow((radius-front)/(.18+foamAge*.12),2.0))*(1.0-smoothstep(1.3,3.0,foamAge));
   let uv=relative*8.0+vec2<f32>(foamAge*.8,-foamAge*.5);let broken=noise(uv)*.40+noise(uv*2.4+vec2<f32>(4.2,6.1))*.30+noise(uv*5.3+vec2<f32>(8.1,4.9))*.20+noise(uv*10.0+vec2<f32>(2.1,11.0))*.10;
   let foam=envelope*smoothstep(.32,.67,broken)*.82;
   color=mix(color,foamColor(normal),foam);
+ }
  }
  let horizon=overlayCrown(mix(color,sky(ray),smoothstep(90.0,200.0,t)),crown,t);
  return vec4<f32>(pow(max(horizon,vec3<f32>(0.0)),vec3<f32>(1.0/2.2)),1.0);
