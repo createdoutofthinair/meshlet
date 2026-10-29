@@ -59,7 +59,7 @@ fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->
  out.debugIds=vec2<u32>(0u);
  if((frame.counts.w&192u)!=0u){
   let patchId=debugHash(bitcast<u32>(tile.cube.x)^debugHash(bitcast<u32>(tile.cube.y))^debugHash(bitcast<u32>(tile.cube.z))^tile.details.y);
-  out.debugIds=vec2<u32>(patchId,debugHash(patchId^(meshlet+1u)*2654435761u));
+  out.debugIds=vec2<u32>(patchId,debugHash(patchId^((meshlet+1u)*2654435761u)));
  }
  return out;
 }

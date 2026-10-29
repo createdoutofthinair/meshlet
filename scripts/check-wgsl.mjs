@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {WASI} from 'node:wasi';
+import {checkBitwiseArithmetic} from './check-wgsl-bitwise.mjs';
 
 // Naga runs only as a development-time validator, inside a WASI sandbox with
 // an empty environment and access to the temporary shader directory only.
@@ -67,7 +68,9 @@ try{
  }
  const failures=[];
  for(const [name,parts] of Object.entries(modules)){
-  const result=await validate(name,parts.join('\n'));
+  const source=parts.join('\n'),operatorErrors=checkBitwiseArithmetic(source);
+  if(operatorErrors.length){failures.push(`${name}:\n${operatorErrors.join('\n')}`);continue;}
+  const result=await validate(name,source);
   if(result.code!==0)failures.push(`${name}:\n${result.diagnostics}`);
  }
  if(failures.length)throw new Error(failures.join('\n'));
