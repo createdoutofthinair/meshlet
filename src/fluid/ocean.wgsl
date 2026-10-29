@@ -118,6 +118,14 @@ fn crownField(p:vec3<f32>,age:f32,base:f32)->f32{
  let radius=.16+age*.52+max(0.0,local.y)*.55;
  return max(abs(radial-radius)-.028,max(-local.y,local.y-height));
 }
+// Local optical approximation for thin water: reflected sky and refracted
+// environment, weighted by the dielectric Fresnel response.
+fn splashOptics(p:vec3<f32>,incident:vec3<f32>,surfaceNormal:vec3<f32>)->vec3<f32>{
+ let n=select(-surfaceNormal,surfaceNormal,dot(surfaceNormal,incident)<0.0);
+ let reflection=sky(reflect(incident,n));let transmittedRay=refract(incident,n,1.0/1.333);
+ var transmitted=sky(transmittedRay);if(transmittedRay.y< -.001){let d=min(30.0,(p.y+2.2)/max(.04,-transmittedRay.y));transmitted=ground((p+transmittedRay*d).xz)*vec3<f32>(.8,.93,.94);}
+ return mix(transmitted,reflection,fresnel(abs(dot(n,-incident))));
+}
 struct ObjectHit {distance:f32,color:vec3<f32>,opacity:f32};
 fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
  var distance=cubeHit(origin,direction);var color=vec3<f32>(0.0);var opacity=1.0;
@@ -146,7 +154,8 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
      let light=.48+.52*abs(dot(normal,normalize(vec3<f32>(-.35,.65,.55))));
      let fine=noise(p.xz*55.0+vec2<f32>(p.y*12.0,crownAge*3.0))*.55+noise(p.xz*117.0+vec2<f32>(p.y*22.0,8.0))*.45;
      let rim=smoothstep(.16,.32,p.y-base);let edge=pow(1.0-abs(dot(normal,-direction)),3.0);
-     color=mix(vec3<f32>(.32,.58,.56),vec3<f32>(.84,.93,.90),smoothstep(.42,.8,fine)*.5+rim*.35)*light;
+     let optics=splashOptics(p,direction,normal);let foam=mix(vec3<f32>(.32,.58,.56),vec3<f32>(.84,.93,.90),smoothstep(.42,.8,fine)*.5+rim*.35)*light;
+     color=mix(optics,foam,.25+rim*.35);
      opacity=clamp(.16+rim*.30+edge*.28+smoothstep(.7,.9,fine)*.12,.16,.72);distance=t;break;
     }
     t+=clamp(field*.65,.012,.12);
@@ -156,15 +165,16 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
  // Small ballistic droplets, emitted at the detected surface crossing.
  let age=params.settings.x-impact[0].z;
  if(includeCrown && impact[0].w>0.0 && age>=0.0 && age<1.15){
-  for(var k=0u;k<12u;k++){
+  for(var k=0u;k<16u;k++){
    let angle=f32(k)*2.399963;let speed=1.2+.12*f32(k%5u);let rise=2.6+.18*f32(k%4u);
    let center=vec3<f32>(impact[0].x+cos(angle)*speed*age, wave(impact[0].xy,impact[0].z,0.0)+rise*age-4.905*age*age,impact[0].y+sin(angle)*speed*age);
-   if(center.y<0.0){continue;}let delta=origin-center;let b=dot(delta,direction);let disc=b*b-dot(delta,delta)+.0003;
+   if(center.y<0.0){continue;}let delta=origin-center;let b=dot(delta,direction);let disc=b*b-dot(delta,delta)+.0012;
    if(disc>0.0){let hit= -b-sqrt(disc);if(hit>.001 && (distance<0.0||hit<distance)){
     let n=normalize(origin+direction*hit-center);let edge=pow(1.0-clamp(dot(n,-direction),0.0,1.0),3.0);
     let sun=normalize(vec3<f32>(-.35,.65,.55));let highlight=pow(max(dot(reflect(-sun,n),-direction),0.0),80.0);
-    distance=hit;color=mix(vec3<f32>(.20,.43,.44),vec3<f32>(.85,.95,.96),clamp(edge*.65+highlight,0.0,1.0));
-    opacity=clamp(.12+edge*.35+highlight*.42,.12,.75);
+    let p=origin+direction*hit;let optics=splashOptics(p,direction,n);
+    distance=hit;color=optics+vec3<f32>(.75,.83,.80)*highlight*.7;
+    opacity=clamp(.32+edge*.38+highlight*.25,.32,.85);
    }}
   }
  }
