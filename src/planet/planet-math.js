@@ -1,7 +1,7 @@
 export const RADIUS_KM=6371;
 export const HEIGHT_LIMIT_KM=12;
 export const PATCH_CELLS=16;
-export const MAX_DEPTH=20;
+export const MAX_DEPTH=22;
 export const FACE_BASES=[
  {c:[1,0,0],u:[0,1,0],v:[0,0,1]},
  {c:[-1,0,0],u:[0,1,0],v:[0,0,-1]},

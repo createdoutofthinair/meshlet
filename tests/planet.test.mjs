@@ -71,6 +71,33 @@ test('a near-ground view can refine to level 20 within a larger budget',()=>{
  const result=selectPatches(camera,{budget:384,maxDepth:20,pixelSize:10});
  assert.equal(result.deepest,20);assert.ok(result.leaves.length<=384);
 });
+test('walking resolves a finer ground mesh while keeping a bounded, balanced quadtree',()=>{
+ for(const pitch of [.08,.3,.55]){
+  const camera=planetCamera({mode:'walk',altitude:.0017,surfaceHeight:2,longitude:.8,latitude:.4,pitch,heading:.45},1217,1010);
+  const result=selectPatches(camera,{budget:512,maxDepth:22,pixelSize:14}),levels=[];
+  for(const y of [-.9,-.6,-.3,0,.2])for(const x of [-.8,-.4,0,.4,.8]){
+   const ray=normalize(add(add(camera.forward,scale(camera.right,x*camera.tanX)),scale(camera.up,y*camera.tanY)));
+   const b=dot(camera.eye,ray),radius=6373,discriminant=b*b-(dot(camera.eye,camera.eye)-radius*radius);
+   if(discriminant<0||b>0)continue;
+   const hit=directionToFace(add(camera.eye,scale(ray,-b-Math.sqrt(discriminant))));
+   const leaf=result.leaves.find(n=>n.face===hit.face&&Math.abs(hit.u-n.u)<=n.span/2&&Math.abs(hit.v-n.v)<=n.span/2);
+   assert.ok(leaf);levels.push(leaf.level);
+  }
+  levels.sort((a,b)=>a-b);assert.equal(result.deepest,22);assert.ok(levels[Math.floor(levels.length/2)]>=22);
+  assert.ok(result.leaves.length<=512);
+  const leaves=new Map(result.leaves.map(n=>[n.key,n]));
+  for(const node of result.leaves)for(let edge=0;edge<4;edge++)for(const other of neighbors(leaves,node,edge,22))assert.ok(Math.abs(node.level-other.level)<=1);
+ }
+});
+test('high mountain views refine both cube faces instead of measuring from sea level',()=>{
+ for(const vector of [[-.1875,-1,-1],[1,1,.0625]])for(const surfaceHeight of [2,5.648,9]){
+  const d=normalize(vector),camera=planetCamera({longitude:Math.atan2(d[2],d[0]),latitude:Math.atan2(d[1],Math.hypot(d[0],d[2])),mode:'walk',altitude:.0017,surfaceHeight,heading:.45,pitch:.2},1280,720);
+  const result=selectPatches(camera,{budget:512,maxDepth:22,pixelSize:14}),focus=directionToFace(camera.focusDirection);
+  const leaf=result.leaves.find(n=>n.face===focus.face&&Math.abs(focus.u-n.u)<=n.span/2&&Math.abs(focus.v-n.v)<=n.span/2);
+  const faces=new Set(result.visible.filter(n=>n.level>=20).map(n=>n.face));
+  assert.equal(leaf?.level,22);assert.ok(faces.size>=2);assert.ok(result.leaves.length<=512);
+ }
+});
 test('zooming refines the viewed surface on high terrain in orbit and flyover',()=>{
  for(const mode of ['orbit','flyover']){
   const levels=[];

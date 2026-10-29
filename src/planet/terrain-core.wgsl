@@ -16,8 +16,8 @@ fn noise3(p:vec3<f32>, seed:u32)->f32 {
 }
 // Value noise and its analytic derivative in noise-space coordinates. This
 // reuses the same lattice values rather than evaluating the terrain repeatedly.
-fn noiseGradient(p:vec3<f32>,seed:u32)->vec4<f32>{
- let cell=vec3<i32>(floor(p));let x=fract(p);let f=x*x*(vec3<f32>(3.0)-2.0*x);let df=6.0*x*(vec3<f32>(1.0)-x);
+fn cellNoiseGradient(cell:vec3<i32>,x:vec3<f32>,seed:u32)->vec4<f32>{
+ let f=x*x*(vec3<f32>(3.0)-2.0*x);let df=6.0*x*(vec3<f32>(1.0)-x);
  let h000=hash3(cell,seed);let h100=hash3(cell+vec3<i32>(1,0,0),seed);
  let h010=hash3(cell+vec3<i32>(0,1,0),seed);let h110=hash3(cell+vec3<i32>(1,1,0),seed);
  let h001=hash3(cell+vec3<i32>(0,0,1),seed);let h101=hash3(cell+vec3<i32>(1,0,1),seed);
@@ -27,6 +27,7 @@ fn noiseGradient(p:vec3<f32>,seed:u32)->vec4<f32>{
  let gy=mix(b-a,d-c,f.z)*df.y;let gz=(mix(c,d,f.y)-mix(a,b,f.y))*df.z;
  return vec4<f32>(mix(mix(a,b,f.y),mix(c,d,f.y),f.z),gx,gy,gz);
 }
+fn noiseGradient(p:vec3<f32>,seed:u32)->vec4<f32>{return cellNoiseGradient(vec3<i32>(floor(p)),fract(p),seed);}
 // Average samples along the local slope. The resulting zero contours tend to
 // run downhill; nesting two scales makes irregular, branching-looking flutes.
 // This is procedural shaping, not an erosion or hydrology simulation.
@@ -41,6 +42,11 @@ fn localNoise(high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,frequency:f32,seed:u3
  let residual=fract(scaled)+(low+delta)*frequency;
  let cell=vec3<i32>(floor(scaled))+vec3<i32>(floor(residual));
  return cellNoise(cell,fract(residual),seed);
+}
+fn localNoiseGradient(high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,frequency:f32,seed:u32)->vec4<f32>{
+ let scaled=high*frequency;let residual=fract(scaled)+(low+delta)*frequency;
+ let cell=vec3<i32>(floor(scaled))+vec3<i32>(floor(residual));
+ return cellNoiseGradient(cell,fract(residual),seed);
 }
 struct TerrainBase {direction:vec3<f32>,warp:vec3<f32>,land:f32,plain:f32,basin:f32,roughness:f32};
 fn terrainBase(direction:vec3<f32>,seed:u32)->TerrainBase {
@@ -63,17 +69,56 @@ fn terrainBase(direction:vec3<f32>,seed:u32)->TerrainBase {
  let mountainZone=clamp(boundary*.82+smoothstep(.08,.35,continent)*.34,0.0,1.0);
  return TerrainBase(d,warp,land,plain,basin,land*mountainZone);
 }
-fn terrainShapeFromBase(base:TerrainBase,seed:u32,valleyStrength:f32)->vec3<f32>{
+fn terrainTwoSum(a:f32,b:f32)->vec2<f32>{
+ let sum=a+b;let bp=sum-a;return vec2<f32>(sum,(a-(sum-bp))+(b-bp));
+}
+// Keep the residual of dot products: rounding the projected coordinate before
+// its 2100x scale otherwise creates height steps at walking distances.
+fn terrainPreciseDot(high:vec3<f32>,low:vec3<f32>,axis:vec3<f32>)->vec2<f32>{
+ let products=high*axis;let errors=fma(high,axis,-products);
+ let ab=terrainTwoSum(products.x,products.y);let abc=terrainTwoSum(ab.x,products.z);
+ return vec2<f32>(abc.x,abc.y+ab.y+errors.x+errors.y+errors.z+dot(low,axis));
+}
+struct TerrainPrecision {direction:vec3<f32>,warp:vec3<f32>};
+fn terrainPrecision(base:TerrainBase,direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32)->TerrainPrecision{
+ let error=(high-direction)+(low+delta);let e=error*2.1;
+ let warpError=vec3<f32>(dot(noiseGradient(direction*2.1,seed+11u).yzw,e),dot(noiseGradient(direction*2.1+vec3<f32>(17.0,3.0,9.0),seed+19u).yzw,e),dot(noiseGradient(direction*2.1+vec3<f32>(5.0,23.0,2.0),seed+29u).yzw,e));
+ let shift=error+warpError*.19;let d=base.direction;
+ let directionError=(shift-d*dot(d,shift))/length(direction+base.warp*.19);
+ return TerrainPrecision(directionError,warpError);
+}
+struct TerrainLattice {cell:vec3<i32>,fraction:vec3<f32>};
+fn terrainPreciseLattice(high:vec3<f32>,low:vec3<f32>,frequency:f32,shift:vec3<f32>,shiftLow:vec3<f32>)->TerrainLattice{
+ let scaled=high*frequency;
+ let residual=fract(scaled)+fma(high,vec3<f32>(frequency),-scaled)+low*frequency+shift+shiftLow;
+ return TerrainLattice(vec3<i32>(floor(scaled))+vec3<i32>(floor(residual)),fract(residual));
+}
+fn terrainPreciseFold(base:TerrainBase,precision:TerrainPrecision,seed:u32)->f32{
+ let d=base.direction;let a=terrainPreciseDot(d,precision.direction,plates[0].xyz);let b=terrainPreciseDot(d,precision.direction,plates[1].xyz);let c=terrainPreciseDot(d,precision.direction,plates[2].xyz);
+ let raw=vec3<f32>(a.x,b.x,c.x);let tail=vec3<f32>(a.y,b.y,c.y);let factors=vec3<f32>(2100.0,480.0,125.0);
+ let scaled=raw*factors;let residual=fract(scaled)+fma(raw,factors,-scaled)+tail*factors+(base.warp+precision.warp)*.45;
+ let cell=vec3<i32>(floor(scaled))+vec3<i32>(floor(residual));
+ return cellNoise(cell,fract(residual),seed+277u);
+}
+fn terrainShapeFromBaseDetail(base:TerrainBase,seed:u32,valleyStrength:f32,direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,precise:bool)->vec3<f32>{
  let d=base.direction;let land=base.land;let plain=base.plain;let basin=base.basin;let roughness=base.roughness;
  if(land<=0.0){return vec3<f32>(clamp(basin,-8.0,9.0),0.0,clamp(basin,-8.0,9.0));}
  let warpDetail=base.warp*.45;let valleyEnabled=valleyStrength>0.0 && roughness>.025;
+ let preciseBands=precise && roughness>.001;var precision=TerrainPrecision(vec3<f32>(0.0),vec3<f32>(0.0));
+ if(preciseBands){precision=terrainPrecision(base,direction,high,low,delta,seed);}
  var ridges=0.0;var ridgeGradient=vec3<f32>(0.0);var amplitude=.56;var freq=14.0;
  for(var i=0u;i<4u;i++){
   let p=d*freq+warpDetail;var n:f32;
-  if(valleyEnabled){let sample=noiseGradient(p,seed+53u+i*23u);n=sample.x;
+  if(valleyEnabled){var sample:vec4<f32>;
+   if(preciseBands){let lattice=terrainPreciseLattice(d,precision.direction,freq,warpDetail,precision.warp*.45);sample=cellNoiseGradient(lattice.cell,lattice.fraction,seed+53u+i*23u);}
+   else{sample=noiseGradient(p,seed+53u+i*23u);}
+   n=sample.x;
    let r=1.0-min(1.0,abs(n)*2.3);
    if(abs(n)*2.3<1.0){ridgeGradient+=sample.yzw*(-4.6*r*sign(n)*amplitude*freq);}
-  }else{n=noise3(p,seed+53u+i*23u);}
+  }else{
+   if(preciseBands){let lattice=terrainPreciseLattice(d,precision.direction,freq,warpDetail,precision.warp*.45);n=cellNoise(lattice.cell,lattice.fraction,seed+53u+i*23u);}
+   else{n=noise3(p,seed+53u+i*23u);}
+  }
   let r=1.0-min(1.0,abs(n)*2.3);
   ridges+=r*r*amplitude;freq*=2.23;amplitude*=.50;
  }
@@ -82,14 +127,22 @@ fn terrainShapeFromBase(base:TerrainBase,seed:u32,valleyStrength:f32)->vec3<f32>
  // not a hydraulic simulation; the land mask prevents ocean-wide ridges.
  var fine=0.0;var fineWeight=1.0;var fineFrequency=640.0;var fineAmplitude=1.0;
  for(var i=0u;i<6u;i++){
-  let r=1.0-min(1.0,abs(noise3(d*fineFrequency+warpDetail,seed+151u+i*23u))*2.2);
+  var fineNoise:f32;
+  if(preciseBands){let lattice=terrainPreciseLattice(d,precision.direction,fineFrequency,warpDetail,precision.warp*.45);fineNoise=cellNoise(lattice.cell,lattice.fraction,seed+151u+i*23u);}
+  else{fineNoise=noise3(d*fineFrequency+warpDetail,seed+151u+i*23u);}
+  let r=1.0-min(1.0,abs(fineNoise)*2.2);
   fine+=(r*r-.22)*fineAmplitude*fineWeight;
   // The amplitude must fall faster than frequency rises. Otherwise the
   // smallest octaves create taller-than-wide spikes as the camera approaches.
   fineWeight=clamp(r*1.6,.25,1.0);fineFrequency*=3.7;fineAmplitude*=.26;
  }
- let coords=vec3<f32>(dot(d,plates[0].xyz)*2100.0,dot(d,plates[1].xyz)*480.0,dot(d,plates[2].xyz)*125.0);
- let fold=1.0-min(1.0,abs(noise3(coords+warpDetail,seed+277u))*2.0);
+ var foldNoise:f32;
+ if(preciseBands){foldNoise=terrainPreciseFold(base,precision,seed);}
+ else{
+  let coords=vec3<f32>(dot(d,plates[0].xyz)*2100.0,dot(d,plates[1].xyz)*480.0,dot(d,plates[2].xyz)*125.0);
+  foldNoise=noise3(coords+warpDetail,seed+277u);
+ }
+ let fold=1.0-min(1.0,abs(foldNoise)*2.0);
  let directional=(fold*fold-.25)*.38*roughness;
  let plainsDetail=noise3(d*900.0,seed+311u)*.035+noise3(d*5000.0,seed+313u)*.008;
  let unshaped=mix(basin,plain,land)+mountains+roughness*fine+directional+plainsDetail*land;
@@ -108,6 +161,9 @@ fn terrainShapeFromBase(base:TerrainBase,seed:u32,valleyStrength:f32)->vec3<f32>
  }
  let h=clamp(unshaped-valleys,-8.0,9.0);
  return vec3<f32>(h,max(0.0,clamp(unshaped,-8.0,9.0)-h),clamp(broadUnshaped,-8.0,9.0));
+}
+fn terrainShapeFromBase(base:TerrainBase,seed:u32,valleyStrength:f32)->vec3<f32>{
+ let zero=vec3<f32>(0.0);return terrainShapeFromBaseDetail(base,seed,valleyStrength,zero,zero,zero,zero,false);
 }
 fn terrainShape(direction:vec3<f32>,seed:u32,valleyStrength:f32)->vec3<f32>{return terrainShapeFromBase(terrainBase(direction,seed),seed,valleyStrength);}
 fn terrain(direction:vec3<f32>,seed:u32)->f32{return terrainShape(direction,seed,frame.settings.w).x;}

@@ -1,4 +1,4 @@
-import {RADIUS_KM,PATCH_CELLS,FACE_BASES,faceCube,directionToFace,seedPlates,normalize,add,scale} from './planet-math.js';
+import {RADIUS_KM,PATCH_CELLS,FACE_BASES,faceCube,directionToFace,seedPlates,normalize,add,scale,dot} from './planet-math.js';
 import {planetCamera} from './camera.js';
 import {selectPatches} from './quadtree.js';
 import {buildWorldGrid} from './world-grid.js';
@@ -190,7 +190,8 @@ export class PlanetRenderer {
  }
  select(camera,now){
   const start=performance.now();
-  const result=selectPatches(camera,{budget:this.budget,maxDepth:this.maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.lodErrors});
+  const maxDepth=this.cameraState.mode==='walk'?22:this.maxDepth;
+  const result=selectPatches(camera,{budget:this.budget,maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.lodErrors});
   this.previousSplits=result.splits;
   const wantedNodes=new Map(result.visible.map(p=>[p.key,p])),wanted=new Set(wantedNodes.keys());
   // Only patches touching an edge or corner can supply that vertex's normal.
@@ -224,7 +225,21 @@ export class PlanetRenderer {
   });
   this.pending=pending;this.normalPending=normalPending;
   this.stats={leaves:result.leaves.length,visiblePatches:this.patches.length,deepest:result.deepest,selectionMs:performance.now()-start,generated:pending.length,normalUpdates:normalPending.length,reusedNormalUpdates:normalPending.length-pending.length};
+  this.selectionState={eye:[...camera.eye],forward:[...camera.forward],mode:this.cameraState.mode,budget:this.budget,maxDepth,pixelSize:this.pixelSize,width:camera.width,height:camera.height,generation:this.generation};
   this.lastSelection=now;this.needsSelection=false;
+ }
+ shouldSelect(camera,now){
+  if(!this.needsSelection)return false;
+  if(!this.patches.length)return true;
+  if(now-this.lastSelection<=100)return false;
+  if(this.cameraState.mode!=='walk')return true;
+  const s=this.selectionState;
+  if(!s||s.mode!=='walk'||s.budget!==this.budget||s.maxDepth!==22||s.pixelSize!==this.pixelSize||s.width!==camera.width||s.height!==camera.height||s.generation!==this.generation)return true;
+  // A full balanced selection is expensive. At walking speed, wait until the
+  // camera moves 75 cm or turns five degrees; retained patches are still drawn
+  // from the current camera every frame. This also limits small LOD churn.
+  const distance=Math.hypot(...camera.eye.map((x,i)=>x-s.eye[i]));
+  return distance>=.00075||dot(camera.forward,s.forward)<Math.cos(5*Math.PI/180);
  }
  async sampleTerrain(direction=null,kind='terrain'){
   const d=this.device,all=!direction,count=all?(kind==='rivers'?this.worldCount:6*24*24):1,size=count*16;
@@ -297,7 +312,7 @@ export class PlanetRenderer {
   const camera=planetCamera(this.cameraState,this.canvas.width,this.canvas.height);
   const regionsChanged=this.prepareRegions(camera);
   if(!regionsChanged)this.requestSurface(camera,now);
-  if(this.needsSelection && (now-this.lastSelection>100||!this.patches.length))this.select(camera,now);
+  if(this.shouldSelect(camera,now))this.select(camera,now);
   for(const node of this.patches){
    const i=node.slot*32,b=FACE_BASES[node.face],cube=faceCube(node.face,node.u,node.v);
    this.patchFloats.set([...cube,node.span],i);this.patchFloats.set([...b.u,0],i+4);this.patchFloats.set([...b.v,0],i+8);

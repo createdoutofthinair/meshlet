@@ -1,4 +1,4 @@
-import {RADIUS_KM,HEIGHT_LIMIT_KM,PATCH_CELLS,MAX_DEPTH,faceCube,faceDirection,directionToFace,makeTile,dot,sub,length} from './planet-math.js';
+import {RADIUS_KM,HEIGHT_LIMIT_KM,PATCH_CELLS,MAX_DEPTH,FACE_BASES,faceCube,faceDirection,directionToFace,makeTile,dot,sub,length} from './planet-math.js';
 
 // Covering leaves include the entire planet. Only visible leaves become GPU
 // patches; retaining invisible leaves lets us balance edges across the horizon.
@@ -61,7 +61,18 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
  // rough terrain whose visual error is large at the current distance.
  const facing=camera.facing;
  let distance=length(relative);
- if(facing.face===node.face){
+ // Near the ground, calculate distance to the current surface altitude on
+ // every front-facing cube face. Limiting this to the face under the camera
+ // makes a neighboring face appear kilometers away on high mountains.
+ const basis=FACE_BASES[node.face],denom=dot(camera.radial,basis.c);
+ if(camera.clearance<50&&denom>0){
+  const half=node.span/2;
+  const u=Math.max(node.u-half,Math.min(node.u+half,dot(camera.radial,basis.u)/denom));
+  const v=Math.max(node.v-half,Math.min(node.v+half,dot(camera.radial,basis.v)/denom));
+  const nearest=faceDirection(node.face,u,v).map(x=>x*(RADIUS_KM+camera.altitude-camera.clearance));
+  distance=Math.min(distance,length(sub(nearest,camera.eye)));
+ }
+ else if(facing.face===node.face){
   const half=node.span/2;
   const u=Math.max(node.u-half,Math.min(node.u+half,facing.u));
   const v=Math.max(node.v-half,Math.min(node.v+half,facing.v));

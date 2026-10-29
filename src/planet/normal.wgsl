@@ -64,8 +64,11 @@ fn main(@builtin(global_invocation_id) gid:vec3<u32>) {
    if(!coarse && other.details.y!=current.details.y){continue;}
    var seen=false;for(var k=0u;k<count;k++){if(slots[k]==candidate){seen=true;}}
    if(seen || count>=16u){continue;}
-   let point=current.cube.xyz+current.axisU.xyz*((f32(x)-8.0)*current.cube.w/16.0)+current.axisV.xyz*((f32(y)-8.0)*current.cube.w/16.0);
-   let faceNormal=normalize(cross(other.axisU.xyz,other.axisV.xyz));let offset=point/max(.001,dot(point,faceNormal))-other.cube.xyz;
+   // Both tiles share this exact cube-face edge, including across cube faces,
+   // where the coordinate normal to the neighboring face is exactly one.
+   // Subtract centers before adding sub-meter offsets: adding them to a unit
+   // cube coordinate first rounds away several fine-grid cells at level 22.
+   let offset=(current.cube.xyz-other.cube.xyz)+current.axisU.xyz*((f32(x)-8.0)*current.cube.w/16.0)+current.axisV.xyz*((f32(y)-8.0)*current.cube.w/16.0);
    let tx=i32(round(dot(offset,other.axisU.xyz)*16.0/other.cube.w+8.0));let ty=i32(round(dot(offset,other.axisV.xyz)*16.0/other.cube.w+8.0));
    if(tx<0 || tx>16 || ty<0 || ty>16){continue;}
    slots[count]=candidate;xs[count]=u32(tx);ys[count]=u32(ty);count++;

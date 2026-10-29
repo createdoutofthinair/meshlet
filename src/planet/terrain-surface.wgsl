@@ -43,7 +43,15 @@ fn regionalIncision(s:WorldSample,profile:vec4<f32>,direction:vec3<f32>,high:vec
  return nested*terrainMask*frame.settings.w*frame.hydrology.x;
 }
 fn surfaceBase(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32,includeRegional:bool)->SurfaceData {
- let shape=terrainShape(direction,seed,frame.settings.w);let base=shape.x;
+ let terrainInfo=terrainBase(direction,seed);
+ var shape=terrainShapeFromBaseDetail(terrainInfo,seed,frame.settings.w,direction,high,low,delta,true);
+ // Keep sea-level classification identical to the original world field. The
+ // sub-meter precision fix is geographic, independent of render patch LOD.
+ if(shape.x<.041){
+  let original=terrainShapeFromBase(terrainInfo,seed,frame.settings.w);
+  shape=mix(original,shape,smoothstep(.01,.04,original.x));
+ }
+ let base=shape.x;
  // Independent, seeded bands produce real vertex relief from tens of meters
  // down to sub-meter scales. Their low amplitudes preserve the landforms.
  let s=worldSample(direction);let profile=worldProfile(s);

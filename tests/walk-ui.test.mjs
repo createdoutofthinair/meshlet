@@ -20,7 +20,7 @@ const doc=new MockDocument();globalThis.document=doc;globalThis.Element=MockElem
 globalThis.location={href:'https://example.test/planet.html',search:''};globalThis.history={replaceState(){}};
 let animation;globalThis.requestAnimationFrame=callback=>{animation=callback;};
 const cameraState={longitude:0,latitude:0,altitude:14000,surfaceHeight:0,mode:'orbit',heading:0,pitch:.3};
-const renderer={cameraState,adapter:{info:{}},timing:false,seed:918273,relief:1,valleys:1,erosion:1,regional:true,rivers:true,ocean:true,generation:0,lastSelection:1,
+const renderer={cameraState,adapter:{info:{}},timing:false,seed:918273,relief:1,valleys:1,erosion:1,regional:true,rivers:true,ocean:true,budget:384,generation:0,lastSelection:1,
  stats:{visiblePatches:1,deepest:20,leaves:1,generated:1,selectionMs:0},latest:{visibleMeshlets:1,gpuComputeMs:null,gpuRenderMs:null},
  invalidateTerrain(){this.generation++;},frame(){return 1;},
  async sampleTerrain(direction){return direction?new Float32Array([...direction,1]):new Float32Array([1,0,0,1]);},
@@ -35,6 +35,7 @@ await import('../src/planet/app.js');await flush();
 test('page lands, walks, responds to terrain changes and returns to orbit',async()=>{
  doc.getElementById('walk').dispatchEvent(new Event('click'));await flush();
  assert.equal(cameraState.mode,'walk');assert.equal(doc.getElementById('altitude-range').disabled,true);
+ assert.equal(renderer.budget,512);assert.equal(doc.getElementById('quality').value,'512');
  assert.equal(doc.getElementById('walk-controls').hidden,false);
  await tick(100);key('keydown','KeyW');await tick(200);await tick(300);await tick(410);
  assert.ok(cameraState.latitude>0,'W moves the camera north');
@@ -43,6 +44,7 @@ test('page lands, walks, responds to terrain changes and returns to orbit',async
  assert.equal(renderer.seed,42);assert.equal(cameraState.mode,'walk','walk mode relands after a new seed');
  doc.getElementById('orbit').dispatchEvent(new Event('click'));
  assert.equal(cameraState.mode,'orbit');assert.equal(cameraState.altitude,14000);
+ assert.equal(renderer.budget,384);
  assert.equal(doc.getElementById('altitude-range').disabled,false);assert.equal(doc.getElementById('walk-controls').hidden,true);
 });
 
@@ -60,4 +62,11 @@ test('landing reports when there is no sampled dry land',async()=>{
  doc.getElementById('walk').dispatchEvent(new Event('click'));await flush();
  assert.equal(cameraState.mode,'orbit');assert.equal(doc.getElementById('mode').value,'orbit');
  assert.match(doc.getElementById('walk-help').textContent,/No dry landing place/);
+});
+
+test('a patch budget chosen while walking remains selected after returning to orbit',async()=>{
+ renderer.sampleTerrain=async direction=>new Float32Array([...(direction||[1,0,0]),1]);
+ doc.getElementById('walk').dispatchEvent(new Event('click'));await flush();
+ doc.getElementById('quality').value='240';doc.getElementById('quality').dispatchEvent(new Event('change'));
+ assert.equal(renderer.budget,240);doc.getElementById('orbit').dispatchEvent(new Event('click'));assert.equal(renderer.budget,240);
 });

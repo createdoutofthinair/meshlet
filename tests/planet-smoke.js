@@ -102,6 +102,23 @@ try{
   let d=localNoise(direction,zero,tangent*(.5/6371000.0),8388608.0,seed+421u);
   samples[0]=vec4<f32>(a,b,c,d);
  }
+ @compute @workgroup_size(1) fn materialDetailCheck(){
+  let high=normalize(probe.direction.xyz);let other=high+vec3<f32>(.000015258789,-.0000076293945,.000015258789);
+  let low=high-other;let delta=vec3<f32>(.000000017,-.000000011,.000000023);let zero=vec3<f32>(0.0);
+  let seed=frame.counts.z+1721u;let f=8388608.0;
+  let a=localNoise(high,zero,delta,f,seed);let b=localNoise(other,low,delta,f,seed);
+  let g=localNoiseGradient(high,zero,delta,f,seed);
+  let e=.001/f;let finite=(localNoise(high,zero,delta+vec3<f32>(e,0.0,0.0),f,seed)-localNoise(high,zero,delta-vec3<f32>(e,0.0,0.0),f,seed))/.002;
+  samples[0]=vec4<f32>(a,b,g.x,abs(g.y-finite));
+ }
+ @compute @workgroup_size(1) fn terrainPrecisionCheck(){
+  let d=normalize(probe.direction.xyz);let other=d+vec3<f32>(.000244140625,-.0001220703125,.000244140625);
+  let zero=vec3<f32>(0.0);let seed=frame.counts.z;let base=terrainBase(d,seed);
+  let a=terrainShapeFromBaseDetail(base,seed,frame.settings.w,d,d,zero,zero,true);
+  let b=terrainShapeFromBaseDetail(base,seed,frame.settings.w,d,other,d-other,zero,true);
+  let original=terrainShapeFromBase(base,seed,frame.settings.w);
+  samples[0]=vec4<f32>(a.x,b.x,original.x,0.0);
+ }
  @compute @workgroup_size(64) fn valleyCheck(@builtin(global_invocation_id) gid:vec3<u32>){
   let n=gid.x;if(n>=512u){return;}
   let p=vec3<f32>(f32(n%32u)*.137+.123,f32(n/32u)*.169+.157,f32((n*37u)%53u)*.117+.183);
@@ -157,6 +174,18 @@ try{
  detailPass.setPipeline(detailPipe);detailPass.setBindGroup(0,detailBind);detailPass.dispatchWorkgroups(1);detailPass.end();detailEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,detailBuffer,0,16);device.queue.submit([detailEncoder.finish()]);
  await detailBuffer.mapAsync(GPUMapMode.READ);const detail=new Float32Array(detailBuffer.getMappedRange().slice(0));detailBuffer.unmap();detailBuffer.destroy();
  if(!detail.every(Number.isFinite)||Math.abs(detail[0]-detail[1])<.000001||Math.abs(detail[2]-detail[3])<.001)throw new Error(`Fine terrain samples did not vary with position: ${[...detail]}`);
+ const materialPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'materialDetailCheck'}});
+ const materialBind=device.createBindGroup({layout:materialPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.uniform}},{binding:5,resource:{buffer:renderer.sampleBuffer}},{binding:6,resource:{buffer:renderer.probeInput}}]});
+ const materialRead=device.createBuffer({size:16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),materialEncoder=device.createCommandEncoder(),materialPass=materialEncoder.beginComputePass();
+ materialPass.setPipeline(materialPipe);materialPass.setBindGroup(0,materialBind);materialPass.dispatchWorkgroups(1);materialPass.end();materialEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,materialRead,0,16);device.queue.submit([materialEncoder.finish()]);
+ await materialRead.mapAsync(GPUMapMode.READ);const material=new Float32Array(materialRead.getMappedRange().slice(0));materialRead.unmap();materialRead.destroy();
+ if(!material.every(Number.isFinite)||Math.abs(material[0]-material[1])>1e-4||Math.abs(material[0]-material[2])>1e-6||material[3]>.01)throw new Error(`World-anchored surface detail failed: ${[...material]}`);
+ const precisionPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'terrainPrecisionCheck'}});
+ const precisionBind=device.createBindGroup({layout:precisionPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.uniform}},{binding:4,resource:{buffer:renderer.plates}},{binding:5,resource:{buffer:renderer.sampleBuffer}},{binding:6,resource:{buffer:renderer.probeInput}}]});
+ const precisionRead=device.createBuffer({size:16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),precisionEncoder=device.createCommandEncoder(),precisionPass=precisionEncoder.beginComputePass();
+ precisionPass.setPipeline(precisionPipe);precisionPass.setBindGroup(0,precisionBind);precisionPass.dispatchWorkgroups(1);precisionPass.end();precisionEncoder.copyBufferToBuffer(renderer.sampleBuffer,0,precisionRead,0,16);device.queue.submit([precisionEncoder.finish()]);
+ await precisionRead.mapAsync(GPUMapMode.READ);const precision=new Float32Array(precisionRead.getMappedRange().slice(0));precisionRead.unmap();precisionRead.destroy();
+ if(!precision.every(Number.isFinite)||Math.abs(precision[0]-precision[1])>.00001||Math.abs(precision[0]-precision[2])>.001)throw new Error(`Fine terrain varied by patch anchor: ${[...precision]}`);
  const valleyPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:detailModule,entryPoint:'valleyCheck'}});
  const valleyBind=device.createBindGroup({layout:valleyPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.uniform}},{binding:5,resource:{buffer:renderer.sampleBuffer}}]});
  const valleyBuffer=device.createBuffer({size:512*16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),valleyEncoder=device.createCommandEncoder(),valleyPass=valleyEncoder.beginComputePass();
@@ -404,10 +433,16 @@ try{
  const riverChanged=difference(riversOn,riversOff);if(riverChanged<20)throw new Error(`River control did not affect the image: ${riverChanged} pixels`);
  // Check the full camera-to-patch lookup against generated terrain, not only
  // the synthetic triangles used for the probe arithmetic above.
- renderer.rivers=true;renderer.invalidateTerrain();renderer.budget=384;renderer.pixelSize=14;
+ renderer.rivers=true;renderer.invalidateTerrain();renderer.budget=512;renderer.pixelSize=14;
  Object.assign(renderer.cameraState,{mode:'walk',altitude:.0017,surfaceHeight:point[3],longitude:Math.atan2(highland.direction[2],highland.direction[0]),latitude:Math.asin(highland.direction[1]),pitch:.08});
  renderer.lastSelection=-Infinity;await capture();const walkHeight=await renderer.sampleRenderedSurface(highland.direction);
  if(walkHeight==null||!Number.isFinite(walkHeight)||Math.abs(walkHeight-point[3])>.5)throw new Error(`Walking probe could not find the generated ground: ${walkHeight} / ${point[3]}`);
+ const walkSeams=await inspectSeams();
+ if(renderer.stats.deepest<22||walkSeams.deepMatched<100||walkSeams.deepMaxKm>.00001||walkSeams.deepMaxNormal>.5)throw new Error(`Walking-level seams: ${JSON.stringify({depth:renderer.stats.deepest,walkSeams})}`);
+ Object.assign(renderer.cameraState,{surfaceHeight:Math.max(0,edgeHeight[3]),longitude:Math.atan2(edgeDirection[2],edgeDirection[0]),latitude:Math.asin(edgeDirection[1])});
+ renderer.invalidateTerrain();renderer.cameraState.surfaceHeight=Math.max(0,edgeHeight[3]);renderer.lastSelection=-Infinity;await capture();
+ const walkCubeSeams=await inspectCubeEdge();
+ if(renderer.stats.deepest<22||walkCubeSeams.deepMatches<50||walkCubeSeams.deepMaxKm>.00001||walkCubeSeams.deepMaxNormal>.5)throw new Error(`Walking-level cube-face seams: ${JSON.stringify({depth:renderer.stats.deepest,walkCubeSeams})}`);
  if(errors.length)throw new Error(errors.join('; '));
  const canvas=document.querySelector('#preview');canvas.width=width;canvas.height=height;const ctx=canvas.getContext('2d'),image=ctx.createImageData(width,height);
  for(let y=0;y<height;y++)for(let x=0;x<width;x++){

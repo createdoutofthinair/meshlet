@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {RADIUS_KM,cross,dot,length,normalize} from '../src/planet/planet-math.js';
 import {planetCamera} from '../src/planet/camera.js';
 import {directionFromCamera,setCameraDirection,walkStep,SurfaceWalker,WALK_EYE_HEIGHT_KM} from '../src/planet/walk.js';
+import {PlanetRenderer} from '../src/planet/renderer.js';
 
 const distance=(a,b)=>Math.atan2(length(cross(a,b)),dot(a,b))*RADIUS_KM;
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
@@ -66,6 +67,19 @@ test('a stationary walker does not repeatedly rebuild the same patch selection',
  const renderer={cameraState:{longitude:0,latitude:0,heading:0,surfaceHeight:1},generation:1,lastSelection:100,needsSelection:false,sampleRenderedSurface:async()=>{calls++;return 1;}};
  const walker=new SurfaceWalker(renderer,()=>({forward:0,strafe:0,fast:false}));walker.start();walker.afterFrame();await flush();
  assert.equal(renderer.needsSelection,false);walker.afterFrame();await flush();assert.equal(calls,1);
+});
+
+test('walking only rebuilds patch selection after meaningful movement, rotation or setting changes',()=>{
+ const camera={eye:[6373,0,0],forward:[0,1,0],width:1280,height:720};
+ const r={needsSelection:true,patches:[{}],lastSelection:100,cameraState:{mode:'walk'},budget:512,pixelSize:14,generation:1,
+  selectionState:{...camera,mode:'walk',budget:512,maxDepth:22,pixelSize:14,generation:1}};
+ const select=c=>PlanetRenderer.prototype.shouldSelect.call(r,c,500);
+ assert.equal(select(camera),false);
+ assert.equal(select({...camera,eye:[6373,.0003,0]}),false);
+ assert.equal(select({...camera,eye:[6373,.001,0]}),true);
+ assert.equal(select({...camera,forward:[.1,Math.sqrt(.99),0]}),true);
+ r.budget=240;assert.equal(select(camera),true);r.budget=512;
+ r.generation++;assert.equal(select(camera),true);
 });
 
 test('walking crosses a cube-face edge without changing the step length',()=>{
