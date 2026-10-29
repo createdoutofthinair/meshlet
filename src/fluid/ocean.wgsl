@@ -107,14 +107,17 @@ fn cubeHit(origin:vec3<f32>,direction:vec3<f32>)->f32{
  if(leave<max(enter,0.0)){return -1.0;}return select(leave,enter,enter>0.0);
 }
 // Ripples travel from each actual impact to the cube, then the wash fades.
-fn cubeImpactWash(position:vec2<f32>,time:f32)->f32{
+fn cubeImpactWash(position:vec2<f32>,faceNormal:vec2<f32>,time:f32)->f32{
  var response=0.0;
  for(var i=0u;i<30u;i++){
   let event=impact[i];let distance=length(position-event.xy);let arrival=distance/1.4;let elapsed=time-event.z-arrival;
   if(event.w>0.0 && elapsed>=0.0 && elapsed<2.0){
    let near=1.0-smoothstep(1.5,4.0,distance);
+   // Only faces facing the source receive the incoming impact wave.
+   let toImpact=event.xy-position;let facing=dot(faceNormal,toImpact)/max(.001,length(toImpact));
+   let directional=smoothstep(.05,.55,facing);
    let attack=smoothstep(0.0,.12,elapsed);let decay=1.0-smoothstep(.45,2.0,elapsed);
-   response=max(response,near*attack*decay);
+   response=max(response,near*directional*attack*decay);
   }
  }
  return response;
@@ -132,7 +135,7 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  // A translucent wet film and sparse draining rivulets respond only to
  // nearby impacts. The underlying cube remains visible through the film.
  let time=params.settings.x;let water=wave(p.xz,time,0.0);let height=p.y-water;
- let faceCoord=select(p.x,p.z,abs(n.x)>.5);let response=cubeImpactWash(p.xz,time);
+ let faceCoord=select(p.x,p.z,abs(n.x)>.5);let response=cubeImpactWash(p.xz,n.xz,time);
  let side=select(1.0,0.0,abs(n.y)>.5);let band=smoothstep(-.025,.02,height)*(1.0-smoothstep(.10,.30,height));
  let cell=floor((faceCoord+2.0)*32.0);let offset=fract((faceCoord+2.0)*32.0)-.5;
  let seed=hash(vec2<f32>(cell,5.4));let lineWidth=.035+.035*seed;
@@ -277,7 +280,8 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
   let near=1.0-smoothstep(.05,.50,cubeDistance);
   let uv=point.xz*8.0+vec2<f32>(time*.55,-time*.3);
   let texture=noise(uv)*.52+noise(uv*2.6+vec2<f32>(4.8,2.3))*.30+noise(uv*6.0+vec2<f32>(8.0,5.0))*.18;
-  let response=cubeImpactWash(point.xz,time);
+  let face=select(vec2<f32>(0.0,sign(point.z)),vec2<f32>(sign(point.x),0.0),abs(point.x)>abs(point.z));
+  let response=cubeImpactWash(point.xz,face,time);
   color=mix(color,foamColor(normal),near*smoothstep(.38,.71,texture)*.72*response);
  }
  // Advected multiscale breakup creates foam around the expanding impact.
