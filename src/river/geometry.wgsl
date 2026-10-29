@@ -32,7 +32,7 @@ fn makeWater(@builtin(global_invocation_id) gid:vec3<u32>){
  if(i<vertices){
   let x=i%row;let z=i/row;let along=(f32(z)/f32(WATER_ALONG)-.5)*REACH_LENGTH;let q=(f32(x)/f32(WATER_ACROSS)*2.0-1.0)*.99;
   let across=riverCenter(along)+q*riverHalfWidth();let h=riverLevel(along);
-  geometry[i]=RiverVertex(vec4<f32>(across,h,along,1.0),vec4<f32>(0.0,1.0,reach.info.y,0.0),vec4<f32>(q,riverDepth(q,along),0.0,0.0));
+  geometry[i]=RiverVertex(vec4<f32>(across,h,along,1.0),vec4<f32>(0.0,1.0,riverLevelSlope(along),0.0),vec4<f32>(q,riverDepth(q,along),0.0,0.0));
  }
  if(i<indexCount){
   let cell=i/6u;let x=cell%WATER_ACROSS;let z=cell/WATER_ACROSS;let k=i%6u;let a=z*row+x;

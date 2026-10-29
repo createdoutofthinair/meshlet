@@ -5,7 +5,7 @@ export const TERRAIN_GRID=192,WATER_ALONG=384,WATER_ACROSS=128,RIVER_ROCKS=12;
 const VERTEX_BYTES=48,TERRAIN_VERTICES=(TERRAIN_GRID+1)**2,TERRAIN_INDICES=TERRAIN_GRID**2*6;
 const WATER_VERTICES=(WATER_ACROSS+1)*(WATER_ALONG+1),WATER_INDICES=WATER_ACROSS*WATER_ALONG*6;
 const ROCK_VERTICES=16*10*6;
-const GROUPS=Math.ceil(24578/64),FRAME_BYTES=208,REACH_BYTES=80;
+const GROUPS=Math.ceil(24578/64),FRAME_BYTES=224,REACH_BYTES=80;
 export function riverCamera(state,width,height){
  const p=Math.max(.12,Math.min(1.49,state.pitch)),d=Math.max(80,Math.min(3000,state.distance));
  const eye=[d*Math.cos(p)*Math.sin(state.yaw),d*Math.sin(p),-d*Math.cos(p)*Math.cos(state.yaw)];
@@ -28,7 +28,7 @@ export class RiverRenderer {
  constructor(canvas,adapter,device,context,onError){
   Object.assign(this,{canvas,adapter,device,context,onError});this.format=navigator.gpu.getPreferredCanvasFormat();
   this.seed=918273;this.variant=0;this.width=1;this.depth=4;this.bank=12;this.roughness=.8;this.speed=1;this.clarity=1.3;this.ripples=.8;this.foam=.45;this.reflectionScale=.5;this.showFlow=false;this.paused=false;
-  this.camera={yaw:-.55,pitch:.58,distance:560};this.ready=false;this.dirty=false;this.lastTime=0;this.busy=false;this.metadata=null;this.inFlight=0;
+  this.waterfall=false;this.drop=35;this.camera={yaw:-.55,pitch:.58,distance:560};this.ready=false;this.dirty=false;this.lastTime=0;this.busy=false;this.metadata=null;this.inFlight=0;
  }
  async init(){
   const d=this.device,U=GPUBufferUsage;d.addEventListener('uncapturederror',e=>this.onError?.(`WebGPU: ${e.error.message}`));
@@ -90,7 +90,7 @@ export class RiverRenderer {
   const camera=riverCamera(this.camera,this.canvas.width||1,this.canvas.height||1),raw=new ArrayBuffer(FRAME_BYTES),f=new Float32Array(raw),u=new Uint32Array(raw);
   const reflection=riverReflectionCamera(camera,this.canvas.width||1,this.canvas.height||1,this.metadata?.slope||0);
   f.set(camera.vp,0);f.set([...camera.eye,this.paused?0:dt],16);f.set([.40,.80,-.45,this.speed],20);f.set([this.width,this.depth,this.bank,this.roughness],24);
-  f.set([this.clarity,this.ripples,this.foam,this.showFlow?1:0],28);u.set([this.seed>>>0,this.variant>>>0,this.canvas.width>>>0,this.canvas.height>>>0],32);f.set(reflection.vp,36);this.device.queue.writeBuffer(this.frameBuffer,0,raw);
+  f.set([this.clarity,this.ripples,this.foam,this.showFlow?1:0],28);u.set([this.seed>>>0,this.variant>>>0,this.canvas.width>>>0,this.canvas.height>>>0],32);f.set(reflection.vp,36);f.set([this.waterfall?1:0,this.drop,0,0],52);this.device.queue.writeBuffer(this.frameBuffer,0,raw);
   f.set(reflection.vp,0);f.set([...reflection.eye,0],16);this.device.queue.writeBuffer(this.reflectionFrame,0,raw);
  }
  buildGeometry(pass){

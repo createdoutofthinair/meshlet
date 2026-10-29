@@ -1,6 +1,6 @@
 import {RiverRenderer} from './renderer.js';
 const $=id=>document.getElementById(id);
-const ids=['view','device-status','loading','loading-title','error','error-message','reach-overlay','reach-caption','status','seed-form','seed','planet-link','generate','next-reach','width-stat','slope-stat','flow-stat','nodes-stat','length-stat','fps','speed','clarity','ripples','foam','reflection-quality','channel','depth','bank','roughness','speed-value','clarity-value','ripples-value','foam-value','channel-value','depth-value','bank-value','roughness-value','flow-arrows','paused','view-overview','view-low','view-top'];
+const ids=['view','device-status','loading','loading-title','error','error-message','reach-overlay','reach-caption','status','seed-form','seed','planet-link','generate','next-reach','width-stat','slope-stat','flow-stat','nodes-stat','length-stat','fps','speed','clarity','ripples','foam','waterfall','drop','drop-value','reflection-quality','channel','depth','bank','roughness','speed-value','clarity-value','ripples-value','foam-value','channel-value','depth-value','bank-value','roughness-value','flow-arrows','paused','view-overview','view-low','view-top'];
 const el=Object.fromEntries(ids.map(id=>[id,$(id)]));
 let renderer,drag=null,previous=0,lastFps=0,frames=[];
 function seedNumber(value){
@@ -46,13 +46,14 @@ el['seed-form'].addEventListener('submit',event=>{event.preventDefault();generat
 el['next-reach'].addEventListener('click',()=>{if(renderer)generate(renderer.seed,(renderer.variant+1)>>>0);});
 const sliders=[
  ['speed','speed',100,'m/s',false],['clarity','clarity',100,'×',false],['ripples','ripples',100,'×',false],['foam','foam',100,'×',false],
- ['channel','width',100,'×',true],['depth','depth',10,'m',true],['bank','bank',10,'m',true],['roughness','roughness',100,'×',true]
+ ['channel','width',100,'×',true],['depth','depth',10,'m',true],['bank','bank',10,'m',true],['roughness','roughness',100,'×',true],['drop','drop',10,'m',true]
 ];
 for(const [id,key,divisor,unit,geometry] of sliders)el[id].addEventListener('input',()=>{
  const v=Number(el[id].value)/divisor;el[`${id}-value`].textContent=`${v.toFixed(divisor===10?1:2)}${unit==='m/s'||unit==='m'?' ':''}${unit}`;
  if(renderer){renderer[key]=v;if(geometry)renderer.dirty=true;updateMetadata();}
 });
 el['flow-arrows'].addEventListener('change',()=>{if(renderer)renderer.showFlow=el['flow-arrows'].checked;});
+el.waterfall.addEventListener('change',()=>{if(renderer){renderer.waterfall=el.waterfall.checked;renderer.dirty=true;Object.assign(renderer.camera,renderer.waterfall?{yaw:2.8,pitch:.35,distance:270}:{yaw:-.55,pitch:.58,distance:560});}});
 el['reflection-quality'].addEventListener('change',()=>{if(renderer)renderer.reflectionScale=el['reflection-quality'].value==='1'?1:.5;});
 el.paused.addEventListener('change',()=>{if(renderer)renderer.paused=el.paused.checked;});
 for(const [id,yaw,pitch,distance] of [['view-overview',-.55,.58,560],['view-low',-.35,.27,240],['view-top',0,1.47,850]])el[id].addEventListener('click',()=>{if(renderer)Object.assign(renderer.camera,{yaw,pitch,distance});});

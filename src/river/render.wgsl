@@ -67,7 +67,7 @@ fn riverRockWaves(p:vec2<f32>,distance:f32)->vec4<f32>{
  let waves=riverSurfaceWaves(across,z,motion[0].x,speed)*activity;let obstacle=riverRockWaves(item.position.xz,motion[0].x);
  let scale=edge*riverFrame.optics.y;let height=(waves.x+obstacle.x)*scale;
  let flow=normalize(vec3<f32>(slope,0.0,1.0));let side=normalize(vec3<f32>(1.0,0.0,-slope));
- let normal=normalize(vec3<f32>(0.0,1.0,reach.info.y)-side*(waves.y+obstacle.y)*scale-flow*(waves.z+obstacle.z)*scale);
+ let normal=normalize(vec3<f32>(0.0,1.0,riverLevelSlope(z))-side*(waves.y+obstacle.y)*scale-flow*(waves.z+obstacle.z)*scale);
  let position=item.position+vec4<f32>(0.0,height,0.0,0.0);var out:VertexOut;
  out.position=riverFrame.viewProjection*position;out.world=position.xyz;out.normal=normal;out.material=vec4<f32>(item.material.xy,obstacle.w*edge,0.0);return out;
 }
@@ -207,7 +207,7 @@ fn viewDepth(depth:f32)->f32{return 5000.0/max(.001,10000.0-depth*9999.5);}
  let slopes=riverAdvectedSlopes(across,p.y,motion[0].x,speed,footprint)*riverFrame.optics.y*.22;
  let n=normalize(normalize(input.normal)-side*slopes.x-flow*slopes.y);
  let view=normalize(riverFrame.cameraDelta.xyz-input.world);let light=normalize(riverFrame.sunSpeed.xyz);let ndv=clamp(dot(n,view),0.0,1.0);let ndl=max(dot(n,light),0.0);
- let depth=riverDepthAtBend(q,bend);let refracted=refract(-view,n,1.0/1.333);
+ let depth=riverDepth(q,p.y);let refracted=refract(-view,n,1.0/1.333);
  let path=min(60.0,depth/max(.15,-refracted.y));let projected=riverFrame.viewProjection*vec4<f32>(input.world+refracted*path,1.0);
  let baseUv=input.position.xy/vec2<f32>(textureDimensions(opaqueScene));let targetUv=uvFromClip(projected);
  let size=vec2<i32>(textureDimensions(opaqueDepth));let pixel=clamp(vec2<i32>(clamp(targetUv,vec2<f32>(0.0),vec2<f32>(1.0))*vec2<f32>(size)),vec2<i32>(0),size-vec2<i32>(1));
@@ -237,6 +237,15 @@ fn viewDepth(depth:f32)->f32{return 5000.0/max(.001,10000.0-depth*9999.5);}
   if(foam>.005 && bubbles>.01){foam*=mix(1.0,riverAdvectedBubbles(across,p.y,motion[0].x,speed),bubbles);}
  }
  let foamColor=vec3<f32>(.65,.69,.65)*(.58+.42*ndl);color=mix(color,foamColor,foam);
+ // Water follows the steep drop; its streaks travel downward with time.
+ let fall=riverFrame.waterfall.x*(1.0-smoothstep(6.0,12.0,abs(p.y)));
+ let falling=input.world.y*.20+motion[0].y*2.6;
+ let threads=riverNoise(vec2<f32>(across*.19,falling*.17))+riverNoise(vec2<f32>(across*.43+7.0,falling*.40))*.35;
+ let curtain=mix(vec3<f32>(.29,.43,.43),vec3<f32>(.79,.84,.81),smoothstep(.28,.92,threads));
+ color=mix(color,curtain,fall*.88);
+ let splash=riverFrame.waterfall.x*smoothstep(5.0,14.0,p.y)*(1.0-smoothstep(18.0,65.0,p.y));
+ let splashNoise=riverNoise(vec2<f32>(across*.23,(p.y-motion[0].x*2.0)*.17));
+ color=mix(color,vec3<f32>(.72,.78,.75),splash*smoothstep(.42,.76,splashNoise)*.55);
  if(riverFrame.optics.w>.5){
   let along=riverFlowCoordinate(p.y,motion[0].x,speed);
   let gx=abs(fract(across/34.0+.5)-.5);let gy=fract(along/72.0)-.5;

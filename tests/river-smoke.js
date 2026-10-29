@@ -61,5 +61,11 @@ try{
  if(!(after-before>.9&&after-before<1.2))throw Error(`Water did not advance by the expected distance at 1 fps: ${before}/${after}`);
  if(movingPixels<50)throw Error(`Advected water did not visibly change without arrows: ${movingPixels} pixels`);
  renderer.paused=true;renderer.frame(2300);await device.queue.onSubmittedWorkDone();const paused=await phase();if(Math.abs(paused-after)>.000001)throw Error('Paused water continued to move');
- if(errors.length)throw Error(errors.join('; '));const result={ok:true,start:meta.start,end:meta.end,alignment,bed:f[37],water:f[41],arrowPixels:changed,reflectedBankPixels:bankPixels,movingPixels,advection:after-before};status.textContent=JSON.stringify(result);window.__riverSmokeDone=result;
+ renderer.waterfall=true;renderer.drop=35;renderer.dirty=true;renderer.frame(2400);await device.queue.onSubmittedWorkDone();
+ const fallsRead=device.createBuffer({size:32,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),fallsCommand=device.createCommandEncoder();
+ const row=WATER_ACROSS+1,up=((WATER_ALONG/2-2)*row+WATER_ACROSS/2)*48,down=((WATER_ALONG/2+2)*row+WATER_ACROSS/2)*48;
+ fallsCommand.copyBufferToBuffer(renderer.vertices[1],up,fallsRead,0,16);fallsCommand.copyBufferToBuffer(renderer.vertices[1],down,fallsRead,16,16);device.queue.submit([fallsCommand.finish()]);
+ await fallsRead.mapAsync(GPUMapMode.READ);const falls=new Float32Array(fallsRead.getMappedRange().slice(0));fallsRead.unmap();fallsRead.destroy();
+ if(!(falls[1]-falls[5]>25))throw Error(`Waterfall geometry did not descend: ${falls[1]}/${falls[5]}`);
+ if(errors.length)throw Error(errors.join('; '));const result={ok:true,start:meta.start,end:meta.end,alignment,bed:f[37],water:f[41],arrowPixels:changed,reflectedBankPixels:bankPixels,movingPixels,advection:after-before,waterfallDrop:falls[1]-falls[5]};status.textContent=JSON.stringify(result);window.__riverSmokeDone=result;
 }catch(error){status.textContent=error.stack;window.__riverSmokeDone={ok:false,error:error.stack};}

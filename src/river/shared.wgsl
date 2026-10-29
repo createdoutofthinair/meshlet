@@ -7,6 +7,7 @@ struct RiverFrame {
  optics:vec4<f32>, // clarity, ripple strength, foam, flow arrows
  config:vec4<u32>, // seed, reach variant, viewport width and height
  reflectionViewProjection:mat4x4<f32>, // view reflected in the sloped river plane
+ waterfall:vec4<f32>, // enabled, drop height in meters, reserved, reserved
 };
 struct Reach {
  info:vec4<f32>, // half width m, surface slope, discharge, local phase
@@ -51,14 +52,21 @@ fn riverCurvature(z:f32)->f32{
  let bend=base-w*.58*k*k*sin(z*k+phase)-w*.15*k*k*.61*.61*sin(z*k*.61+phase*1.7);
  return clamp(bend*w*8.0,-1.0,1.0);
 }
-fn riverLevel(z:f32)->f32{return -z*reach.info.y;}
+fn riverLevel(z:f32)->f32{return -z*reach.info.y+riverFrame.waterfall.x*riverFrame.waterfall.y*(.5-smoothstep(-9.0,9.0,z));}
+fn riverLevelSlope(z:f32)->f32{
+ let t=clamp((z+9.0)/18.0,0.0,1.0);
+ return reach.info.y+riverFrame.waterfall.x*riverFrame.waterfall.y*6.0*t*(1.0-t)/18.0;
+}
 fn riverRiffle(z:f32)->f32{return 1.0-smoothstep(.08,.65,abs(riverCurvature(z)));}
 fn riverDepthAtBend(q:f32,bend:f32)->f32{
  let profile=1.0-smoothstep(.0,1.0,abs(q));let riffle=1.0-smoothstep(.08,.65,abs(bend));
  // Pools deepen on the outside of bends; the shallow crossings form riffles.
  return riverFrame.shape.y*profile*(1.0-.5*bend*clamp(q,-1.0,1.0))*(1.0-.24*riffle);
 }
-fn riverDepth(q:f32,z:f32)->f32{return riverDepthAtBend(q,riverCurvature(z));}
+fn riverDepth(q:f32,z:f32)->f32{
+ let pool=riverFrame.waterfall.x*3.0*exp(-pow((z-32.0)/32.0,2.0))*(1.0-smoothstep(.1,1.0,abs(q)));
+ return riverDepthAtBend(q,riverCurvature(z))+pool;
+}
 fn riverFlowSpeedAtBend(q:f32,bend:f32)->f32{
  let profile=.18+.82*(1.0-smoothstep(.15,1.0,abs(q)));
  return profile*clamp(1.0-.30*bend*q,.7,1.3);
@@ -71,7 +79,9 @@ fn riverGround(p:vec2<f32>)->f32{
  let bank=riverFrame.shape.z*smoothstep(0.0,bankRun,max(0.0,(side-1.0)*w));
  let terrain=(riverFbm(p*.006+vec2<f32>(reach.info.w,31.0))-.5)*riverFrame.shape.w*9.0*smoothstep(1.02,1.9,side);
  let fine=(riverNoise(p*.055+vec2<f32>(11.2,reach.info.w))-.5)*riverFrame.shape.w*.8*smoothstep(1.01,1.45,side);
- return riverLevel(p.y)-riverDepthAtBend(q,bend)+bank+terrain+fine;
+ let ridge=riverFrame.waterfall.x*smoothstep(1.0,2.0,side)*exp(-pow((p.y+95.0)/260.0,2.0));
+ let mountain=ridge*(24.0+85.0*riverFbm(p*.003+vec2<f32>(reach.info.w,8.1)));
+ return riverLevel(p.y)-riverDepth(q,p.y)+bank+terrain+fine+mountain;
 }
 fn riverNormal(p:vec2<f32>)->vec3<f32>{
  let step=1.0;let left=riverGround(p-vec2<f32>(step,0.0));let right=riverGround(p+vec2<f32>(step,0.0));
