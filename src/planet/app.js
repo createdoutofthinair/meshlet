@@ -1,7 +1,7 @@
 import {PlanetRenderer} from './renderer.js';
 import {SurfaceWalker,WALK_EYE_HEIGHT_KM,directionFromCamera,setCameraDirection} from './walk.js';
 const $=id=>document.getElementById(id);
-const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','walk','walk-help','generation-status','seed-form','seed','random','orbit','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','lod-colors','patch-lines','wireframe','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','timing-note'];
+const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','walk','walk-help','generation-status','seed-form','seed','random','orbit','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','lod-colors','patch-lines','wireframe','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','transition-error','transition-status','timing-note'];
 const el=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const MIN_ALT=.03,MAX_ALT=30000;
 const fmt=n=>Math.round(n).toLocaleString('en-US');
@@ -94,6 +94,10 @@ function updateTelemetry(){
  el.patches.textContent=fmt(s.visiblePatches);el.depth.textContent=`0–${s.deepest}`;
  if(t.visibleMeshlets!=null){el.meshlets.textContent=`${fmt(t.visibleMeshlets)} / ${fmt(s.visiblePatches*16)}`;el.triangles.textContent=fmt(t.visibleMeshlets*32);}
  el['selection-ms'].textContent=ms(s.selectionMs);el['compute-label'].textContent=t.generatedPatchesSample?'GPU generation + cull':'GPU visibility';el['compute-ms'].textContent=ms(t.gpuComputeMs);el['render-ms'].textContent=ms(t.gpuRenderMs);
+ const transition=renderer.transition;if(transition){
+  el['transition-error'].textContent=transition.pixels==null?'—':`${transition.pixels.toFixed(2)} px${transition.overTarget?' · ABOVE TARGET':''}`;
+  el['transition-status'].textContent=transition.waiting?'HOLDING DETAIL':renderer.stage?.state==='measuring'?'MEASURING':renderer.stage?`${transition.pending} PATCHES PENDING`:'READY';
+ }
  el['generation-status'].textContent=`${fmt(s.leaves)} QUADTREE LEAVES · ${fmt(s.generated)} PATCHES LAST GENERATED`;
  if(frames.length){const avg=frames.reduce((a,b)=>a+b,0)/frames.length;el.fps.textContent=(1000/avg).toFixed(1);el['frame-ms'].textContent=avg.toFixed(1);}
 }
@@ -162,7 +166,7 @@ el.valleys.addEventListener('change',()=>{if(!renderer)return;renderer.valleys=N
 el.erosion.addEventListener('input',()=>{el['erosion-value'].textContent=`${(Number(el.erosion.value)/100).toFixed(2)}×`;});
 el.erosion.addEventListener('change',()=>{if(!renderer)return;renderer.erosion=Number(el.erosion.value)/100;rebuildTerrain('Updating erosion');});
 el.rivers.addEventListener('change',()=>{if(!renderer)return;renderer.rivers=el.rivers.checked;rebuildTerrain('Updating surface water');});
-el.regional.addEventListener('change',()=>{if(!renderer)return;renderer.regional=el.regional.checked;rebuildTerrain('Updating regional erosion');});
+el.regional.addEventListener('change',()=>{if(!renderer)return;renderer.regional=el.regional.checked;rebuildTerrain('Updating drainage detail');});
 el.biomes.addEventListener('change',()=>{if(renderer)renderer.biomes=el.biomes.checked;});
 el.ocean.addEventListener('change',()=>{if(!renderer)return;renderer.ocean=el.ocean.checked;rebuildTerrain('Updating the surface');});
 el['sun-follow'].addEventListener('change',()=>{if(renderer)renderer.followSun=el['sun-follow'].checked;});

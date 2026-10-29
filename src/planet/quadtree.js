@@ -99,12 +99,11 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
   viewPriority=1/(1+outside/Math.max(.001,camera.clearance)*32);
  }
  const residual=errorEstimates?.get(node.key);
- // A residual compares this patch against its coarser representation; use
- // half as a heuristic for the next finer split. Bound its priority influence
- // to avoid a large patch reshuffle when a measurement first arrives.
- const projectedError=Number.isFinite(residual)?residual*.5*camera.focalPixels/distance:0;
- const errorPriority=projectedError*pixelSize;
- return Math.max(projected,Math.min(errorPriority,projected*1.2))*localFocus*viewPriority;
+ // Measurements come from actual child-versus-parent geometry. Unsampled
+ // detail still uses the projected cell-size floor; no hard bound is implied.
+ const projectedError=Number.isFinite(residual)?residual*camera.focalPixels/distance:0;
+ const errorPriority=projectedError*pixelSize/.5;
+ return Math.max(projected,Math.min(errorPriority,projected*4))*localFocus*viewPriority;
 }
 export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10,previousSplits=null,hysteresis=.1,errorEstimates=null}={}) {
  budget=Math.max(6,Math.floor(budget));maxDepth=Math.min(MAX_DEPTH,Math.max(0,maxDepth));

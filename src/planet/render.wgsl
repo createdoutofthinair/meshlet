@@ -18,6 +18,7 @@ struct Output {
  @location(10) @interpolate(flat) detailLow:vec3<f32>,
  @location(11) detailOffset:vec3<f32>,
 };
+struct TerrainPixel {@location(0) color:vec4<f32>,@location(1) waterDepth:f32};
 fn onPatchEdge(a:vec2<u32>,b:vec2<u32>)->bool {
  return (a.x==b.x && (a.x==0u || a.x==CELLS)) || (a.y==b.y && (a.y==0u || a.y==CELLS));
 }
@@ -54,11 +55,14 @@ fn levelColor(level:u32)->vec3<f32>{
  return palette[level%6u];
 }
 @fragment
-fn fs(in:Output)->@location(0) vec4<f32> {
+fn fs(in:Output)->TerrainPixel {
  let radial=normalize(in.direction);let light=normalize(frame.sun.xyz);
  // Classify the sea from the same seeded world at every LOD, rather than
  // from interpolated heights of the triangles currently on screen.
  let coast=naturalCoast(radial,frame.counts.z);let land=coast.x>=0.0;let h=select(min(in.height,0.0),max(in.height,0.0),land);
+ // The normal view draws the ocean from its own analytic sea-level surface.
+ // Debug views retain the terrain mesh so its LOD topology remains visible.
+ let separateSea=!land && (frame.counts.w&32u)!=0u;
  // Filter the geographic sea boundary over its pixel footprint. This only
  // antialiases the edge; it does not move the seeded shoreline with LOD.
  let coastWidth=max(.00001,fwidth(coast.x)*.55);let seaCoverage=1.0-smoothstep(-coastWidth,coastWidth,coast.x);
@@ -70,7 +74,11 @@ fn fs(in:Output)->@location(0) vec4<f32> {
  }
  let water=smoothstep(.1,.6,max(waterField.x,waterField.y));
  let oceanFlatness=seaCoverage*select(0.0,1.0,frame.settings.z>.5);
- var n=normalize(mix(normalize(mix(in.normal,radial,water*.8)),radial,oceanFlatness));let slope=1.0-clamp(dot(n,radial),0.0,1.0);
+ var east=cross(vec3<f32>(0.0,1.0,0.0),radial);if(length(east)<.000001){east=cross(vec3<f32>(1.0,0.0,0.0),radial);}
+ east=normalize(east);let north=normalize(cross(radial,east));
+ let broadNormal=normalize(radial-east*in.surface.z-north*in.surface.w);
+ let filteredNormal=normalize(mix(in.normal,broadNormal,smoothstep(.004,.25,pixelKm)));
+ var n=normalize(mix(normalize(mix(filteredNormal,radial,water*.8)),radial,oceanFlatness));let slope=1.0-clamp(dot(n,radial),0.0,1.0);
  let deep=vec3<f32>(0.012,0.055,0.092);let ocean=vec3<f32>(0.025,0.17,0.23);
  let lowland=vec3<f32>(0.25,0.31,0.20);let upland=vec3<f32>(0.30,0.28,0.22);
  let rock=vec3<f32>(0.34,0.34,0.32);let snow=vec3<f32>(0.66,0.71,0.72);
@@ -119,5 +127,9 @@ fn fs(in:Output)->@location(0) vec4<f32> {
   if((frame.counts.w&4u)!=0u){color=mix(color,vec3<f32>(.02,.03,.04),max(edge.x,max(edge.y,edge.z))*.75);}
   if((frame.counts.w&8u)!=0u){var e=0.0;if((in.edgeMask&1u)!=0u){e=max(e,edge.x);}if((in.edgeMask&2u)!=0u){e=max(e,edge.y);}if((in.edgeMask&4u)!=0u){e=max(e,edge.z);}color=mix(color,vec3<f32>(.9,.98,1.0),e*.85);}
  }
- return vec4<f32>(color,1.0);
+ // The second target retains the fragment depth and flags geographic lake
+ // pixels by sign. The independent water pass uses it to locate each basin.
+ let lakePixel=land && waterField.x>.5 && (frame.counts.w&32u)!=0u;
+ if(separateSea){discard;}
+ return TerrainPixel(vec4<f32>(color,1.0),select(in.position.z,-in.position.z,lakePixel));
 }

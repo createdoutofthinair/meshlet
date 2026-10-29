@@ -7,13 +7,17 @@ try{
  const source=document.querySelector('#source');const adapter=await navigator.gpu?.requestAdapter();if(!adapter)throw new Error('No WebGPU adapter');
  const device=await adapter.requestDevice(),errors=[];
  const renderer=new PlanetRenderer(source,adapter,device,source.getContext('webgpu'),false,e=>errors.push(e));
- await renderer.init();window.__planetRenderer=renderer;renderer.budget=36;renderer.pixelSize=24;renderer.resize();renderer.lastSample=Infinity;
+ await renderer.init();window.__planetRenderer=renderer;renderer.budget=36;renderer.pixelSize=24;renderer.transitionTargetPixels=Infinity;renderer.resize();renderer.lastSample=Infinity;
  const width=source.width,height=source.height,stride=Math.ceil(width*4/256)*256;
  const color=device.createTexture({size:[width,height],format:renderer.format,usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_SRC});
  renderer.context={getCurrentTexture:()=>color};
  async function capture(){
-  while(renderer.inFlight>=2)await new Promise(resolve=>setTimeout(resolve,1));
-  renderer.frame(performance.now()+1000);
+  let now=performance.now()+1000,iterations=0;
+  do{
+   while(renderer.inFlight>=2)await new Promise(resolve=>setTimeout(resolve,1));
+   renderer.frame(now);now+=150;await device.queue.onSubmittedWorkDone();await new Promise(resolve=>setTimeout(resolve,1));
+   if(++iterations>300)throw new Error('Terrain staging failed to settle');
+  }while(renderer.stage);
   const pixels=device.createBuffer({size:stride*height,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
   const commands=device.createBuffer({size:16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});const e=device.createCommandEncoder();
   e.copyTextureToBuffer({texture:color},{buffer:pixels,bytesPerRow:stride,rowsPerImage:height},[width,height]);e.copyBufferToBuffer(renderer.indirect,0,commands,0,16);device.queue.submit([e.finish()]);
@@ -47,6 +51,37 @@ try{
   if(values[1]<.5||Math.abs(values[0]-(9+x*.0002+y*.0001))>.00001)throw new Error(`Walking mesh probe failed at ${x},${y}, stitch ${stitch}: ${[...values]}`);
  }
  walkPatch.destroy();walkVertices.destroy();walkInput.destroy();walkOutput.destroy();
+ // Exercise the actual parent/child comparison on a known synthetic mesh.
+ // One fine vertex is offset by .002 km, which projects to one pixel here.
+ const transitionFrame=device.createBuffer({size:224,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+ const transitionPatches=device.createBuffer({size:256,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+ const transitionVertices=device.createBuffer({size:2*441*48,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+ const transitionPair=device.createBuffer({size:32,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+ const transitionResult=device.createBuffer({size:8,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC});
+ const tf=new ArrayBuffer(224),tff=new Float32Array(tf),tfu=new Uint32Array(tf);tff[0]=tff[5]=tff[10]=tff[15]=1;tfu[50]=1000;tfu[51]=500;device.queue.writeBuffer(transitionFrame,0,tf);
+ const tv=new Float32Array(2*441*12);
+ for(let slot=0;slot<2;slot++)for(let y=0;y<=16;y++)for(let x=0;x<=16;x++){
+  const i=(slot*441+(y+2)*21+x+2)*12;tv[i]=x*(slot?.005:.01)+(slot===1&&x===3&&y===3?.002:0);tv[i+1]=y*(slot?.005:.01);
+ }
+ device.queue.writeBuffer(transitionVertices,0,tv);const tp=new ArrayBuffer(32),tpu=new Uint32Array(tp),tpf=new Float32Array(tp);tpu.set([1,0,0,0]);tpf.set([0,0,.5,0],4);device.queue.writeBuffer(transitionPair,0,tp);
+ const transitionBind=device.createBindGroup({layout:renderer.transitionPipe.getBindGroupLayout(0),entries:[transitionFrame,transitionPatches,transitionVertices,transitionPair,transitionResult].map((buffer,binding)=>({binding,resource:{buffer}}))});
+ const transitionRead=device.createBuffer({size:8,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),transitionEncoder=device.createCommandEncoder(),transitionPass=transitionEncoder.beginComputePass();
+ transitionPass.setPipeline(renderer.transitionPipe);transitionPass.setBindGroup(0,transitionBind);transitionPass.dispatchWorkgroups(1);transitionPass.end();transitionEncoder.copyBufferToBuffer(transitionResult,0,transitionRead,0,8);device.queue.submit([transitionEncoder.finish()]);
+ await transitionRead.mapAsync(GPUMapMode.READ);const transitionCheck=new Float32Array(transitionRead.getMappedRange().slice(0));transitionRead.unmap();
+ if(!transitionCheck.every(Number.isFinite)||Math.abs(transitionCheck[0]-1)>.01||Math.abs(transitionCheck[1]-.002)>.00001)throw new Error(`Actual parent/child comparison failed: ${[...transitionCheck]}`);
+ // A flat, newly stitched edge should not report an error simply because an
+ // odd vertex collapses to the preceding even vertex. Curvature must count.
+ tpu.set([0,0,0,1]);tpf.set([0,0,1,0],4);device.queue.writeBuffer(transitionPair,0,tp);
+ async function measureStitch(){
+  const encoder=device.createCommandEncoder(),pass=encoder.beginComputePass();pass.setPipeline(renderer.transitionPipe);pass.setBindGroup(0,transitionBind);pass.dispatchWorkgroups(1);pass.end();encoder.copyBufferToBuffer(transitionResult,0,transitionRead,0,8);device.queue.submit([encoder.finish()]);
+  await transitionRead.mapAsync(GPUMapMode.READ);const result=new Float32Array(transitionRead.getMappedRange().slice(0));transitionRead.unmap();return result;
+ }
+ const flatStitch=await measureStitch();
+ if(flatStitch[0]>.001||flatStitch[1]>.00001)throw new Error(`Flat stitched edge produced a false error: ${[...flatStitch]}`);
+ tv[((3+2)*21+2)*12]=.002;device.queue.writeBuffer(transitionVertices,0,tv);
+ const curvedStitch=await measureStitch();
+ if(Math.abs(curvedStitch[0]-1)>.01||Math.abs(curvedStitch[1]-.002)>.00001)throw new Error(`Stitched-edge curvature was not measured: ${[...curvedStitch]}`);
+ for(const buffer of [transitionFrame,transitionPatches,transitionVertices,transitionPair,transitionResult,transitionRead])buffer.destroy();
  renderer.culling=false;const uncull=await capture();renderer.culling=true;
  if(uncull.count!==uncull.patches*16 || first.count>uncull.count)throw new Error(`Invalid meshlet culling counts: ${first.count} / ${uncull.count}`);
  const cullingChanged=difference(first,uncull);if(cullingChanged>width*height*.02)throw new Error(`Culling changed ${cullingChanged} pixels`);
@@ -92,6 +127,16 @@ try{
  // The extra detail is geometry, including at scales smaller than a float32
  // unit-vector coordinate can represent without the high/low decomposition.
  const [common,terrainCore,riverCurve,worldField,terrainSurface,generator]=await Promise.all(['common.wgsl','terrain-core.wgsl','river-curve.wgsl','world-field.wgsl','terrain-surface.wgsl','generate.wgsl'].map(p=>fetch(`../src/planet/${p}`).then(r=>r.text())));
+ const [oceanSource,oceanTest]=await Promise.all([fetch('../src/planet/ocean.wgsl').then(r=>r.text()),fetch('./ocean-smoke.wgsl').then(r=>r.text())]);
+ const oceanModule=device.createShaderModule({code:[common,terrainCore,riverCurve,worldField,terrainSurface,oceanSource,oceanTest].join('\n')});
+ const oceanPipe=await device.createComputePipelineAsync({layout:'auto',compute:{module:oceanModule,entryPoint:'oceanIntersectionCheck'}});
+ const oceanOutput=device.createBuffer({size:48,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC});
+ const oceanBind=device.createBindGroup({layout:oceanPipe.getBindGroupLayout(0),entries:[[0,renderer.uniform],[13,oceanOutput]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
+ const oceanRead=device.createBuffer({size:48,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),oceanEncoder=device.createCommandEncoder(),oceanPass=oceanEncoder.beginComputePass();
+ oceanPass.setPipeline(oceanPipe);oceanPass.setBindGroup(0,oceanBind);oceanPass.dispatchWorkgroups(1);oceanPass.end();oceanEncoder.copyBufferToBuffer(oceanOutput,0,oceanRead,0,48);device.queue.submit([oceanEncoder.finish()]);
+ await oceanRead.mapAsync(GPUMapMode.READ);const oceanHit=new Float32Array(oceanRead.getMappedRange().slice(0));oceanRead.unmap();oceanRead.destroy();oceanOutput.destroy();
+ const radius=6371,b=-(radius+100)*.8,c=100*(2*radius+100),orbitDistance=c/(-b+Math.sqrt(b*b-c));
+ if(!oceanHit.every(Number.isFinite)||Math.abs(oceanHit[0]-.0017)>.000001||oceanHit[1]<.5||Math.abs(oceanHit[2]-orbitDistance)>.02||oceanHit[3]<.5||oceanHit[5]>.5||oceanHit[7]<.5||Math.abs(oceanHit[8]-.0017)>.000001||oceanHit[9]<.5||Math.abs(oceanHit[10]-1)>.0001||oceanHit[11]<.5)throw new Error(`Independent water intersection failed: ${[...oceanHit]}`);
  const detailModule=device.createShaderModule({code:common+'\n'+terrainCore+'\n'+riverCurve+'\n'+worldField+'\n'+terrainSurface+'\n'+generator+`
  @compute @workgroup_size(1) fn detailCheck(){
   let direction=normalize(probe.direction.xyz);let tangent=normalize(cross(direction,vec3<f32>(0.0,1.0,0.0)));
@@ -351,7 +396,19 @@ try{
  for(let i=0;i<oceanSamples.length;i+=4)if(oceanSamples[i+3]<-.1&&Math.abs(oceanSamples[i+3]+.6)<Math.abs(oceanSamples[sea+3]+.6))sea=i;
  const seaDirection=[oceanSamples[sea],oceanSamples[sea+1],oceanSamples[sea+2]];
  Object.assign(renderer.cameraState,{mode:'orbit',altitude:100,surfaceHeight:0,longitude:Math.atan2(seaDirection[2],seaDirection[0]),latitude:Math.asin(seaDirection[1])});
- renderer.budget=180;renderer.pixelSize=10;renderer.ocean=true;renderer.invalidateTerrain();renderer.lastSelection=0;await capture();
+ renderer.budget=180;renderer.pixelSize=10;renderer.ocean=true;renderer.invalidateTerrain();renderer.lastSelection=0;const coarseOcean=await capture();
+ // Unoccluded ocean pixels are ray/sphere intersections and should retain the
+ // same color even when the surrounding terrain uses a different selection.
+ renderer.budget=384;renderer.pixelSize=6;renderer.needsSelection=true;renderer.lastSelection=0;const fineOcean=await capture();
+ let oceanCompared=0,oceanChanged=0;const bgra=renderer.format.startsWith('bgra');
+ for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+  const i=y*stride+x*4,isWater=p=>{const r=p[i+(bgra?2:0)],g=p[i+1],b=p[i+(bgra?0:2)];return g>10&&b>g*1.05&&b>r*1.4;};
+  if(isWater(coarseOcean.pixels)&&isWater(fineOcean.pixels)){
+   oceanCompared++;if(Math.max(...[0,1,2].map(k=>Math.abs(coarseOcean.pixels[i+k]-fineOcean.pixels[i+k])))>2)oceanChanged++;
+  }
+ }
+ if(oceanCompared<100||oceanChanged>oceanCompared*.02)throw new Error(`Independent ocean changed with LOD: ${oceanChanged}/${oceanCompared}`);
+ renderer.budget=180;renderer.pixelSize=10;renderer.needsSelection=true;renderer.lastSelection=0;await capture();
  async function inspectOcean(){
   const nodes=renderer.patches,chunk=441*48,read=device.createBuffer({size:nodes.length*chunk,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),encoder=device.createCommandEncoder();
   nodes.forEach((node,i)=>encoder.copyBufferToBuffer(renderer.vertices,node.slot*chunk,read,i*chunk,chunk));device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
@@ -373,7 +430,7 @@ try{
  const coastalWater=await inspectOcean();
  if(coastalWater.count<100||coastalWater.maxCavity>1e-6||coastalWater.maxNormalAngle>.1)throw new Error(`Coastal water has seabed shading: ${JSON.stringify(coastalWater)}`);
  renderer.ocean=false;renderer.invalidateTerrain();renderer.lastSelection=0;await capture();const exposedSeafloor=await inspectOcean();
- if(exposedSeafloor.count<100||exposedSeafloor.maxCavity<.001)throw new Error(`Exposed seafloor lost terrain shading: ${JSON.stringify(exposedSeafloor)}`);
+ if(exposedSeafloor.count<100||exposedSeafloor.maxNormalAngle<.1)throw new Error(`Exposed seafloor lost terrain shading: ${JSON.stringify(exposedSeafloor)}`);
  renderer.ocean=true;Object.assign(renderer.cameraState,oceanCamera);renderer.budget=36;renderer.pixelSize=24;renderer.invalidateTerrain();renderer.lastSelection=0;await capture();
  // Exercise culling and exact shared vertices in a refined, mixed-LOD view.
  const original={...renderer.cameraState};renderer.budget=180;renderer.pixelSize=10;renderer.cameraState.altitude=100;renderer.invalidateTerrain();
@@ -412,7 +469,7 @@ try{
  const seams=await inspectSeams();
  if(seams.matched<100||seams.mixed<1||seams.maxSeamKm>.002||seams.maxNormal>.5)throw new Error(`Terrain seams: ${JSON.stringify(seams)}`);
  // At the closest altitude, the geometry and lighting must still agree across
- // mixed LODs, and retained patches must be updated when neighbor masks change.
+ // mixed LODs, including retained patches when neighbor masks change.
  renderer.budget=384;renderer.pixelSize=14;renderer.invalidateTerrain();
  Object.assign(renderer.cameraState,{mode:'orbit',altitude:.03,surfaceHeight:point[3],longitude:Math.atan2(highland.direction[2],highland.direction[0]),latitude:Math.asin(highland.direction[1])});
  renderer.lastSelection=0;await capture();const deepSeams=await inspectSeams();
@@ -421,7 +478,7 @@ try{
  for(const offset of [.01,.03,.07]){
   const before=new Map(renderer.patches.map(p=>[p.key,p.normalStitch]));renderer.cameraState.longitude+=offset;renderer.needsSelection=true;renderer.lastSelection=0;await capture();
   reusedChanges=renderer.patches.filter(p=>before.has(p.key)&&before.get(p.key)!==p.normalStitch).length;
-  if(reusedChanges){if(renderer.stats.reusedNormalUpdates<reusedChanges)throw new Error('Changed neighboring LOD did not refresh cached normals');break;}
+  if(reusedChanges){if(renderer.stats.reusedNormalUpdates!==0)throw new Error('World-space normals should not need neighbor-dependent regeneration');break;}
  }
  if(!reusedChanges)throw new Error('Camera movement did not exercise a cached stitch change');
  // Exercise a close-up view centered directly on a cube-face edge. The same
@@ -457,8 +514,8 @@ try{
  }
  const closeCubeEdge=await inspectCubeEdge();
  if(closeCubeEdge.deepMatches<50||closeCubeEdge.deepMaxKm>.00001||closeCubeEdge.deepMaxNormal>.5)throw new Error(`Close-up cube-face seams: ${JSON.stringify(closeCubeEdge)}`);
- // Travel along the same boundary with cached geometry still resident; changed
- // LOD neighbors must refresh all normals that depend on the old edge chain.
+ // Travel along the same boundary with cached geometry still resident; the
+ // world-space normals should remain stable as LOD neighbors change.
  const priorSlots=new Map(renderer.patches.map(n=>[n.key,n.slot])),movedDirection=[...edgeDirection];
  let minor=0;for(let i=1;i<3;i++)if(Math.abs(movedDirection[i])<Math.abs(movedDirection[minor]))minor=i;
  movedDirection[minor]+=(movedDirection[minor]>0?-.0001:.0001);const movedLength=Math.hypot(...movedDirection);for(let i=0;i<3;i++)movedDirection[i]/=movedLength;

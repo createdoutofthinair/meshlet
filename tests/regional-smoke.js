@@ -7,7 +7,7 @@ try{
  const device=await adapter.requestDevice(),errors=[],renderer=new PlanetRenderer(canvas,adapter,device,canvas.getContext('webgpu'),false,e=>errors.push(e));
  await renderer.init();renderer.seed=918273;renderer.invalidateTerrain();const highland=await renderer.findHighlands();
  renderer.resize();const color=device.createTexture({size:[canvas.width,canvas.height],format:renderer.format,usage:GPUTextureUsage.RENDER_ATTACHMENT});renderer.context={getCurrentTexture:()=>color};
- renderer.requestSurface=()=>{};renderer.budget=36;renderer.pixelSize=24;
+ renderer.requestSurface=()=>{};renderer.simulateRegionsForAnalysis=true;renderer.budget=36;renderer.pixelSize=24;
  Object.assign(renderer.cameraState,{mode:'orbit',altitude:4,surfaceHeight:highland.height,longitude:Math.atan2(highland.direction[2],highland.direction[0]),latitude:Math.asin(highland.direction[1])});
  renderer.frame(performance.now()+1000);await device.queue.onSubmittedWorkDone();
  const slots=[...renderer.regions].map(([id,slot])=>({id,slot,face:renderer.regionMeta[slot*4],x:renderer.regionMeta[slot*4+1],y:renderer.regionMeta[slot*4+2]}));
@@ -45,11 +45,11 @@ try{
   if(!Number.isFinite(state[i])||!Number.isFinite(state[i+1])||!Number.isFinite(state[i+2])||state[i+1]<0||state[i+2]<0)throw new Error(`Invalid simulated state at ${i/4}`);
  }
  if(Math.abs(massChange)>.01||maxFluxExcess>.000001)throw new Error(`Material or water accounting failed: ${JSON.stringify({massChange,maxFluxExcess})}`);
- // The simulated displacement must be used by the actual terrain probe.
+ // Regional cache data must not change the rendered height for the same seed.
  const region=slots.find(r=>r.slot===best.slot),u=-1+2*(region.x+best.x/64)/REGION_FACE_TILES,v=-1+2*(region.y+best.y/64)/REGION_FACE_TILES;
- const direction=faceDirection(region.face,u,v);renderer.regional=false;const without=await renderer.sampleTerrain(direction);
- renderer.regional=true;const withRegion=await renderer.sampleTerrain(direction);
- const probeChange=withRegion[3]-without[3];if(Math.abs(probeChange)<.0001)throw new Error(`Regional simulation did not change terrain: ${JSON.stringify({best,probeChange})}`);
+ const direction=faceDirection(region.face,u,v),withRegion=await renderer.sampleTerrain(direction);
+ renderer.resetRegions();const without=await renderer.sampleTerrain(direction);
+ const probeChange=withRegion[3]-without[3];if(Math.abs(probeChange)>.00001)throw new Error(`Regional cache changed the terrain: ${JSON.stringify({best,probeChange})}`);
  // Repeat the same seed with different cache slots; results must not depend
  // on allocation order or on which part of the world was visited first.
  renderer.resetRegions();renderer.regionFree.reverse();renderer.invalidateTerrain();renderer.cameraState.surfaceHeight=highland.height;renderer.lastSelection=0;

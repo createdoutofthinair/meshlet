@@ -1,10 +1,14 @@
 import {RADIUS_KM,PATCH_CELLS,FACE_BASES,faceCube,directionToFace,seedPlates,normalize,add,scale,dot} from './planet-math.js';
 import {planetCamera} from './camera.js';
 import {selectPatches} from './quadtree.js';
+import {transitionPairs,encodeTransitionPairs} from './patch-transition.js';
 import {buildWorldGrid} from './world-grid.js';
-import {regionsAround,REGION_FACE_TILES,REGION_CAPACITY,REGION_GRID,REGION_SAMPLES,REGION_LOOKUPS} from './regions.js';
+import {regionsAround,REGION_CAPACITY,REGION_GRID,REGION_SAMPLES,REGION_LOOKUPS} from './regions.js';
 const BUFFER=globalThis.GPUBufferUsage;
-const CAPACITY=512,GRID=21,VERTEX_BYTES=48,MESHLETS=16,PATCH_BYTES=128;
+// A second set of slots lets the currently drawn patches stay resident while
+// their replacements are generated and measured.
+const CAPACITY=1024,GRID=21,VERTEX_BYTES=48,MESHLETS=16,PATCH_BYTES=128;
+const TRANSITION_BATCH=12,TRANSITION_TARGET_PIXELS=.5,REFINEMENT_WAIT_MS=1200;
 const REGION_LOOKUP_OFFSET=24578*(48+17*16+4);
 const REGION_VALUES_OFFSET=Math.ceil((REGION_LOOKUP_OFFSET+REGION_LOOKUPS*4)/16)*16;
 const WORLD_BYTES=REGION_VALUES_OFFSET+REGION_CAPACITY*REGION_SAMPLES*16;
@@ -25,13 +29,16 @@ export class PlanetRenderer {
   Object.assign(this,{canvas,adapter,device,context,timing,onError});this.format=navigator.gpu.getPreferredCanvasFormat();
   this.cameraState={longitude:.8,latitude:.4,altitude:14000,surfaceHeight:0,mode:'orbit',heading:.45,pitch:.3};
   this.seed=918273;this.relief=1;this.valleys=1;this.erosion=1;this.regional=true;this.rivers=true;this.biomes=true;this.ocean=true;this.followSun=true;this.culling=true;this.lodColors=false;this.wireframe=false;this.patchLines=false;
-  this.budget=384;this.pixelSize=14;this.resolution=1;this.maxDepth=20;
+  this.budget=384;this.pixelSize=6;this.resolution=1;this.maxDepth=20;
   this.patchBytes=new ArrayBuffer(CAPACITY*PATCH_BYTES);this.patchFloats=new Float32Array(this.patchBytes);this.patchUints=new Uint32Array(this.patchBytes);
   this.slotByKey=new Map();this.stitchByKey=new Map();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.patches=[];this.pending=[];this.normalPending=[];
   this.needsSelection=true;this.lastSelection=0;this.previousSplits=null;this.lodErrors=new Map();this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
+  this.transitionErrors=new Map();this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
+  this.transitionTargetPixels=TRANSITION_TARGET_PIXELS;
   this.lastSample=0;this.pendingRead=false;this.generation=0;this.inFlight=0;this.probePending=false;this.lastProbeKey='';this.lastProbeTime=0;this.stats={leaves:0,visiblePatches:0,deepest:0,selectionMs:0,generated:0};
   this.hydrologySeed=null;
   this.regionSeed=null;this.regions=new Map();this.regionFree=Array.from({length:REGION_CAPACITY},(_,i)=>REGION_CAPACITY-1-i);
+  this.simulateRegionsForAnalysis=false;
   this.regionLookup=new Uint32Array(REGION_LOOKUPS);this.regionLookup.fill(0xffffffff);
   this.regionMeta=new Uint32Array(REGION_CAPACITY*4);this.regionPending=[];
  }
@@ -40,20 +47,32 @@ export class PlanetRenderer {
   d.lost.then(info=>this.onError?.(`WebGPU device lost: ${info.message||info.reason}. Reload to retry.`));
   this.context.configure({device:d,format:this.format,alphaMode:'opaque'});
   const fetchText=async p=>{const r=await fetch(new URL(p,import.meta.url));if(!r.ok)throw new Error(`Failed to load ${p}`);return r.text();};
-  const [common,terrainCore,riverCurve,hydrologySource,worldField,riverDetailSource,regionalSource,terrainSurface,walkProbeSource,...sources]=await Promise.all(['./common.wgsl','./terrain-core.wgsl','./river-curve.wgsl','./hydrology.wgsl','./world-field.wgsl','./river-detail.wgsl','./regional-hydrology.wgsl','./terrain-surface.wgsl','./walk-probe.wgsl','./generate.wgsl','./normal.wgsl','./bounds.wgsl','./cull.wgsl','./render.wgsl','./lod-error.wgsl'].map(fetchText));
-  const labels=['Terrain generation','Terrain normals','Meshlet bounds','Meshlet culling','Planet rendering','Terrain LOD residual'];
-  const modules=await Promise.all(sources.map((s,i)=>shader(d,common+'\n'+(i===0||i===4?terrainCore+'\n'+riverCurve+'\n'+worldField+'\n'+terrainSurface+'\n':'')+s,labels[i])));
+  const [common,terrainCore,riverCurve,hydrologySource,worldField,riverDetailSource,regionalSource,terrainSurface,walkProbeSource,...sources]=await Promise.all(['./common.wgsl','./terrain-core.wgsl','./river-curve.wgsl','./hydrology.wgsl','./world-field.wgsl','./river-detail.wgsl','./regional-hydrology.wgsl','./terrain-surface.wgsl','./walk-probe.wgsl','./generate.wgsl','./normal.wgsl','./bounds.wgsl','./cull.wgsl','./render.wgsl','./lod-error.wgsl','./transition-error.wgsl','./ocean.wgsl'].map(fetchText));
+  const labels=['Terrain generation','Terrain normals','Meshlet bounds','Meshlet culling','Planet rendering','Terrain LOD residual','Terrain transition comparison','Ocean surface'];
+  const modules=await Promise.all(sources.map((s,i)=>shader(d,common+'\n'+(i===0||i===1||i===4||i===7?terrainCore+'\n'+riverCurve+'\n'+worldField+'\n'+terrainSurface+'\n':'')+s,labels[i])));
   [this.generatePipe,this.normalPipe,this.boundsPipe,this.cullPipe]=await Promise.all(modules.slice(0,4).map(module=>d.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}})));
   this.lodErrorPipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:modules[5],entryPoint:'main'}});
+  this.transitionPipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:modules[6],entryPoint:'main'}});
   const walkProbeModule=await shader(d,common+'\n'+walkProbeSource,'Walking surface probe');
   this.walkProbePipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:walkProbeModule,entryPoint:'main'}});
   [this.highlandsPipe,this.pointPipe,this.valleyPipe,this.riverPipe]=await Promise.all(['highlands','point','valleyCandidates','riverCandidates'].map(entryPoint=>d.createComputePipelineAsync({layout:'auto',compute:{module:modules[0],entryPoint}})));
-  this.renderPipe=await d.createRenderPipelineAsync({layout:'auto',vertex:{module:modules[4],entryPoint:'vs'},fragment:{module:modules[4],entryPoint:'fs',targets:[{format:this.format}]},primitive:{topology:'triangle-list',cullMode:'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'}});
+  this.renderPipe=await d.createRenderPipelineAsync({layout:'auto',vertex:{module:modules[4],entryPoint:'vs'},fragment:{module:modules[4],entryPoint:'fs',targets:[{format:this.format},{format:'r32float'}]},primitive:{topology:'triangle-list',cullMode:'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'}});
+  // r32float can be loaded without the optional float32-filterable feature.
+  this.oceanLayout=d.createBindGroupLayout({entries:[
+   {binding:0,visibility:GPUShaderStage.FRAGMENT,buffer:{type:'uniform'}},
+   ...[5,7,8,10].map(binding=>({binding,visibility:GPUShaderStage.FRAGMENT,buffer:{type:'read-only-storage'}})),
+   {binding:11,visibility:GPUShaderStage.FRAGMENT,buffer:{type:'uniform'}},
+   {binding:12,visibility:GPUShaderStage.FRAGMENT,texture:{sampleType:'unfilterable-float',viewDimension:'2d'}}
+  ]});
+  this.oceanPipe=await d.createRenderPipelineAsync({layout:d.createPipelineLayout({bindGroupLayouts:[this.oceanLayout]}),vertex:{module:modules[7],entryPoint:'oceanVertex'},fragment:{module:modules[7],entryPoint:'oceanFragment',targets:[{format:this.format}]},primitive:{topology:'triangle-list'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'always'}});
   const make=(label,size,usage)=>d.createBuffer({label,size,usage});
   this.uniform=make('Planet frame',224,BUFFER.UNIFORM|BUFFER.COPY_DST);
+  this.oceanView=make('Camera for analytic ocean',80,BUFFER.UNIFORM|BUFFER.COPY_DST);
   this.patchBuffer=make('Planet patches',this.patchBytes.byteLength,BUFFER.STORAGE|BUFFER.COPY_DST);
   this.vertices=make('Cached GPU terrain vertices',CAPACITY*GRID*GRID*VERTEX_BYTES,BUFFER.STORAGE|BUFFER.COPY_SRC);
   this.lodErrorBuffer=make('Measured terrain LOD residuals',CAPACITY*4,BUFFER.STORAGE|BUFFER.COPY_SRC);
+  this.transitionPairsBuffer=make('Terrain transition pairs',CAPACITY*32,BUFFER.STORAGE|BUFFER.COPY_DST);
+  this.transitionErrorBuffer=make('Measured terrain transition differences',CAPACITY*8,BUFFER.STORAGE|BUFFER.COPY_SRC);
   this.riverMasks=make('Cached river coverage',CAPACITY*1681*8,BUFFER.STORAGE|BUFFER.COPY_SRC);
   this.bounds=make('Terrain meshlet bounds',CAPACITY*MESHLETS*16,BUFFER.STORAGE);
   this.activeBuffer=make('Active patches',CAPACITY*4,BUFFER.STORAGE|BUFFER.COPY_DST);
@@ -106,8 +125,9 @@ export class PlanetRenderer {
   this.regionFinishBind=bindEntries(this.regionPipes.finishRegion,[[0,this.uniform],[7,this.world],[13,this.regionQueueBuffer],[14,this.regionA]]);
   this.generateBind=bindEntries(this.generatePipe,[[0,this.uniform],[1,this.patchBuffer],[2,this.vertices],[3,this.queueBuffer],[4,this.plates],[7,this.world],[8,this.worldDirections],[10,this.worldFaces],[11,this.riverMasks]]);
   this.lodErrorBind=bind(this.lodErrorPipe,[this.uniform,this.vertices,this.queueBuffer,this.lodErrorBuffer]);
+  this.transitionBind=bind(this.transitionPipe,[this.uniform,this.patchBuffer,this.vertices,this.transitionPairsBuffer,this.transitionErrorBuffer]);
   this.riverDetailBind=bindEntries(this.riverDetailPipe,[[0,this.uniform],[1,this.patchBuffer],[3,this.queueBuffer],...worldEntries,[11,this.riverMasks]]);
-  this.normalBind=bind(this.normalPipe,[this.uniform,this.patchBuffer,this.vertices,this.normalQueueBuffer]);
+  this.normalBind=bindEntries(this.normalPipe,[[0,this.uniform],[1,this.patchBuffer],[2,this.vertices],[3,this.normalQueueBuffer],[4,this.plates],[7,this.world],[8,this.worldDirections],[10,this.worldFaces]]);
   this.boundsBind=bind(this.boundsPipe,[this.uniform,this.vertices,this.bounds,this.queueBuffer]);
   this.cullBind=bind(this.cullPipe,[this.uniform,this.patchBuffer,this.bounds,this.activeBuffer,this.visible,this.indirect]);
   this.renderBind=bindEntries(this.renderPipe,[[0,this.uniform],[1,this.patchBuffer],[2,this.vertices],[3,this.visible],[5,this.plates],...worldEntries]);
@@ -136,6 +156,7 @@ export class PlanetRenderer {
  resetPatchCache(){
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
   this.lodErrors.clear();
+  this.transitionErrors.clear();this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
   this.needsSelection=true;this.generation++;this.lastProbeKey='';
   this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
  }
@@ -149,54 +170,46 @@ export class PlanetRenderer {
   this.device.queue.writeBuffer(this.plates,0,seedPlates(this.seed));
   if(this.cameraState.altitude<50)this.cameraState.surfaceHeight=10;
  }
- invalidateRegionalPatches(changed){
-  const around=new Map(),span=2/REGION_FACE_TILES;
-  for(const r of changed){const direction=faceCube(r.face,-1+(r.x+.5)*span,-1+(r.y+.5)*span);for(const neighbor of regionsAround(direction))around.set(neighbor.id,neighbor);}
-  const touched=new Set(),candidates=[...around.values()];
-  for(const node of this.patches){
-   const half=node.span/2;
-   if(candidates.some(r=>r.face===node.face && node.u+half>=-1+r.x*span && node.u-half<=-1+(r.x+1)*span && node.v+half>=-1+r.y*span && node.v-half<=-1+(r.y+1)*span)){
-    const slot=this.slotByKey.get(node.key);if(slot!==undefined){this.slotByKey.delete(node.key);this.stitchByKey.delete(node.key);this.lodErrors.delete(node.key);this.free.push(slot);touched.add(node.key);}
-   }
-  }
-  for(const node of this.patches)if(node.edgeKeys.some(key=>touched.has(key))||node.cornerKeys.some(keys=>keys.some(key=>touched.has(key))))this.stitchByKey.delete(node.key);
-  this.needsSelection=true;this.generation++;this.lastProbeKey='';this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
- }
  prepareRegions(camera){
   if(this.regionSeed!==(this.seed>>>0))this.resetRegions();
   if(camera.clearance>=50 || this.erosion<=0 || !this.regional)return false;
-  const requested=regionsAround(camera.radial),protectedIds=new Set(requested.map(r=>r.id)),pending=[],changed=[];
+  const requested=regionsAround(camera.radial),protectedIds=new Set(requested.map(r=>r.id)),pending=[];
   for(const region of requested){
    if(this.regions.has(region.id)){const slot=this.regions.get(region.id);this.regions.delete(region.id);this.regions.set(region.id,slot);continue;}
    let slot=this.regionFree.pop();
    if(slot===undefined){
     const entry=[...this.regions].find(([id])=>!protectedIds.has(id));if(!entry)throw new Error('Regional simulation cache exhausted');
     this.regions.delete(entry[0]);this.regionLookup[entry[0]]=0xffffffff;slot=entry[1];
-    changed.push({face:this.regionMeta[slot*4],x:this.regionMeta[slot*4+1],y:this.regionMeta[slot*4+2]});
    }
    this.regions.set(region.id,slot);this.regionLookup[region.id]=slot;
-   this.regionMeta.set([region.face,region.x,region.y,0],slot*4);pending.push(slot);changed.push(region);
+   this.regionMeta.set([region.face,region.x,region.y,0],slot*4);pending.push(slot);
   }
   if(!pending.length)return false;
   this.regionPending=pending;const d=this.device;
   d.queue.writeBuffer(this.world,REGION_LOOKUP_OFFSET,this.regionLookup);
   d.queue.writeBuffer(this.regionMetaBuffer,0,this.regionMeta);d.queue.writeBuffer(this.regionQueueBuffer,0,new Uint32Array(pending));
-  this.invalidateRegionalPatches(changed);this.lastSelection=0;this.lastProbeTime=0;return true;
+  return true;
  }
  resize(){
   const rect=this.canvas.getBoundingClientRect(),ratio=Math.min(window.devicePixelRatio||1,2)*this.resolution,max=this.device.limits.maxTextureDimension2D;
   const w=Math.min(max,Math.max(1,Math.round(rect.width*ratio))),h=Math.min(max,Math.max(1,Math.round(rect.height*ratio)));
-  if(this.canvas.width!==w||this.canvas.height!==h||!this.depth){this.canvas.width=w;this.canvas.height=h;this.depth?.destroy();this.depth=this.device.createTexture({label:'Planet reverse-Z depth',size:[w,h],format:'depth32float',usage:GPUTextureUsage.RENDER_ATTACHMENT});this.needsSelection=true;}
+  if(this.canvas.width!==w||this.canvas.height!==h||!this.depth){
+   this.canvas.width=w;this.canvas.height=h;this.depth?.destroy();this.waterDepth?.destroy();
+   this.depth=this.device.createTexture({label:'Planet reverse-Z depth',size:[w,h],format:'depth32float',usage:GPUTextureUsage.RENDER_ATTACHMENT});
+   this.waterDepth=this.device.createTexture({label:'Terrain depth and lake coverage',size:[w,h],format:'r32float',usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.TEXTURE_BINDING});
+   this.oceanBind=this.device.createBindGroup({layout:this.oceanLayout,entries:[
+    ...[[0,this.uniform],[5,this.plates],[7,this.world],[8,this.worldDirections],[10,this.worldFaces],[11,this.oceanView]].map(([binding,buffer])=>({binding,resource:{buffer}})),
+    {binding:12,resource:this.waterDepth.createView()}
+   ]});
+   this.needsSelection=true;
+  }
  }
  select(camera,now){
   const start=performance.now();
   const maxDepth=this.cameraState.mode==='walk'?22:this.maxDepth;
-  const result=selectPatches(camera,{budget:this.budget,maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.lodErrors});
-  this.previousSplits=result.splits;
-  const wantedNodes=new Map(result.visible.map(p=>[p.key,p])),wanted=new Set(wantedNodes.keys());
-  // Only patches touching an edge or corner can supply that vertex's normal.
-  // Tracking this local graph refreshes dependent cached normals without
-  // invalidating unrelated patches several tiles away.
+  const result=selectPatches(camera,{budget:this.budget,maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.transitionErrors});
+  const wantedNodes=new Map(result.visible.map(p=>[p.key,p]));
+  // A changed stitch graph may alter geometry even for a retained patch.
   const signatureFor=node=>{
    let hash=(2166136261^node.normalStitch)>>>0;
    const mixKey=key=>{for(let i=0;i<key.length;i++)hash=Math.imul(hash^key.charCodeAt(i),16777619)>>>0;};
@@ -213,22 +226,51 @@ export class PlanetRenderer {
    }
    return hash;
   };
-  for(const [key,slot] of this.slotByKey)if(!wanted.has(key)){this.slotByKey.delete(key);this.stitchByKey.delete(key);this.free.push(slot);}
-  const pending=[],normalPending=[];
-  this.patches=result.visible.map(node=>{
+  const slots=new Map(),signatures=new Map(),newNodes=[],normalPending=[];let topologyChanges=0;
+  const nodes=result.visible.map(node=>{
    const signature=signatureFor(node);
    let slot=this.slotByKey.get(node.key);
-   if(slot===undefined){slot=this.free.pop();if(slot===undefined)throw new Error('Planet patch cache exhausted.');this.slotByKey.set(node.key,slot);pending.push(slot);normalPending.push(slot);}
-   else if(this.stitchByKey.get(node.key)!==signature)normalPending.push(slot);
-   this.stitchByKey.set(node.key,signature);
+   if(slot===undefined){slot=this.free.pop();if(slot===undefined)throw new Error('Planet patch staging cache exhausted.');newNodes.push({...node,slot});normalPending.push(slot);}
+   else if(this.stitchByKey.get(node.key)!==signature)topologyChanges++;
+   slots.set(node.key,slot);signatures.set(node.key,signature);
    return {...node,slot};
   });
-  this.pending=pending;this.normalPending=normalPending;
-  this.stats={leaves:result.leaves.length,visiblePatches:this.patches.length,deepest:result.deepest,selectionMs:performance.now()-start,generated:pending.length,normalUpdates:normalPending.length,reusedNormalUpdates:normalPending.length-pending.length};
+  const selectionMs=performance.now()-start;
   this.selectionState={eye:[...camera.eye],forward:[...camera.forward],mode:this.cameraState.mode,budget:this.budget,maxDepth,pixelSize:this.pixelSize,width:camera.width,height:camera.height,generation:this.generation};
   this.lastSelection=now;this.needsSelection=false;
+  if(!this.patches.length){
+   this.slotByKey=slots;this.stitchByKey=signatures;this.patches=nodes;this.previousSplits=result.splits;
+   this.pending=newNodes.map(n=>n.slot);this.normalPending=normalPending;
+   this.stats={leaves:result.leaves.length,visiblePatches:nodes.length,deepest:result.deepest,selectionMs,generated:newNodes.length,normalUpdates:normalPending.length,reusedNormalUpdates:normalPending.length-newNodes.length};
+   return;
+  }
+  if(!newNodes.length&&nodes.length===this.patches.length&&topologyChanges===0){
+   this.patches=nodes;this.previousSplits=result.splits;this.stats={...this.stats,leaves:result.leaves.length,deepest:result.deepest,selectionMs,generated:0,normalUpdates:0,reusedNormalUpdates:0};return;
+  }
+  const pairs=transitionPairs(this.patches,nodes).map(p=>({...p,refining:p.refining??slots.has(p.fine.key)}));
+  if(pairs.length>CAPACITY)throw new Error('Terrain transition comparison capacity exceeded.');
+  const matched=new Set(pairs.map(p=>p.refining?p.fine.key:p.coarse.key));
+  const uncovered=newNodes.some(n=>!matched.has(n.key));
+  this.stage={result,nodes,slots,signatures,newNodes,todo:newNodes.map(n=>n.slot),normalPending,pairs,selectionMs,state:'building',generation:this.generation,reference:camera,nextMeasure:0,uncovered,hasRefinement:pairs.some(p=>p.refining),waitingSince:null};
+  this.transition={...this.transition,pending:newNodes.length,waiting:false};
+ }
+ cancelStage(){
+  if(!this.stage)return;
+  for(const node of this.stage.newNodes)this.free.push(node.slot);
+  this.stage=null;this.transition={...this.transition,pending:0,waiting:false};
+ }
+ commitStage(now){
+  const stage=this.stage;if(!stage)return;
+  for(const [key,slot] of this.slotByKey)if(!stage.slots.has(key))this.free.push(slot);
+  this.slotByKey=stage.slots;this.stitchByKey=stage.signatures;this.patches=stage.nodes;this.previousSplits=stage.result.splits;
+  // New patches were shaded while staged; world-space normals do not depend
+  // on which neighboring LOD is currently selected.
+  this.normalPending=[];
+  this.stats={leaves:stage.result.leaves.length,visiblePatches:stage.nodes.length,deepest:stage.result.deepest,selectionMs:stage.selectionMs,generated:stage.newNodes.length,normalUpdates:stage.normalPending.length,reusedNormalUpdates:0};
+  this.stage=null;this.lastSelection=now;this.transition={...this.transition,pending:0,waiting:false};
  }
  shouldSelect(camera,now){
+  if(this.stage)return false;
   if(!this.needsSelection)return false;
   if(!this.patches.length)return true;
   if(now-this.lastSelection<=100)return false;
@@ -310,18 +352,44 @@ export class PlanetRenderer {
   if(this.inFlight>=2)return null;
   const cpuStart=performance.now();this.resize();
   const camera=planetCamera(this.cameraState,this.canvas.width,this.canvas.height);
-  const regionsChanged=this.prepareRegions(camera);
+  const regionsChanged=this.simulateRegionsForAnalysis&&this.prepareRegions(camera);
   if(!regionsChanged)this.requestSurface(camera,now);
+  if(this.stage){
+   const s=this.selectionState,ratio=camera.clearance/Math.max(.0001,this.stage.reference.clearance);
+   const moved=Math.hypot(...camera.eye.map((x,i)=>x-this.stage.reference.eye[i]));
+   const waitingWalk=this.cameraState.mode==='walk'&&this.stage.state==='waiting';
+   const maxMove=waitingWalk ? .002 : Math.max(.05,this.stage.reference.clearance*.7);
+   const maxTurn=(waitingWalk?5:20)*Math.PI/180;
+   if(!s||s.mode!==this.cameraState.mode||s.budget!==this.budget||s.pixelSize!==this.pixelSize||s.width!==camera.width||s.height!==camera.height||ratio<.6||ratio>1.7||moved>maxMove||dot(camera.forward,this.stage.reference.forward)<Math.cos(maxTurn)){
+    this.cancelStage();this.needsSelection=true;this.lastSelection=0;
+   }
+  }
+  if(this.stage?.state==='ready'){
+   const stage=this.stage,largeMerge=stage.maxMerge>this.transitionTargetPixels&&!stage.uncovered;
+   if(largeMerge && stage.waitingSince===null)stage.waitingSince=now;
+   // Do not indefinitely block newly requested detail when the budget also
+   // needs an above-target merge elsewhere. Pure coarsening remains held.
+   const blocksRefinement=stage.hasRefinement&&now-stage.waitingSince>=REFINEMENT_WAIT_MS;
+   if(largeMerge&&!blocksRefinement){stage.state='waiting';stage.nextMeasure=now+200;this.transition={...this.transition,waiting:true};}
+   else this.commitStage(now);
+  }
+  if(this.stage?.state==='waiting'&&now>=this.stage.nextMeasure){this.stage.state='building';this.transition={...this.transition,waiting:false};}
   if(this.shouldSelect(camera,now))this.select(camera,now);
-  for(const node of this.patches){
+  const stage=this.stage;
+  if(stage?.state==='building')this.pending=stage.todo.splice(0,TRANSITION_BATCH);
+  const normals=stage?.state==='building'?[...this.normalPending,...this.pending]:this.normalPending;
+  const compare=stage?.state==='building'&&stage.todo.length===0;
+  const writePatch=(node,slots)=>{
    const i=node.slot*32,b=FACE_BASES[node.face],cube=faceCube(node.face,node.u,node.v);
    this.patchFloats.set([...cube,node.span],i);this.patchFloats.set([...b.u,0],i+4);this.patchFloats.set([...b.v,0],i+8);
    const high=node.direction.map(Math.fround),low=node.direction.map((x,k)=>x-high[k]);
    this.patchFloats.set([...high,0],i+12);this.patchFloats.set([...low,0],i+16);
    this.patchFloats.set(node.direction.map((x,k)=>x*RADIUS_KM-camera.eye[k]).concat(0),i+20);
    this.patchUints.set([node.face,node.level,node.stitch,node.normalStitch],i+24);
-   this.patchUints.set(node.edgeKeys.map(key=>this.slotByKey.get(key)??0xffffffff),i+28);
-  }
+   this.patchUints.set(node.edgeKeys.map(key=>slots.get(key)??0xffffffff),i+28);
+  };
+  for(const node of this.patches)writePatch(node,this.slotByKey);
+  if(stage)for(const node of stage.newNodes)writePatch(node,stage.slots);
   const raw=new ArrayBuffer(224),f=new Float32Array(raw),u=new Uint32Array(raw);
   f.set(camera.vp,0);camera.planes.forEach((p,i)=>f.set(p,16+i*4));
   let sun=normalize([.55,.42,.72]);
@@ -330,18 +398,23 @@ export class PlanetRenderer {
    sun=normalize(add(add(scale(camera.radial,low ? .32 : .72),scale(camera.right,low ? .9 : .55)),scale(camera.up,low ? .22 : .25)));
   }
   f.set([...sun,0],36);f.set([RADIUS_KM,this.relief,this.ocean?1:0,this.valleys],40);
-  const flags=(this.culling?1:0)|(this.lodColors?2:0)|(this.wireframe?4:0)|(this.patchLines?8:0)|(this.biomes?16:0);
+  const separateOcean=this.ocean&&!this.lodColors&&!this.wireframe&&!this.patchLines;
+  const flags=(this.culling?1:0)|(this.lodColors?2:0)|(this.wireframe?4:0)|(this.patchLines?8:0)|(this.biomes?16:0)|(separateOcean?32:0);
   u.set([this.patches.length,this.pending.length,this.seed>>>0,flags],44);
-  u.set([this.normalPending.length,this.regionPending.length,0,0],48);
+  u.set([normals.length,this.regionPending.length,camera.width,camera.height],48);
   f.set([this.erosion,this.rivers?1:0,this.regional?1:0,0],52);
   const d=this.device;d.queue.writeBuffer(this.uniform,0,raw);d.queue.writeBuffer(this.patchBuffer,0,this.patchBytes);
+  if(separateOcean){
+   const view=new Float32Array(20);view.set([...camera.radial,camera.altitude],0);view.set([...camera.forward,camera.tanY],4);view.set([...camera.right,camera.tanX],8);view.set([...camera.up,camera.width],12);view[16]=camera.height;view[17]=camera.near;d.queue.writeBuffer(this.oceanView,0,view);
+  }
   if(this.patches.length)d.queue.writeBuffer(this.activeBuffer,0,new Uint32Array(this.patches.map(p=>p.slot)));
   if(this.pending.length)d.queue.writeBuffer(this.queueBuffer,0,new Uint32Array(this.pending));
-  if(this.normalPending.length)d.queue.writeBuffer(this.normalQueueBuffer,0,new Uint32Array(this.normalPending));
+  if(normals.length)d.queue.writeBuffer(this.normalQueueBuffer,0,new Uint32Array(normals));
+  if(compare&&stage.pairs.length)d.queue.writeBuffer(this.transitionPairsBuffer,0,encodeTransitionPairs(stage.pairs));
   d.queue.writeBuffer(this.indirect,0,new Uint32Array([96,0,0,0]));
   this.ensureHydrology();
   const generatedOnSample=this.pending.length;
-  const sample=(generatedOnSample>0||now-this.lastSample>500)&&!this.pendingRead;if(sample){this.lastSample=now;this.pendingRead=true;}
+  const sample=((generatedOnSample>0&&!stage)||now-this.lastSample>500)&&!this.pendingRead;if(sample){this.lastSample=now;this.pendingRead=true;}
   const encoder=d.createCommandEncoder({label:'Planet frame'});
   const cp=encoder.beginComputePass(sample&&this.timing?{timestampWrites:{querySet:this.queries,beginningOfPassWriteIndex:0,endOfPassWriteIndex:1}}:{});
   const dispatch=(pipe,bind,count)=>{if(count){cp.setPipeline(pipe);cp.setBindGroup(0,bind);cp.dispatchWorkgroups(Math.ceil(count/64));}};
@@ -357,16 +430,45 @@ export class PlanetRenderer {
   dispatch(this.riverDetailPipe,this.riverDetailBind,this.pending.length*1681);
   dispatch(this.generatePipe,this.generateBind,this.pending.length*GRID*GRID);
   if(this.pending.length){cp.setPipeline(this.lodErrorPipe);cp.setBindGroup(0,this.lodErrorBind);cp.dispatchWorkgroups(this.pending.length);}
-  dispatch(this.normalPipe,this.normalBind,this.normalPending.length*17*17);
+  dispatch(this.normalPipe,this.normalBind,normals.length*17*17);
   dispatch(this.boundsPipe,this.boundsBind,this.pending.length*MESHLETS);
+  if(compare&&stage.pairs.length){cp.setPipeline(this.transitionPipe);cp.setBindGroup(0,this.transitionBind);cp.dispatchWorkgroups(stage.pairs.length);}
   dispatch(this.cullPipe,this.cullBind,this.patches.length*MESHLETS);cp.end();
-  const descriptor={colorAttachments:[{view:this.context.getCurrentTexture().createView(),clearValue:{r:.006,g:.009,b:.016,a:1},loadOp:'clear',storeOp:'store'}],depthStencilAttachment:{view:this.depth.createView(),depthClearValue:0,depthLoadOp:'clear',depthStoreOp:'discard'}};
-  if(sample&&this.timing)descriptor.timestampWrites={querySet:this.queries,beginningOfPassWriteIndex:2,endOfPassWriteIndex:3};
+  const colorView=this.context.getCurrentTexture().createView(),depthView=this.depth.createView();
+  const descriptor={colorAttachments:[
+   {view:colorView,clearValue:{r:.006,g:.009,b:.016,a:1},loadOp:'clear',storeOp:'store'},
+   {view:this.waterDepth.createView(),clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}
+  ],depthStencilAttachment:{view:depthView,depthClearValue:0,depthLoadOp:'clear',depthStoreOp:separateOcean?'store':'discard'}};
+  if(sample&&this.timing)descriptor.timestampWrites=separateOcean?{querySet:this.queries,beginningOfPassWriteIndex:2}:{querySet:this.queries,beginningOfPassWriteIndex:2,endOfPassWriteIndex:3};
   const pass=encoder.beginRenderPass(descriptor);pass.setPipeline(this.renderPipe);pass.setBindGroup(0,this.renderBind);pass.drawIndirect(this.indirect,0);pass.end();
+  if(separateOcean){
+   const waterDescriptor={colorAttachments:[{view:colorView,loadOp:'load',storeOp:'store'}],depthStencilAttachment:{view:depthView,depthLoadOp:'load',depthStoreOp:'discard'}};
+   if(sample&&this.timing)waterDescriptor.timestampWrites={querySet:this.queries,endOfPassWriteIndex:3};
+   const waterPass=encoder.beginRenderPass(waterDescriptor);waterPass.setPipeline(this.oceanPipe);waterPass.setBindGroup(0,this.oceanBind);waterPass.draw(3);waterPass.end();
+  }
   const measured=sample?this.patches.map(({key,slot})=>({key,slot})):null;
   let readback;if(sample){readback=d.createBuffer({size:48+CAPACITY*4,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});encoder.copyBufferToBuffer(this.indirect,0,readback,0,16);encoder.copyBufferToBuffer(this.lodErrorBuffer,0,readback,48,CAPACITY*4);if(this.timing){encoder.resolveQuerySet(this.queries,0,4,this.resolve,0);encoder.copyBufferToBuffer(this.resolve,0,readback,16,32);}}
+  let transitionRead;if(compare&&stage.pairs.length){
+   stage.state='measuring';transitionRead=d.createBuffer({size:stage.pairs.length*8,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});
+   encoder.copyBufferToBuffer(this.transitionErrorBuffer,0,transitionRead,0,stage.pairs.length*8);
+  }else if(compare){stage.maxMerge=0;stage.state='ready';this.transition={...this.transition,pixels:0,pending:0,overTarget:false};}
   d.queue.submit([encoder.finish()]);this.lastFrameEye=camera.eye;this.pending=[];this.normalPending=[];this.regionPending=[];this.inFlight++;
+  if(stage)this.transition={...this.transition,pending:stage.todo.length};
   d.queue.onSubmittedWorkDone().then(()=>{this.inFlight--;}).catch(()=>{this.inFlight--;});
+  if(transitionRead)transitionRead.mapAsync(GPUMapMode.READ).then(()=>{
+   const values=new Float32Array(transitionRead.getMappedRange());let maxPixel=0,maxMerge=0;
+   if(this.stage===stage&&stage.generation===this.generation){
+    for(let i=0;i<stage.pairs.length;i++){
+     const px=values[i*2],world=values[i*2+1],pair=stage.pairs[i];
+     if(!Number.isFinite(px)||!Number.isFinite(world))throw new Error('Non-finite terrain transition measurement');
+     maxPixel=Math.max(maxPixel,px);if(!pair.refining)maxMerge=Math.max(maxMerge,px);
+     this.transitionErrors.set(pair.coarse.key,Math.max(this.transitionErrors.get(pair.coarse.key)||0,world));
+    }
+    while(this.transitionErrors.size>8192)this.transitionErrors.delete(this.transitionErrors.keys().next().value);
+    stage.maxMerge=maxMerge;stage.state='ready';this.transition={pixels:maxPixel,pending:0,overTarget:maxPixel>this.transitionTargetPixels,waiting:false};
+   }
+   transitionRead.unmap();
+  }).catch(e=>{if(this.stage===stage){this.cancelStage();this.needsSelection=true;this.onError?.(`Terrain transition: ${e.message}`);}}).finally(()=>transitionRead.destroy());
   if(readback){const generation=this.generation;readback.mapAsync(GPUMapMode.READ).then(()=>{
    const data=readback.getMappedRange(),visibleMeshlets=new Uint32Array(data,0,4)[1];let gpuComputeMs=null,gpuRenderMs=null;
    if(this.timing){const t=new BigUint64Array(data,16,4);if(t[1]>=t[0]&&t[3]>=t[2]){gpuComputeMs=Number(t[1]-t[0])/1e6;gpuRenderMs=Number(t[3]-t[2])/1e6;}}

@@ -17,7 +17,7 @@ const read=async path=>readFile(join(root,path),'utf8');
 const planet=async name=>read(`src/planet/${name}.wgsl`);
 const [common,core,curve,field,surface]=await Promise.all(['common','terrain-core','river-curve','world-field','terrain-surface'].map(planet));
 const covered={
- 'src/planet':new Set(['common','terrain-core','river-curve','world-field','terrain-surface','generate','normal','bounds','cull','render','lod-error','hydrology','regional-hydrology','river-detail','walk-probe']),
+ 'src/planet':new Set(['common','terrain-core','river-curve','world-field','terrain-surface','generate','normal','bounds','cull','render','ocean','lod-error','transition-error','hydrology','regional-hydrology','river-detail','walk-probe']),
  'src/gpu':new Set(['common','cull','render','projection'])
 };
 for(const [folder,names] of Object.entries(covered))for(const filename of await readdir(join(root,folder))){
@@ -26,11 +26,14 @@ for(const [folder,names] of Object.entries(covered))for(const filename of await 
 const full=[common,core,curve,field,surface];
 const modules={
  'planet-generate':[...full,await planet('generate')],
- 'planet-normal':[common,await planet('normal')],
+ 'planet-normal':[...full,await planet('normal')],
  'planet-bounds':[common,await planet('bounds')],
  'planet-cull':[common,await planet('cull')],
  'planet-render':[...full,await planet('render')],
+ 'planet-ocean':[...full,await planet('ocean')],
+ 'planet-ocean-smoke':[...full,await planet('ocean'),await read('tests/ocean-smoke.wgsl')],
  'planet-lod-error':[common,await planet('lod-error')],
+ 'planet-transition-error':[common,await planet('transition-error')],
  'planet-hydrology':[common,core,curve,await planet('hydrology')],
  'planet-regional':[common,core,curve,field.replace('var<storage,read> world:','var<storage,read_write> world:'),await planet('regional-hydrology')],
  'planet-river-detail':[common,curve,field,await planet('river-detail')],
@@ -40,8 +43,8 @@ const meshletCommon=await read('src/gpu/common.wgsl');
 for(const name of ['cull','render','projection'])modules[`meshlet-${name}`]=[meshletCommon,await read(`src/gpu/${name}.wgsl`)];
 // The browser smoke tests append their own WGSL to the same source modules.
 // Compile that code as well so test-only shader errors cannot go unnoticed.
-for(const [name,path,parts] of [['planet-smoke','tests/planet-smoke.js',[...full,await planet('generate')]],['regional-smoke','tests/regional-smoke.js',[common,curve,field]]]){
- const source=await read(path),start=source.indexOf('device.createShaderModule({code:'),begin=source.indexOf('`',start),end=source.indexOf('`});',begin);
+for(const [name,path,parts,marker] of [['planet-smoke','tests/planet-smoke.js',[...full,await planet('generate')],'const detailModule=device.createShaderModule({code:'],['regional-smoke','tests/regional-smoke.js',[common,curve,field],'const module=device.createShaderModule({code:']]){
+ const source=await read(path),start=source.indexOf(marker),begin=source.indexOf('`',start),end=source.indexOf('`});',begin);
  if(start<0||begin<0||end<0)throw new Error(`Could not find the WGSL in ${path}`);
  modules[name]=[...parts,source.slice(begin+1,end)];
 }

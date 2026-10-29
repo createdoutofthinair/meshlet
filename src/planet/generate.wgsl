@@ -33,7 +33,9 @@ fn main(@builtin(global_invocation_id) gid:vec3<u32>) {
  let h=clamp(data.height*frame.settings.y,-HEIGHT_LIMIT,HEIGHT_LIMIT);
  let surfaceHeight=select(h,max(h,0.0),frame.settings.z>.5);
  vertices[slot*GRID_COUNT+sample].position=vec4<f32>(directionDelta*frame.settings.x+direction*surfaceHeight,h);
- vertices[slot*GRID_COUNT+sample].surface=vec4<f32>(data.lake,data.humidity,0.0,0.0);
+ // Keep the uncarved height until the fixed-distance normal pass consumes it.
+ // The pass replaces these scratch components with the broad surface slopes.
+ vertices[slot*GRID_COUNT+sample].surface=vec4<f32>(data.lake,data.humidity,clamp(base.height*frame.settings.y,-HEIGHT_LIMIT,HEIGHT_LIMIT),0.0);
 }
 // Small, explicit readbacks for navigation tools. They are not per-vertex CPU
 // generation: both height probing and highland searches evaluate on the GPU.

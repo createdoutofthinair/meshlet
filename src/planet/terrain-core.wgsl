@@ -135,6 +135,23 @@ fn terrainDetailReference(cell:vec3<f32>,base:TerrainBase,high:vec3<f32>,low:vec
  let offset=terrainPrecision(local,anchor,high,low,delta,gx,gy,gz);
  return TerrainDetailReference(local.direction,warp,offset.direction,offset.warp);
 }
+fn terrainBlendedReference(base:TerrainBase,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32)->TerrainDetailReference{
+ let grid=terrainDetailGrid(high,low,delta);let reference=terrainDetailReference(grid.cell,base,high,low,delta,seed);
+ var directionError=reference.directionError;var warpError=reference.warpError;
+ if(grid.blend.x>0.0 || grid.blend.y>0.0 || grid.blend.z>0.0){
+  for(var corner=1u;corner<8u;corner++){
+   let x=(corner&1u)!=0u;let y=(corner&2u)!=0u;let z=(corner&4u)!=0u;
+   let weight=select(1.0-grid.blend.x,grid.blend.x,x)*select(1.0-grid.blend.y,grid.blend.y,y)*select(1.0-grid.blend.z,grid.blend.z,z);
+   if(weight>0.0){
+    let offset=vec3<f32>(select(0.0,grid.side.x,x),select(0.0,grid.side.y,y),select(0.0,grid.side.z,z));
+    let neighbor=terrainDetailReference(grid.cell+offset,base,high,low,delta,seed);
+    directionError+=((neighbor.direction-reference.direction)+(neighbor.directionError-reference.directionError))*weight;
+    warpError+=((neighbor.warp-reference.warp)+(neighbor.warpError-reference.warpError))*weight;
+   }
+  }
+ }
+ return TerrainDetailReference(reference.direction,reference.warp,directionError,warpError);
+}
 fn terrainDetailChannel(high:vec3<f32>,low:vec3<f32>,warp:vec3<f32>,warpLow:vec3<f32>,down:vec3<f32>,frequency:f32,seed:u32)->f32{
  var n=0.0;
  for(var i=-2;i<=2;i++){
@@ -159,21 +176,8 @@ fn terrainShapeFromBaseDetail(base:TerrainBase,seed:u32,valleyStrength:f32,direc
  let preciseBands=useDetailOffset && roughness>.001;var detailOffset=TerrainPrecision(vec3<f32>(0.0),vec3<f32>(0.0));
  var detailBase=base;
  if(preciseBands){
-  let grid=terrainDetailGrid(high,low,delta);
-  let reference=terrainDetailReference(grid.cell,base,high,low,delta,seed);
+  let reference=terrainBlendedReference(base,high,low,delta,seed);
   detailBase.direction=reference.direction;detailBase.warp=reference.warp;detailOffset=TerrainPrecision(reference.directionError,reference.warpError);
-  if(grid.blend.x>0.0 || grid.blend.y>0.0 || grid.blend.z>0.0){
-   for(var corner=1u;corner<8u;corner++){
-    let x=(corner&1u)!=0u;let y=(corner&2u)!=0u;let z=(corner&4u)!=0u;
-    let weight=select(1.0-grid.blend.x,grid.blend.x,x)*select(1.0-grid.blend.y,grid.blend.y,y)*select(1.0-grid.blend.z,grid.blend.z,z);
-    if(weight>0.0){
-     let offset=vec3<f32>(select(0.0,grid.side.x,x),select(0.0,grid.side.y,y),select(0.0,grid.side.z,z));
-     let neighbor=terrainDetailReference(grid.cell+offset,base,high,low,delta,seed);
-     detailOffset.direction+=((neighbor.direction-reference.direction)+(neighbor.directionError-reference.directionError))*weight;
-     detailOffset.warp+=((neighbor.warp-reference.warp)+(neighbor.warpError-reference.warpError))*weight;
-    }
-   }
-  }
  }
  let d=detailBase.direction;let warpDetail=detailBase.warp*.45;
  var ridges=0.0;var ridgeGradient=vec3<f32>(0.0);var amplitude=.56;var freq=14.0;

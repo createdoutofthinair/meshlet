@@ -30,7 +30,7 @@ fn flowChannel(high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,flow:vec3<f32>,frequ
  let channel=1.0-smoothstep(.035,.30,abs(n));return channel*channel;
 }
 fn regionalIncision(s:WorldSample,profile:vec4<f32>,direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,height:f32,seed:u32)->f32{
- if(frame.settings.w<=0.0 || frame.hydrology.x<=0.0 || height<=.03){return 0.0;}
+ if(frame.settings.w<=0.0 || frame.hydrology.x<=0.0 || frame.hydrology.z<=0.0 || height<=.03){return 0.0;}
  let drain=worldDrainage(s,direction);if(drain.w<.001){return 0.0;}
  // Tie the regional incision to the coarse catchment's slope and discharge,
  // suppressing it in flat basins and at drainage divides.
@@ -65,8 +65,10 @@ fn surfaceBase(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,
  // turn an existing piece of dry land into a new sea-level hole.
  var baseline=natural+change;
  if(natural>0.0){baseline=max(baseline,natural*.10);}else{baseline=natural;}
+ // Regional simulation tiles are an exploratory cache, not part of the
+ // displayed height field. Loading or evicting one must never move terrain.
+ // The seeded drainage incision above supplies stable regional-scale detail.
  var ground=baseline;
- if(includeRegional && frame.hydrology.z>.5 && natural>0.0){ground=max(natural*.10,baseline+regionalSimulation(direction).x*frame.hydrology.x);}
  var lake=0.0;
  if(frame.hydrology.y>.5 && frame.hydrology.x>0.0 && baseline>.0){
   let basin=worldLake(s);
