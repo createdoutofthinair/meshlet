@@ -12,6 +12,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run check
       - name: Verify committed WASM is reproducible
         run: git diff --exit-code -- src/geometry/bounds.wasm

@@ -6,7 +6,7 @@ This is an experimental baseline for profiling and developing an engine, not a f
 
 ## Run locally
 
-Requirements: Node.js 20 or newer, and a browser with WebGPU enabled. WebGPU requires a secure context: `localhost` or HTTPS. No packages need to be installed.
+Requirements: Node.js 20 or newer, and a browser with WebGPU enabled. WebGPU requires a secure context: `localhost` or HTTPS. No packages need to be installed to run the site.
 
 ```sh
 npm run dev
@@ -51,10 +51,11 @@ Source layout:
 ## Verification
 
 ```sh
+npm ci
 npm run check
 ```
 
-This rebuilds the WASM binary and runs the dependency-free Node tests, including verifying every generated meshlet's bounds and all six frustum planes. To test actual GPU compute and rendering, run the server and open <http://localhost:4173/tests/webgpu-smoke.html>. It renders to an offscreen GPU texture, verifies indirect counts, checks that culling preserves the image, validates all forced and automatic LODs, and exercises color, geometry edges, and projected-bounds overlays. Its result appears on the page and in `window.__webgpuSmokeDone`. Open <http://localhost:4173/tests/planet-smoke.html> for the planet GPU test, which also checks deterministic seeds, drainage-oriented detail, geographic water stability, land–sea classification, GPU terrain-error measurements, culling and generated shared-edge positions. <http://localhost:4173/tests/hydrology-smoke.html> checks world generation and routes across several seeds, including deterministic data, downhill flow, river-path endpoints, river-presence flags and erosion. <http://localhost:4173/tests/regional-smoke.html> tests regional water and sediment transport, conservation, seed and cache-slot determinism, tile borders and cube-face sampling. This is a correctness check, not a hardware performance benchmark. In CI the reproducible WASM and Node tests run automatically; GPU hardware and a real browser remain necessary for representative performance and presentation checks.
+This rebuilds the WASM binary, validates the actual assembled WGSL modules with the development-only Naga compiler, and runs the Node tests, including verifying every generated meshlet's bounds and all six frustum planes. The compiler runs offline in a restricted WASI sandbox and is not included in the website. To test actual GPU compute and rendering, run the server and open <http://localhost:4173/tests/webgpu-smoke.html>. It renders to an offscreen GPU texture, verifies indirect counts, checks that culling preserves the image, validates all forced and automatic LODs, and exercises color, geometry edges, and projected-bounds overlays. Its result appears on the page and in `window.__webgpuSmokeDone`. Open <http://localhost:4173/tests/planet-smoke.html> for the planet GPU test, which also checks deterministic seeds, drainage-oriented detail, geographic water stability, land–sea classification, GPU terrain-error measurements, culling and generated shared-edge positions. <http://localhost:4173/tests/hydrology-smoke.html> checks world generation and routes across several seeds, including deterministic data, downhill flow, river-path endpoints, river-presence flags and erosion. <http://localhost:4173/tests/regional-smoke.html> tests regional water and sediment transport, conservation, seed and cache-slot determinism, tile borders and cube-face sampling. This is a correctness check, not a hardware performance benchmark. In CI the reproducible WASM and Node tests run automatically; GPU hardware and a real browser remain necessary for representative performance and presentation checks.
 
 ## Suggested next experiments
 
