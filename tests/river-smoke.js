@@ -20,13 +20,16 @@ try{
  // Exercise the actual material functions, including reset continuity and flow direction.
  const source=await Promise.all(['../src/planet/common.wgsl','../src/river/shared.wgsl','../src/river/render.wgsl','./river-flow-smoke.wgsl'].map(async path=>{const response=await fetch(path);if(!response.ok)throw Error(`Could not load ${path}`);return response.text();}));
  const module=device.createShaderModule({code:source.join('\n')}),pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'probeRiverFlow'}});
- const probe=device.createBuffer({size:80,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC}),probeRead=device.createBuffer({size:80,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+ const probe=device.createBuffer({size:128,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC}),probeRead=device.createBuffer({size:128,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
  const group0=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.frameBuffer}}]}),group1=device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[{binding:0,resource:{buffer:probe}}]});
- const command=device.createCommandEncoder(),compute=command.beginComputePass();compute.setPipeline(pipeline);compute.setBindGroup(0,group0);compute.setBindGroup(1,group1);compute.dispatchWorkgroups(1);compute.end();command.copyBufferToBuffer(probe,0,probeRead,0,80);device.queue.submit([command.finish()]);
+ const command=device.createCommandEncoder(),compute=command.beginComputePass();compute.setPipeline(pipeline);compute.setBindGroup(0,group0);compute.setBindGroup(1,group1);compute.dispatchWorkgroups(1);compute.end();command.copyBufferToBuffer(probe,0,probeRead,0,128);device.queue.submit([command.finish()]);
  await probeRead.mapAsync(GPUMapMode.READ);const values=new Float32Array(probeRead.getMappedRange().slice(0));probeRead.unmap();probeRead.destroy();probe.destroy();
  if(!(values[0]>values[1]&&values[2]>values[3]&&values[6]>values[7]&&Math.abs(values[4]-values[5])<1e-5))throw Error(`Channel or downstream velocity is invalid: ${[...values.slice(0,8)]}`);
  if(Math.hypot(values[8]-values[10],values[9]-values[11])<.005&&Math.abs(values[12]-values[13])<.005)throw Error('Surface detail did not change as water moved');
  if(Math.abs(values[14]-values[15])>.003||Math.hypot(values[16]-values[18],values[17]-values[19])>.003)throw Error('Advected surface popped when its phase reset');
+ if(!(values[20]>.019&&values[20]<.022&&values[21]>values[20]&&values[22]>.999&&values[23]>=.54&&values[23]<=1.0))throw Error(`Invalid water Fresnel or foam detail: ${[...values.slice(20,24)]}`);
+ if(!(values[24]>.999&&values[24]>values[25]&&values[25]>values[26]&&values[27]>values[26]))throw Error(`Water absorption did not increase with depth: ${[...values.slice(24,28)]}`);
+ if(Math.abs(values[28])>.15||Math.abs(values[29])>.15||Math.abs(values[30]-values[31])>.003)throw Error('Water geometry height or animation continuity is invalid');
  renderer.resize();const width=canvas.width,height=canvas.height,stride=Math.ceil(width*4/256)*256;
  const color=device.createTexture({size:[width,height],format:renderer.format,usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_SRC});renderer.context={getCurrentTexture:()=>color};
  async function capture(time){
@@ -38,11 +41,23 @@ try{
  renderer.paused=true;const plain=await capture(1000);renderer.showFlow=true;const arrows=await capture(1100);let changed=0;
  for(let y=0;y<height;y++)for(let x=0;x<width;x++){const i=y*stride+x*4;if(Math.max(...[0,1,2].map(k=>Math.abs(plain[i+k]-arrows[i+k])))>3)changed++;}
  if(changed<20)throw Error(`Downstream arrows did not affect the rendered water: ${changed} pixels`);
+ // Compare the reflected scene to the same reflected sky alone: banks must be present.
+ const rw=Math.ceil(width*renderer.reflectionScale),rh=Math.ceil(height*renderer.reflectionScale),rpitch=Math.ceil(rw*4/256)*256,section=rpitch*rh;
+ const skyOnly=device.createTexture({size:[rw,rh],format:renderer.format,usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_SRC});
+ const skyDepth=device.createTexture({size:[rw,rh],format:'depth32float',usage:GPUTextureUsage.RENDER_ATTACHMENT});
+ const reflectedRead=device.createBuffer({size:section*2,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),reflectCommand=device.createCommandEncoder();
+ const skyPass=reflectCommand.beginRenderPass({colorAttachments:[{view:skyOnly.createView(),loadOp:'clear',storeOp:'store',clearValue:{r:0,g:0,b:0,a:1}}],depthStencilAttachment:{view:skyDepth.createView(),depthLoadOp:'clear',depthStoreOp:'discard',depthClearValue:1}});
+ skyPass.setPipeline(renderer.skyPipe);skyPass.setBindGroup(0,renderer.skyBinds[1]);skyPass.draw(3);skyPass.end();
+ reflectCommand.copyTextureToBuffer({texture:renderer.reflectionTexture},{buffer:reflectedRead,offset:0,bytesPerRow:rpitch,rowsPerImage:rh},[rw,rh]);
+ reflectCommand.copyTextureToBuffer({texture:skyOnly},{buffer:reflectedRead,offset:section,bytesPerRow:rpitch,rowsPerImage:rh},[rw,rh]);device.queue.submit([reflectCommand.finish()]);
+ await reflectedRead.mapAsync(GPUMapMode.READ);const reflectionBytes=new Uint8Array(reflectedRead.getMappedRange());let bankPixels=0;
+ for(let y=0;y<rh;y++)for(let x=0;x<rw;x++){const i=y*rpitch+x*4;if(Math.max(...[0,1,2].map(k=>Math.abs(reflectionBytes[i+k]-reflectionBytes[section+i+k])))>6)bankPixels++;}
+ reflectedRead.unmap();reflectedRead.destroy();skyOnly.destroy();skyDepth.destroy();if(bankPixels<20)throw Error(`Riverbanks are missing from the reflection: ${bankPixels} pixels`);
  async function phase(){const b=device.createBuffer({size:16,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),e=device.createCommandEncoder();e.copyBufferToBuffer(renderer.motion,0,b,0,16);device.queue.submit([e.finish()]);await b.mapAsync(GPUMapMode.READ);const p=new Float32Array(b.getMappedRange())[0];b.unmap();b.destroy();return p;}
  renderer.showFlow=false;renderer.paused=false;const before=await phase(),first=await capture(1200),moving=await capture(2200),after=await phase();let movingPixels=0;
  for(let y=0;y<height;y++)for(let x=0;x<width;x++){const i=y*stride+x*4;if(Math.max(...[0,1,2].map(k=>Math.abs(first[i+k]-moving[i+k])))>2)movingPixels++;}
  if(!(after-before>.9&&after-before<1.2))throw Error(`Water did not advance by the expected distance at 1 fps: ${before}/${after}`);
  if(movingPixels<50)throw Error(`Advected water did not visibly change without arrows: ${movingPixels} pixels`);
  renderer.paused=true;renderer.frame(2300);await device.queue.onSubmittedWorkDone();const paused=await phase();if(Math.abs(paused-after)>.000001)throw Error('Paused water continued to move');
- if(errors.length)throw Error(errors.join('; '));const result={ok:true,start:meta.start,end:meta.end,alignment,bed:f[37],water:f[41],arrowPixels:changed,movingPixels,advection:after-before};status.textContent=JSON.stringify(result);window.__riverSmokeDone=result;
+ if(errors.length)throw Error(errors.join('; '));const result={ok:true,start:meta.start,end:meta.end,alignment,bed:f[37],water:f[41],arrowPixels:changed,reflectedBankPixels:bankPixels,movingPixels,advection:after-before};status.textContent=JSON.stringify(result);window.__riverSmokeDone=result;
 }catch(error){status.textContent=error.stack;window.__riverSmokeDone={ok:false,error:error.stack};}

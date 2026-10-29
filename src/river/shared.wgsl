@@ -5,7 +5,8 @@ struct RiverFrame {
  sunSpeed:vec4<f32>, // light xyz, flow speed meters/second
  shape:vec4<f32>, // width multiplier, channel depth m, bank height m, roughness
  optics:vec4<f32>, // clarity, ripple strength, foam, flow arrows
- config:vec4<u32>, // seed, reach variant, reserved, reserved
+ config:vec4<u32>, // seed, reach variant, viewport width and height
+ reflectionViewProjection:mat4x4<f32>, // view reflected in the sloped river plane
 };
 struct Reach {
  info:vec4<f32>, // half width m, surface slope, discharge, local phase

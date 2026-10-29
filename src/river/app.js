@@ -1,6 +1,6 @@
 import {RiverRenderer} from './renderer.js';
 const $=id=>document.getElementById(id);
-const ids=['view','device-status','loading','loading-title','error','error-message','reach-overlay','reach-caption','status','seed-form','seed','planet-link','generate','next-reach','width-stat','slope-stat','flow-stat','nodes-stat','length-stat','fps','speed','clarity','ripples','foam','channel','depth','bank','roughness','speed-value','clarity-value','ripples-value','foam-value','channel-value','depth-value','bank-value','roughness-value','flow-arrows','paused','view-overview','view-low','view-top'];
+const ids=['view','device-status','loading','loading-title','error','error-message','reach-overlay','reach-caption','status','seed-form','seed','planet-link','generate','next-reach','width-stat','slope-stat','flow-stat','nodes-stat','length-stat','fps','speed','clarity','ripples','foam','reflection-quality','channel','depth','bank','roughness','speed-value','clarity-value','ripples-value','foam-value','channel-value','depth-value','bank-value','roughness-value','flow-arrows','paused','view-overview','view-low','view-top'];
 const el=Object.fromEntries(ids.map(id=>[id,$(id)]));
 let renderer,drag=null,previous=0,lastFps=0,frames=[];
 function seedNumber(value){
@@ -53,6 +53,7 @@ for(const [id,key,divisor,unit,geometry] of sliders)el[id].addEventListener('inp
  if(renderer){renderer[key]=v;if(geometry)renderer.dirty=true;updateMetadata();}
 });
 el['flow-arrows'].addEventListener('change',()=>{if(renderer)renderer.showFlow=el['flow-arrows'].checked;});
+el['reflection-quality'].addEventListener('change',()=>{if(renderer)renderer.reflectionScale=el['reflection-quality'].value==='1'?1:.5;});
 el.paused.addEventListener('change',()=>{if(renderer)renderer.paused=el.paused.checked;});
 for(const [id,yaw,pitch,distance] of [['view-overview',-.55,.58,560],['view-low',-.35,.27,240],['view-top',0,1.47,850]])el[id].addEventListener('click',()=>{if(renderer)Object.assign(renderer.camera,{yaw,pitch,distance});});
 el.view.addEventListener('pointerdown',event=>{if(!renderer)return;drag={x:event.clientX,y:event.clientY};el.view.setPointerCapture(event.pointerId);el.view.focus({preventScroll:true});});

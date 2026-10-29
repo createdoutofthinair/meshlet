@@ -4,11 +4,18 @@ import {RiverWorld,checkedShader,readShader} from './world.js';
 export const TERRAIN_GRID=192,WATER_ALONG=192,WATER_ACROSS=48;
 const VERTEX_BYTES=48,TERRAIN_VERTICES=(TERRAIN_GRID+1)**2,TERRAIN_INDICES=TERRAIN_GRID**2*6;
 const WATER_VERTICES=(WATER_ACROSS+1)*(WATER_ALONG+1),WATER_INDICES=WATER_ACROSS*WATER_ALONG*6;
-const GROUPS=Math.ceil(24578/64),FRAME_BYTES=144,REACH_BYTES=80;
+const GROUPS=Math.ceil(24578/64),FRAME_BYTES=208,REACH_BYTES=80;
 export function riverCamera(state,width,height){
  const p=Math.max(.12,Math.min(1.49,state.pitch)),d=Math.max(80,Math.min(3000,state.distance));
  const eye=[d*Math.cos(p)*Math.sin(state.yaw),d*Math.sin(p),-d*Math.cos(p)*Math.cos(state.yaw)];
  return {eye,vp:multiply(perspective(Math.PI/3,width/height,.5,10000),lookAt(eye,[0,0,0]))};
+}
+// Reflect both the camera and its up-vector in the actual sloped water plane.
+export function riverReflectionCamera(camera,width,height,slope){
+ const length=Math.hypot(1,slope),normal=[0,1/length,slope/length];
+ const mirror=v=>{const distance=v[0]*normal[0]+v[1]*normal[1]+v[2]*normal[2];return v.map((value,i)=>value-2*distance*normal[i]);};
+ const eye=mirror(camera.eye),up=mirror([0,1,0]);
+ return {eye,vp:multiply(perspective(Math.PI/3,width/height,.5,10000),lookAt(eye,[0,0,0],up))};
 }
 export class RiverRenderer {
  static async create(canvas,onError){
@@ -19,7 +26,7 @@ export class RiverRenderer {
  }
  constructor(canvas,adapter,device,context,onError){
   Object.assign(this,{canvas,adapter,device,context,onError});this.format=navigator.gpu.getPreferredCanvasFormat();
-  this.seed=918273;this.variant=0;this.width=1;this.depth=4;this.bank=12;this.roughness=.8;this.speed=1;this.clarity=1.3;this.ripples=.8;this.foam=.45;this.showFlow=false;this.paused=false;
+  this.seed=918273;this.variant=0;this.width=1;this.depth=4;this.bank=12;this.roughness=.8;this.speed=1;this.clarity=1.3;this.ripples=.8;this.foam=.45;this.reflectionScale=.5;this.showFlow=false;this.paused=false;
   this.camera={yaw:-.55,pitch:.58,distance:560};this.ready=false;this.dirty=false;this.lastTime=0;this.busy=false;this.metadata=null;this.inFlight=0;
  }
  async init(){
@@ -44,10 +51,12 @@ export class RiverRenderer {
   this.geometryPipes=await Promise.all(['makeTerrain','makeWater'].map(entryPoint=>d.createComputePipelineAsync({layout:'auto',compute:{module:modules[1],entryPoint}})));
   this.flowPipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:modules[2],entryPoint:'advanceWater'}});
   const depthStencil={format:'depth32float',depthWriteEnabled:true,depthCompare:'less'};
+  const readDepth={format:'depth32float',depthWriteEnabled:false,depthCompare:'less'};
   this.skyPipe=await d.createRenderPipelineAsync({layout:'auto',vertex:{module:modules[3],entryPoint:'skyVertex'},fragment:{module:modules[3],entryPoint:'skyFragment',targets:[{format:this.format}]},primitive:{topology:'triangle-list'},depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'always'}});
-  this.renderPipes=await Promise.all(['groundFragment','waterFragment'].map(entryPoint=>d.createRenderPipelineAsync({layout:'auto',vertex:{module:modules[3],entryPoint:'vertexMain'},fragment:{module:modules[3],entryPoint,targets:[{format:this.format}]},primitive:{topology:'triangle-list',cullMode:'back'},depthStencil})));
+  this.compositePipe=await d.createRenderPipelineAsync({layout:'auto',vertex:{module:modules[3],entryPoint:'skyVertex'},fragment:{module:modules[3],entryPoint:'compositeFragment',targets:[{format:this.format}]},primitive:{topology:'triangle-list'},depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'always'}});
+  this.renderPipes=await Promise.all(['groundFragment','waterFragment','reflectionFragment'].map((entryPoint,i)=>d.createRenderPipelineAsync({layout:'auto',vertex:{module:modules[3],entryPoint:i===1?'waterVertex':'vertexMain'},fragment:{module:modules[3],entryPoint,targets:[{format:this.format}]},primitive:{topology:'triangle-list',cullMode:i===2?'front':'back'},depthStencil:i===1?readDepth:depthStencil})));
   const make=(label,size,usage)=>d.createBuffer({label,size,usage});
-  this.frameBuffer=make('River view settings',FRAME_BYTES,U.UNIFORM|U.COPY_DST);this.reach=make('Selected downstream reach',REACH_BYTES,U.STORAGE|U.COPY_SRC);
+  this.frameBuffer=make('River view settings',FRAME_BYTES,U.UNIFORM|U.COPY_DST);this.reflectionFrame=make('Reflected river camera',FRAME_BYTES,U.UNIFORM|U.COPY_DST);this.reach=make('Selected downstream reach',REACH_BYTES,U.STORAGE|U.COPY_SRC);
   this.candidates=make('Reach selection reduction',GROUPS*8,U.STORAGE);this.motion=make('GPU water advection',16,U.STORAGE|U.COPY_DST|U.COPY_SRC);
   this.vertices=[make('Procedural river banks',TERRAIN_VERTICES*VERTEX_BYTES,U.STORAGE|U.COPY_SRC),make('Procedural river water',WATER_VERTICES*VERTEX_BYTES,U.STORAGE|U.COPY_SRC)];
   this.indices=[make('River bank triangles',TERRAIN_INDICES*4,U.STORAGE|U.INDEX|U.COPY_SRC),make('River water triangles',WATER_INDICES*4,U.STORAGE|U.INDEX|U.COPY_SRC)];
@@ -55,17 +64,31 @@ export class RiverRenderer {
   this.selectionBind=d.createBindGroup({layout:selectLayout,entries:[[0,this.frameBuffer],[1,this.reach],[2,this.world.world],[3,this.candidates]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
   this.geometryBinds=this.geometryPipes.map((pipe,i)=>bind(pipe,[[0,this.frameBuffer],[1,this.reach],[2,this.vertices[i]],[3,this.indices[i]]]));
   this.flowBind=bind(this.flowPipe,[[0,this.frameBuffer],[2,this.motion]]);
-  this.renderBinds=this.renderPipes.map((pipe,i)=>bind(pipe,[[0,this.frameBuffer],[1,this.reach],[2,this.vertices[i]],...(i===1?[[3,this.motion]]:[])]));
+  this.renderBinds=[bind(this.renderPipes[0],[[0,this.frameBuffer],[1,this.reach],[2,this.vertices[0]]]),null,bind(this.renderPipes[2],[[0,this.reflectionFrame],[1,this.reach],[2,this.vertices[0]]])];
+  this.skyBinds=[bind(this.skyPipe,[[0,this.frameBuffer],[1,this.reach]]),bind(this.skyPipe,[[0,this.reflectionFrame],[1,this.reach]])];
+  this.sceneSampler=d.createSampler({minFilter:'linear',magFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
  }
  resize(){
   const rect=this.canvas.getBoundingClientRect(),ratio=Math.min(window.devicePixelRatio||1,2),limit=this.device.limits.maxTextureDimension2D;
   const width=Math.max(1,Math.min(limit,Math.round(rect.width*ratio))),height=Math.max(1,Math.min(limit,Math.round(rect.height*ratio)));
-  if(this.canvas.width!==width||this.canvas.height!==height||!this.depthTexture){this.canvas.width=width;this.canvas.height=height;this.depthTexture?.destroy();this.depthTexture=this.device.createTexture({label:'River depth',size:[width,height],format:'depth32float',usage:GPUTextureUsage.RENDER_ATTACHMENT});}
+  if(this.canvas.width!==width||this.canvas.height!==height||!this.depthTexture||this.allocatedReflectionScale!==this.reflectionScale){
+   this.canvas.width=width;this.canvas.height=height;for(const texture of [this.depthTexture,this.sceneTexture,this.reflectionTexture,this.reflectionDepth])texture?.destroy();
+   const d=this.device,T=GPUTextureUsage,reflectionSize=[Math.max(1,Math.ceil(width*this.reflectionScale)),Math.max(1,Math.ceil(height*this.reflectionScale))];this.allocatedReflectionScale=this.reflectionScale;
+   this.depthTexture=d.createTexture({label:'Opaque river depth',size:[width,height],format:'depth32float',usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING});
+   this.sceneTexture=d.createTexture({label:'Riverbed and banks',size:[width,height],format:this.format,usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING});
+   this.reflectionTexture=d.createTexture({label:'Reflected riverbanks',size:reflectionSize,format:this.format,usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING|T.COPY_SRC});
+   this.reflectionDepth=d.createTexture({label:'Reflection depth',size:reflectionSize,format:'depth32float',usage:T.RENDER_ATTACHMENT});
+   const sceneView=this.sceneTexture.createView(),depthView=this.depthTexture.createView(),reflectionView=this.reflectionTexture.createView();
+   this.compositeBind=d.createBindGroup({layout:this.compositePipe.getBindGroupLayout(0),entries:[{binding:4,resource:sceneView}]});
+   this.renderBinds[1]=d.createBindGroup({layout:this.renderPipes[1].getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.frameBuffer}},{binding:1,resource:{buffer:this.reach}},{binding:2,resource:{buffer:this.vertices[1]}},{binding:3,resource:{buffer:this.motion}},{binding:4,resource:sceneView},{binding:5,resource:depthView},{binding:6,resource:reflectionView},{binding:7,resource:this.sceneSampler}]});
+  }
  }
  writeFrame(dt){
   const camera=riverCamera(this.camera,this.canvas.width||1,this.canvas.height||1),raw=new ArrayBuffer(FRAME_BYTES),f=new Float32Array(raw),u=new Uint32Array(raw);
+  const reflection=riverReflectionCamera(camera,this.canvas.width||1,this.canvas.height||1,this.metadata?.slope||0);
   f.set(camera.vp,0);f.set([...camera.eye,this.paused?0:dt],16);f.set([.40,.80,-.45,this.speed],20);f.set([this.width,this.depth,this.bank,this.roughness],24);
-  f.set([this.clarity,this.ripples,this.foam,this.showFlow?1:0],28);u.set([this.seed>>>0,this.variant>>>0,0,0],32);this.device.queue.writeBuffer(this.frameBuffer,0,raw);
+  f.set([this.clarity,this.ripples,this.foam,this.showFlow?1:0],28);u.set([this.seed>>>0,this.variant>>>0,this.canvas.width>>>0,this.canvas.height>>>0],32);f.set(reflection.vp,36);this.device.queue.writeBuffer(this.frameBuffer,0,raw);
+  f.set(reflection.vp,0);f.set([...reflection.eye,0],16);this.device.queue.writeBuffer(this.reflectionFrame,0,raw);
  }
  buildGeometry(pass){
   const counts=[Math.max(TERRAIN_VERTICES,TERRAIN_INDICES),Math.max(WATER_VERTICES,WATER_INDICES)];
@@ -92,9 +115,12 @@ export class RiverRenderer {
   const d=this.device,encoder=d.createCommandEncoder({label:'River view frame'}),compute=encoder.beginComputePass();
   if(this.dirty){this.buildGeometry(compute);this.dirty=false;}
   compute.setPipeline(this.flowPipe);compute.setBindGroup(0,this.flowBind);compute.dispatchWorkgroups(1);compute.end();
-  const pass=encoder.beginRenderPass({colorAttachments:[{view:this.context.getCurrentTexture().createView(),loadOp:'clear',storeOp:'store',clearValue:{r:.08,g:.13,b:.16,a:1}}],depthStencilAttachment:{view:this.depthTexture.createView(),depthLoadOp:'clear',depthStoreOp:'discard',depthClearValue:1}});
-  pass.setPipeline(this.skyPipe);pass.draw(3);
-  for(let i=0;i<2;i++){pass.setPipeline(this.renderPipes[i]);pass.setBindGroup(0,this.renderBinds[i]);pass.setIndexBuffer(this.indices[i],'uint32');pass.drawIndexed(i===0?TERRAIN_INDICES:WATER_INDICES);}
+  const opaque=encoder.beginRenderPass({label:'Riverbed and banks',colorAttachments:[{view:this.sceneTexture.createView(),loadOp:'clear',storeOp:'store',clearValue:{r:.08,g:.13,b:.16,a:1}}],depthStencilAttachment:{view:this.depthTexture.createView(),depthLoadOp:'clear',depthStoreOp:'store',depthClearValue:1}});
+  opaque.setPipeline(this.skyPipe);opaque.setBindGroup(0,this.skyBinds[0]);opaque.draw(3);opaque.setPipeline(this.renderPipes[0]);opaque.setBindGroup(0,this.renderBinds[0]);opaque.setIndexBuffer(this.indices[0],'uint32');opaque.drawIndexed(TERRAIN_INDICES);opaque.end();
+  const reflected=encoder.beginRenderPass({label:'Riverbank reflection',colorAttachments:[{view:this.reflectionTexture.createView(),loadOp:'clear',storeOp:'store',clearValue:{r:.08,g:.13,b:.16,a:1}}],depthStencilAttachment:{view:this.reflectionDepth.createView(),depthLoadOp:'clear',depthStoreOp:'discard',depthClearValue:1}});
+  reflected.setPipeline(this.skyPipe);reflected.setBindGroup(0,this.skyBinds[1]);reflected.draw(3);reflected.setPipeline(this.renderPipes[2]);reflected.setBindGroup(0,this.renderBinds[2]);reflected.setIndexBuffer(this.indices[0],'uint32');reflected.drawIndexed(TERRAIN_INDICES);reflected.end();
+  const pass=encoder.beginRenderPass({label:'Refractive river surface',colorAttachments:[{view:this.context.getCurrentTexture().createView(),loadOp:'clear',storeOp:'store',clearValue:{r:.08,g:.13,b:.16,a:1}}],depthStencilAttachment:{view:this.depthTexture.createView(),depthReadOnly:true}});
+  pass.setPipeline(this.compositePipe);pass.setBindGroup(0,this.compositeBind);pass.draw(3);pass.setPipeline(this.renderPipes[1]);pass.setBindGroup(0,this.renderBinds[1]);pass.setIndexBuffer(this.indices[1],'uint32');pass.drawIndexed(WATER_INDICES);
   pass.end();d.queue.submit([encoder.finish()]);this.inFlight++;d.queue.onSubmittedWorkDone().then(()=>{this.inFlight--;}).catch(()=>{this.inFlight--;});return true;
  }
 }
