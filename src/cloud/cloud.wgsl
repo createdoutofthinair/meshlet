@@ -91,7 +91,10 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  // taken before divergent branches so it remains valid in WebGPU shaders.
  let edgeWidth=max(.000001,fwidth(ray.y)*1.25);
  let groundCoverage=1.0-smoothstep(horizonDirection-edgeWidth,horizonDirection+edgeWidth,ray.y);
- if(ground.y>0.0 && ground.x>0.0){groundDistance=ground.x;}
+ // At sea level the near root is zero. It must occlude downward rays;
+ // otherwise they reach the cloud shell on the far side of the planet.
+ if(ground.y>0.0 && ground.x>=0.0){groundDistance=ground.x;}
+ if(origin.y<=.5 && ray.y<0.0){groundDistance=0.0;}
  let haze=smoothstep(.48,1.0,min(groundDistance,horizonDistance)/horizonDistance);
  let groundColor=mix(vec3<f32>(.045,.12,.19),vec3<f32>(.26,.49,.67),haze*.62)*mix(.06,1.0,day);
  color=mix(color,groundColor,groundCoverage);

@@ -14,3 +14,10 @@ test('stable near root retains sub-metre detail at planetary radius',()=>{
  const root=f(Math.sqrt(f(f(b*b)-c)));const far=f(-b-root);const near=f(c/far);
  assert.ok(Math.abs(near-1399.875)<.05,`near cloud shell was ${near}`);
 });
+
+test('downward surface rays terminate at the planet before the far-side clouds',()=>{
+ const ground=interval(0,-1,0);assert.equal(ground[0],0);
+ const outer=interval(0,-1,8000);assert.ok(outer[1]>1e7);
+ const groundDistance=ground[1]>0&&ground[0]>=0?ground[0]:Infinity;
+ assert.equal(Math.min(outer[1],groundDistance),0);
+});
