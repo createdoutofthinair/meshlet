@@ -78,6 +78,33 @@ fn roundedObjectField(p:vec3<f32>)->f32{
 fn roundedObjectNormal(p:vec3<f32>)->vec3<f32>{
  let e=.002;return normalize(vec3<f32>(roundedObjectField(p+vec3<f32>(e,0,0))-roundedObjectField(p-vec3<f32>(e,0,0)),roundedObjectField(p+vec3<f32>(0,e,0))-roundedObjectField(p-vec3<f32>(0,e,0)),roundedObjectField(p+vec3<f32>(0,0,e))-roundedObjectField(p-vec3<f32>(0,0,e))));
 }
+// The ray-march field is intentionally scaled down for safe tracing, so it
+// is not a metric distance. Project onto each actual rock surface before
+// comparing the ball radius; a bounding sphere is only a broad-phase test.
+fn rockGradient(p:vec3<f32>,seed:f32)->vec3<f32>{
+ let e=.004;
+ return vec3<f32>(rockField(p+vec3<f32>(e,0,0),seed)-rockField(p-vec3<f32>(e,0,0),seed),
+                  rockField(p+vec3<f32>(0,e,0),seed)-rockField(p-vec3<f32>(0,e,0),seed),
+                  rockField(p+vec3<f32>(0,0,e),seed)-rockField(p-vec3<f32>(0,0,e),seed))/(2.0*e);
+}
+fn rockContact(ball:FloatingBall,center:vec3<f32>,scale:f32,seed:f32)->FloatingBall{
+ var result=ball;let local=(ball.position.xyz-center)/scale;let radius=ball.position.w;
+ if(length(local-vec3<f32>(0.0,-.08,0.0))>1.4+radius/scale){return result;}
+ let initial=rockField(local,seed);var surface=local;
+ for(var step=0u;step<6u;step++){
+  let field=rockField(surface,seed);let grad=rockGradient(surface,seed);let g2=dot(grad,grad);
+  if(g2<.000001){break;}let offset=clamp(field/g2,-1.5,1.5);surface-=grad*offset;
+ }
+ let difference=local-surface;let distance=length(difference)*scale;
+ if(distance<radius || initial<0.0){
+  let grad=rockGradient(surface,seed);let g=length(grad);var normal=vec3<f32>(0.0,1.0,0.0);
+  if(g>.0001){normal=grad/g;}
+  let penetration=select(radius-distance,radius+distance,initial<0.0);
+  result.position=vec4<f32>(ball.position.xyz+normal*max(0.0,penetration),radius);
+  let vn=dot(ball.velocity.xyz,normal);if(vn<0.0){result.velocity=vec4<f32>(ball.velocity.xyz-normal*vn*1.15,0.0);}
+ }
+ return result;
+}
 // The bounded test bodies fit in one invocation: pair resolution is deterministic and
 // never reads another invocation's partially updated state.
 @compute @workgroup_size(1) fn updateBalls(){
@@ -95,7 +122,14 @@ fn roundedObjectNormal(p:vec3<f32>)->vec3<f32>{
  for(var iteration=0u;iteration<4u;iteration++){
   for(var i=0u;i<u32(params.viewport.w);i++){
    var ball=balls[i];let r=ball.position.w;if(r<=0.0){continue;}let lo=vec3<f32>(-.65,-.95,-.65);let hi=vec3<f32>(.65,.75,.65);
-   if(params.viewport.z>.5){
+   if(params.viewport.z>3.5){
+    for(var rock=0u;rock<4u;rock++){
+     let scale=.43+f32(rock%3u)*.035;
+     ball=rockContact(ball,rockCenter(rock),scale,params.eye.w+f32(rock)*71.0);
+    }
+   }else if(params.viewport.z>2.5){
+    ball=rockContact(ball,vec3<f32>(0.0),1.0,params.eye.w);
+   }else if(params.viewport.z>.5){
     let d=roundedObjectField(ball.position.xyz);if(d<r){let normal=roundedObjectNormal(ball.position.xyz);ball.position=vec4<f32>(ball.position.xyz+normal*(r-d),r);let vn=dot(ball.velocity.xyz,normal);if(vn<0.0){ball.velocity=vec4<f32>(ball.velocity.xyz-normal*vn*1.15,0.0);}}
    }else{
    let closest=clamp(ball.position.xyz,lo,hi);let delta=ball.position.xyz-closest;let d=length(delta);
