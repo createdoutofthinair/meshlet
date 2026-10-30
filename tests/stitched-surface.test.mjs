@@ -38,3 +38,12 @@ test('interior coordinates on stitched patches are covered by the local cell',()
   for(const hit of hits)assert.ok(Math.abs(value(hit)-value(local))<1e-9);
  }
 });
+
+test('direct regular-triangle weights match enumerated terrain triangles',()=>{
+ for(let y=0;y<16;y++)for(let x=0;x<16;x++)for(const [u,v] of [[0,0],[.25,.25],[.5,.5],[.75,.25],[.75,.75],[1,1]]){
+  const q=[x+u,y+v],a=u+v>1+1e-6?[[x+1,y],[x+1,y+1],[x,y+1]]:[[x,y],[x+1,y],[x,y+1]];
+  const weights=u+v>1+1e-6?[1-v,u+v-1,1-u]:[1-u-v,u,v];
+  const val=p=>Math.sin(p[0]*.7+p[1]*.3),expected=a.reduce((sum,p,i)=>sum+weights[i]*val(p),0);
+  const hits=containing(q,0);assert.ok(hits.length);for(const h of hits)assert.ok(Math.abs(h.vertices.reduce((sum,p,i)=>sum+h.weights[i]*val(p),0)-expected)<1e-9);
+ }
+});

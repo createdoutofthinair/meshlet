@@ -25,6 +25,23 @@ fn sampleSurfaceVertex(slot:u32,coord:vec2<f32>,mask:u32)->PlanetVertex{
  // Collapsed vertices only affect triangles next to an outer edge. Interior
  // cells use the regular containing triangles even on a stitched patch.
  let interior=all(base>=vec2<i32>(2)) && all(base<=vec2<i32>(13));
+ if(mask==0u || interior){
+  let cell=vec2<u32>(base);let f=q-vec2<f32>(cell);
+  var ia=cell;var ib=cell+vec2<u32>(1u,0u);var ic=cell+vec2<u32>(0u,1u);
+  var u=f.x;var v=f.y;
+  if(f.x+f.y>1.000001){
+   ia=cell+vec2<u32>(1u,0u);ib=cell+vec2<u32>(1u,1u);ic=cell+vec2<u32>(0u,1u);
+   u=f.x+f.y-1.0;v=1.0-f.x;
+  }
+  let pa=vertices[slot*GRID_COUNT+(ia.y+2u)*GRID+ia.x+2u];
+  let pb=vertices[slot*GRID_COUNT+(ib.y+2u)*GRID+ib.x+2u];
+  let pc=vertices[slot*GRID_COUNT+(ic.y+2u)*GRID+ic.x+2u];
+  var result:PlanetVertex;
+  result.position=pa.position+(pb.position-pa.position)*u+(pc.position-pa.position)*v;
+  result.normal=pa.normal+(pb.normal-pa.normal)*u+(pc.normal-pa.normal)*v;
+  result.surface=pa.surface+(pb.surface-pa.surface)*u+(pc.surface-pa.surface)*v;
+  return result;
+ }
  let radius=select(0,1,mask!=0u && !interior);
  for(var dy=-radius;dy<=radius;dy++){for(var dx=-radius;dx<=radius;dx++){
   let c=base+vec2<i32>(dx,dy);
