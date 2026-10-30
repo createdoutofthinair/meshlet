@@ -31,6 +31,14 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
 // Smooth union of overlapping ellipsoidal lobes forms an irregular rounded
 // test object. The same distance field drives rendering and ball contacts.
 fn roundedObjectField(p:vec3<f32>)->f32{
+ // Seeded irregular boulder. A conservative step scale keeps ray marching stable.
+ if(params.viewport.z>2.5){
+  let seed=params.eye.w;let q=p-vec3<f32>(0.0,-.08,0.0);
+  let warp=.075*sin(q.x*3.9+seed*.13)*sin(q.y*4.2+seed*.17)*cos(q.z*3.6-seed*.11)
+          +.035*sin(q.x*8.0+q.z*3.2+seed*.07)*cos(q.y*6.7-q.z*4.4+seed*.19);
+  let shape=length(q/vec3<f32>(.86,.78,.73))-.95+warp;
+  return shape*.36;
+ }
  // Upright torus: its open center is visible above and below the waterline.
  if(params.viewport.z>1.5){return length(vec2<f32>(length(p.xy)-.62,p.z))-.24;}
  let a=length((p-vec3<f32>(-.20,-.10,0.0))/vec3<f32>(.78,.90,.62))-.90;
@@ -180,6 +188,29 @@ fn cubeFoamDrain(position:vec2<f32>,faceNormal:vec2<f32>,height:f32,faceCoord:f3
 fn foamBreakup(uv:vec2<f32>)->f32{
  return noise(uv)*.40+noise(uv*2.4+vec2<f32>(4.2,6.1))*.30+noise(uv*5.3+vec2<f32>(8.1,4.9))*.20+noise(uv*10.0+vec2<f32>(2.1,11.0))*.10;
 }
+// Seamless world-space procedural height field, sampled directly at the
+// visible surface; the small-scale relief perturbs normals, not silhouette.
+fn rockHeight(p:vec3<f32>)->f32{
+ let seed=params.eye.w;let q=p+vec3<f32>(seed*.013,seed*.021,seed*.017);
+ let broad=(noise(q.xy*6.0)+noise(q.yz*6.0+vec2<f32>(4.2,1.3))+noise(q.zx*6.0+vec2<f32>(2.7,9.1)))/3.0;
+ let fine=(noise(q.xy*24.0)+noise(q.yz*24.0+vec2<f32>(7.3,2.9))+noise(q.zx*24.0+vec2<f32>(3.1,4.6)))/3.0;
+ let grain=(noise(q.xy*68.0)+noise(q.yz*68.0+vec2<f32>(3.3,6.2))+noise(q.zx*68.0+vec2<f32>(8.2,1.7)))/3.0;
+ return broad*.045+fine*.014+grain*.003;
+}
+fn rockMaterial(p:vec3<f32>,normal:vec3<f32>,light:vec3<f32>)->vec3<f32>{
+ let e=.003;let h=rockHeight(p);
+ let grad=vec3<f32>(rockHeight(p+vec3<f32>(e,0,0))-h,rockHeight(p+vec3<f32>(0,e,0))-h,rockHeight(p+vec3<f32>(0,0,e))-h)/e;
+ let n=normalize(normal-(grad-normal*dot(grad,normal)));
+ let mineral=noise(p.xz*5.0+vec2<f32>(params.eye.w*.03,3.0))*.5+noise(p.xy*10.0+vec2<f32>(2.7,params.eye.w*.02))*.5;
+ let albedo=mix(vec3<f32>(.095,.105,.10),vec3<f32>(.32,.30,.26),smoothstep(.24,.76,mineral));
+ let view=normalize(params.eye.xyz-p);let halfVec=normalize(light+view);
+ let nl=max(dot(n,light),0.0);let nv=max(dot(n,view),.001);let nh=max(dot(n,halfVec),0.0);let vh=max(dot(view,halfVec),0.0);
+ let roughness=.76;let a=roughness*roughness;let a2=a*a;let denom=nh*nh*(a2-1.0)+1.0;
+ let distribution=a2/(3.14159265*denom*denom);let k=(roughness+1.0)*(roughness+1.0)/8.0;
+ let geometry=(nl/(nl*(1.0-k)+k))*(nv/(nv*(1.0-k)+k));let f=.04+.96*pow(1.0-vh,5.0);
+ let spec=distribution*geometry*f/max(.004,4.0*nl*nv);
+ return albedo*(.24+nl*.76)+vec3<f32>(1.0,.91,.79)*spec*nl;
+}
 fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let q=abs(p-vec3<f32>(0.0,-.1,0.0))/vec3<f32>(.65,.85,.65);var n=vec3<f32>(0.0,0.0,sign(p.z));
  if(q.x>q.y&&q.x>q.z){n=vec3<f32>(sign(p.x),0.0,0.0);}else if(q.y>q.z){n=vec3<f32>(0.0,sign(p.y+.1),0.0);}
@@ -191,6 +222,7 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let tiles=floor((coord.x+3.0)*4.0)+floor((coord.y+3.0)*4.0);
  let pattern=select(.68,1.0,fract(tiles*.5)<.25);
  var color=vec3<f32>(.80,.48,.23)*lit*pattern;
+ if(params.viewport.z>2.5){color=rockMaterial(p,n,light);}
  // A translucent wet film and sparse draining rivulets respond only to
  // nearby impacts. The underlying cube remains visible through the film.
  let time=params.settings.x;
