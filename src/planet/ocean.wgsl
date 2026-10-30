@@ -56,11 +56,11 @@ fn oceanIntersection(radial:vec3<f32>,height:f32,ray:vec3<f32>)->vec2<f32>{retur
   // sphere intersection is outside the basin, keep the terrain edge color.
   if(signedDepth<0.0){discard;}
   hit=oceanIntersection(radial,height,ray);if(hit.y<.5){discard;}
-  direction=normalize(radial+(radial*height+ray*hit.x)/frame.settings.x);
-  coast=naturalCoast(direction,frame.counts.z);if(coast.x>=0.0){discard;}
  }
  let relative=ray*hit.x;let clip=frame.viewProjection*vec4<f32>(relative,1.0);let depth=clip.z/clip.w;if(depth<=0.0 || depth>1.0){discard;}
  if(!isLake && signedDepth>0.0 && depth<=signedDepth){discard;}
+ // Reject occluded ocean before evaluating the procedural coastline.
+ if(!isLake){direction=normalize(radial+(radial*height+ray*hit.x)/frame.settings.x);coast=naturalCoast(direction,frame.counts.z);if(coast.x>=0.0){discard;}}
  let deep=vec3<f32>(0.012,0.055,0.092);let shallow=vec3<f32>(0.025,0.17,0.23);
  var base=mix(deep,shallow,smoothstep(-4.0,0.0,min(coast.y,0.0)));
  if(isLake){base=vec3<f32>(.025,.16,.19);}
