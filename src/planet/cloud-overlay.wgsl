@@ -1,4 +1,26 @@
 @group(0) @binding(1) var sceneDepth:texture_depth_2d;
+// A filtered far-field approximation: resolve large weather systems and
+// fractional coverage without evaluating subpixel cloud erosion in orbit.
+fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>)->vec4<f32>{
+ let weather=weatherField(point);
+ let global=params.east.xyz*point.x+params.radial.xyz*(PLANET_RADIUS+point.y)+params.north.xyz*point.z;
+ let angle=params.sky.x*params.cloud.y/PLANET_RADIUS;
+ let rotated=vec3<f32>(global.x*cos(angle)+global.z*sin(angle),global.y,-global.x*sin(angle)+global.z*cos(angle));
+ let seed=params.cloud.z;let q=rotated*.00002+vec3<f32>(seed*.017,seed*.021,seed*.013);
+ let shape=cloudNoise(q)*.68+cloudNoise(q*2.1+vec3<f32>(7.0,3.0,13.0))*.32;
+ let humidity=smoothstep(.31,.67,weather.x);
+ let coverage=clamp(params.sky.w*.45+humidity*.72-.18,0.0,1.0);
+ let threshold=mix(.74,.31,coverage);
+ let fractional=smoothstep(threshold-.12,threshold+.22,shape);
+ let opacity=clamp(fractional*(1.0-exp(-max(span,0.0)/5000.0))*params.cloud.x*smoothstep(0.0,.08,params.sky.w),0.0,.95);
+ let up=normalize(vec3<f32>(point.x,PLANET_RADIUS+point.y,point.z));let elevation=dot(up,sun);
+ let day=atmosphereDaylight(elevation);let twilight=atmosphereTwilight(elevation);
+ let cool=mix(vec3<f32>(.018,.025,.05),vec3<f32>(.24,.31,.39),day);
+ let warm=mix(vec3<f32>(1.0,.92,.80),vec3<f32>(1.0,.32,.12),twilight*.85)*max(.035,day+twilight*.30);
+ let phase=.55+.45*pow(max(dot(ray,sun),0.0),6.0);
+ let color=mix(cool,warm,clamp((.48+.34*shape)*phase,0.0,1.0));
+ return vec4<f32>(color*opacity,opacity);
+}
 @fragment fn planetCloud(input:Screen)->@location(0) vec4<f32>{
  let uv=vec2<f32>(input.pos.x/params.view.x*2.0-1.0,1.0-input.pos.y/params.view.y*2.0);
  let worldRay=normalize(params.forward.xyz+params.right.xyz*uv.x*params.forward.w+params.up.xyz*uv.y*params.right.w);
@@ -22,8 +44,13 @@
   var start=max(0.0,outer.x);var end=min(outer.y,limit);
   if(inner.y>inner.x){if(inner.x>start){end=min(end,inner.x);}else if(inner.y>start){start=inner.y;}}
   if(end>start){
-   // Long, grazing rays need smaller steps than short vertical views.
    let span=end-start;
+   // Blend representations across altitude so the handoff does not pop.
+   let farWeight=smoothstep(100000.0,500000.0,origin.y);
+   var distant=vec4<f32>(0.0);
+   if(farWeight>0.0){distant=orbitalCloud(origin+ray*((start+end)*.5),span,ray,sun);}
+   if(farWeight<.999){
+   // Long, grazing rays need smaller steps than short vertical views.
    let targetSteps=max(mix(48.0,96.0,smoothstep(12000.0,100000.0,span)),span/1800.0);
    let steps=u32(max(16.0,min(144.0,targetSteps)*params.atmosphere.w));
    let stepSize=(end-start)/f32(steps);let weather=weatherField(origin+ray*((start+end)*.5));
@@ -57,6 +84,8 @@
      light+=transmission*alpha*illumination;transmission*=1.0-alpha;
     }
    }
+   }
+   if(farWeight>0.0){light=mix(light,distant.rgb,farWeight);transmission=mix(transmission,1.0-distant.a,farWeight);}
   }
  }
  // Preserve cloud coverage up to the visible horizon. The actual depth
