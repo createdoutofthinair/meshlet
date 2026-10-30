@@ -164,12 +164,13 @@ fn cubeFoamDrain(position:vec2<f32>,faceNormal:vec2<f32>,height:f32,faceCoord:f3
    let seed=hash(vec2<f32>(cell+variant*37.0,18.7+f32(i)*.9));let shift=.18+.64*seed;
    let facing=smoothstep(.05,.55,dot(faceNormal,delta)/max(.001,dist));let near=1.0-smoothstep(1.5,4.0,dist);
    let surge=(.25+.08*seed)*smoothstep(0.0,.38,elapsed);
-   let drainage=max(0.0,elapsed-.42)*(.045+.022*seed);
+   let drainage=max(0.0,elapsed-.26)*(.15+.07*seed);
    let head=.03+surge-drainage;
    let waviness=(noise(vec2<f32>(height*14.0,cell+seed))-.5)*.20;
    let width=.20+.16*seed;let across=1.0-smoothstep(width,width+.16,abs(local-shift+waviness));
    let length=.08+.12*clamp(elapsed,0.0,1.0);let vertical=exp(-pow((height-head)/length,2.0));
-   let fade=smoothstep(0.0,.15,elapsed)*(1.0-smoothstep(2.8,4.8,elapsed))*smoothstep(-.03,.025,height);
+   let lowerEdge= -.11+.07*noise(vec2<f32>(faceCoord*11.0+variant*13.0,seed*5.0));
+   let fade=smoothstep(0.0,.15,elapsed)*(1.0-smoothstep(2.8,4.8,elapsed))*smoothstep(lowerEdge-.035,lowerEdge+.035,height);
    result=max(result,across*vertical*fade*facing*near);
   }
  }
@@ -197,7 +198,9 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  // wave height so adhered water does not stretch and bounce with ripples.
  let height=p.y;
  let faceCoord=select(select(p.x,p.z,abs(n.x)>.5),atan2(p.z,p.x)*.45,params.viewport.z>.5);let response=cubeImpactWash(p.xz,n.xz,time);
- let side=select(select(1.0,0.0,abs(n.y)>.5),smoothstep(.15,.55,length(n.xz)),params.viewport.z>.5);let band=smoothstep(-.025,.02,height)*(1.0-smoothstep(.12,.36,height));
+ let side=select(select(1.0,0.0,abs(n.y)>.5),smoothstep(.15,.55,length(n.xz)),params.viewport.z>.5);
+ let lowerEdge= -.08+.07*noise(vec2<f32>(faceCoord*9.0,3.7))+.025*noise(vec2<f32>(faceCoord*24.0,8.1));
+ let band=smoothstep(lowerEdge-.035,lowerEdge+.035,height)*(1.0-smoothstep(.12,.36,height));
  let breakup=noise(vec2<f32>(faceCoord*18.0,p.y*18.0));
  let drain=cubeFoamDrain(p.xz,n.xz,height,faceCoord,time);
  let film=clamp((band*.50*response+drain*.80)*side,0.0,.90);
