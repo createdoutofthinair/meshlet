@@ -22,7 +22,10 @@ fn sampleSurfaceVertex(slot:u32,coord:vec2<f32>,mask:u32)->PlanetVertex{
  }
  let base=vec2<i32>(min(floor(q),vec2<f32>(f32(CELLS-1u))));
  let offsets=array<vec2<u32>,6>(vec2<u32>(0u,0u),vec2<u32>(1u,0u),vec2<u32>(0u,1u),vec2<u32>(1u,0u),vec2<u32>(1u,1u),vec2<u32>(0u,1u));
- let radius=select(0,1,mask!=0u);
+ // Collapsed vertices only affect triangles next to an outer edge. Interior
+ // cells use the regular containing triangles even on a stitched patch.
+ let interior=all(base>=vec2<i32>(2)) && all(base<=vec2<i32>(13));
+ let radius=select(0,1,mask!=0u && !interior);
  for(var dy=-radius;dy<=radius;dy++){for(var dx=-radius;dx<=radius;dx++){
   let c=base+vec2<i32>(dx,dy);
   if(any(c<vec2<i32>(0))||any(c>=vec2<i32>(i32(CELLS)))){continue;}

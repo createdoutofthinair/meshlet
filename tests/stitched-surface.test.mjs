@@ -29,3 +29,12 @@ test('collapsed triangles cover the grid and are reachable from adjacent cells',
   for(const h of hits){const z=h.vertices.reduce((sum,p,i)=>sum+h.weights[i]*(2*p[0]-3*p[1]+7),0);assert.ok(Math.abs(z-(2*q[0]-3*q[1]+7))<1e-8);}
  }
 });
+
+test('interior coordinates on stitched patches are covered by the local cell',()=>{
+ for(let mask=0;mask<16;mask++)for(let y=2;y<=13;y++)for(let x=2;x<=13;x++)for(const [u,v] of [[.25,.25],[.75,.25],[.25,.75],[.75,.75]]){
+  const q=[x+u,y+v],hits=containing(q,mask),local=hits.find(h=>h.x===x&&h.y===y);
+  assert.ok(local,`missing local cell for ${mask} at ${q}`);
+  const value=h=>h.vertices.reduce((sum,p,i)=>sum+h.weights[i]*Math.sin(p[0]*.7+p[1]*.3),0);
+  for(const hit of hits)assert.ok(Math.abs(value(hit)-value(local))<1e-9);
+ }
+});
