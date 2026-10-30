@@ -3,16 +3,15 @@
 // fractional coverage without evaluating subpixel cloud erosion in orbit.
 fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>)->vec4<f32>{
  let weather=weatherField(point);
- let global=params.east.xyz*point.x+params.radial.xyz*(PLANET_RADIUS+point.y)+params.north.xyz*point.z;
- let angle=params.sky.x*params.cloud.y/PLANET_RADIUS;
- let rotated=vec3<f32>(global.x*cos(angle)+global.z*sin(angle),global.y,-global.x*sin(angle)+global.z*cos(angle));
- let seed=params.cloud.z;let q=rotated*.00002+vec3<f32>(seed*.017,seed*.021,seed*.013);
- let shape=cloudNoise(q)*.68+cloudNoise(q*2.1+vec3<f32>(7.0,3.0,13.0))*.32;
- let humidity=smoothstep(.31,.67,weather.x);
- let coverage=clamp(params.sky.w*.45+humidity*.72-.18,0.0,1.0);
- let threshold=mix(.74,.31,coverage);
- let fractional=smoothstep(threshold-.12,threshold+.22,shape);
- let opacity=clamp(fractional*(1.0-exp(-max(span,0.0)/5000.0))*params.cloud.x*smoothstep(0.0,.08,params.sky.w),0.0,.95);
+ // The same density field and weather drive both representations. Four
+ // stratified volume samples approximate its integrated coverage in orbit.
+ var density=0.0;
+ for(var i=0u;i<4u;i++){
+  let samplePoint=point+ray*((f32(i)-1.5)*span*.25);
+  density+=cloudDensity(samplePoint,weather,0.0)*.25;
+ }
+ let opacity=1.0-exp(-density*max(span,0.0)*.0009);
+ let shape=clamp(density,0.0,1.0);
  let up=normalize(vec3<f32>(point.x,PLANET_RADIUS+point.y,point.z));let elevation=dot(up,sun);
  let day=atmosphereDaylight(elevation);let twilight=atmosphereTwilight(elevation);
  let cool=mix(vec3<f32>(.018,.025,.05),vec3<f32>(.24,.31,.39),day);
@@ -46,7 +45,7 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>)->vec4<f32>
   if(end>start){
    let span=end-start;
    // Blend representations across altitude so the handoff does not pop.
-   let farWeight=smoothstep(100000.0,500000.0,origin.y);
+   let farWeight=smoothstep(50000.0,900000.0,origin.y);
    var distant=vec4<f32>(0.0);
    if(farWeight>0.0){distant=orbitalCloud(origin+ray*((start+end)*.5),span,ray,sun);}
    if(farWeight<.999){

@@ -1,4 +1,4 @@
-struct CloudParams{view:vec4<f32>,sky:vec4<f32>,cloud:vec4<f32>};
+struct CloudParams{view:vec4<f32>,sky:vec4<f32>,cloud:vec4<f32>,shape:vec4<f32>};
 @group(0) @binding(0) var<uniform> params:CloudParams;
 struct Screen{@builtin(position) pos:vec4<f32>};
 @vertex fn vertex(@builtin(vertex_index) i:u32)->Screen{
@@ -64,7 +64,7 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  if(profile<=0.0 || params.sky.w<=0.0){return 0.0;}
  let seed=params.cloud.z;let angle=params.sky.x*params.cloud.y/PLANET_RADIUS;let global=vec3<f32>(p.x,PLANET_RADIUS+p.y,p.z);
  let rotated=vec3<f32>(global.x*cos(angle)+global.z*sin(angle),global.y,-global.x*sin(angle)+global.z*cos(angle));
- let q=rotated*.00028+vec3<f32>(seed*.071,seed*.039,seed*.053);
+ let q=rotated*(.00028/max(.5,params.shape.x))+vec3<f32>(seed*.071,seed*.039,seed*.053);
  let coarse=cloudNoise(q*.16+vec3<f32>(8.0,14.0,3.0));
  let baseShape=cloudNoise(q)*.68+cloudNoise(q*2.03+vec3<f32>(12.0,3.0,6.0))*.32;
  // Filter the base shape as well as erosion when it becomes subpixel.

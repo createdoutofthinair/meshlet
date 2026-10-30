@@ -233,7 +233,7 @@ for(const [index,name] of tabNames.entries()){
 const controls=[
  ['sun-azimuth','sunAzimuth',1,value=>`${value}°`,true],['sun-elevation','sunElevation',1,value=>`${value}°`,true],
  ['sky-strength','skyStrength',.01,value=>`${value.toFixed(2)}×`],['mie-strength','mieStrength',.01,value=>`${value.toFixed(2)}×`],['halo-strength','haloStrength',.01,value=>`${value.toFixed(2)}×`],
- ['cloud-coverage','cloudCoverage',.01,value=>`${Math.round(value*100)}%`],['cloud-density','cloudDensity',.01,value=>`${value.toFixed(2)}×`],['cloud-speed','cloudSpeed',1,value=>`${value} m/s`]
+ ['cloud-coverage','cloudCoverage',.01,value=>`${Math.round(value*100)}%`],['cloud-size','cloudSize',.01,value=>`${value.toFixed(2)}×`],['cloud-density','cloudDensity',.01,value=>`${value.toFixed(2)}×`],['cloud-speed','cloudSpeed',1,value=>`${value} m/s`]
 ];
 for(const [id,property,factor,format,manualSun] of controls){
  $(id).addEventListener('input',()=>{const value=Number($(id).value)*factor;$(`${id}-value`).textContent=format(value);if(!renderer)return;renderer[property]=value;if(manualSun){renderer.followSun=false;el['sun-follow'].checked=false;}});
