@@ -155,11 +155,11 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
  // Near the ground, calculate distance to the current surface altitude on
  // every front-facing cube face. Limiting this to the face under the camera
  // makes a neighboring face appear kilometers away on high mountains.
- const basis=FACE_BASES[node.face],denom=dot(camera.radial,basis.c);
- if(camera.clearance<50&&denom>0){
+ const radial=camera.selection.faceRadial[node.face];
+ if(camera.clearance<50&&radial.denom>0){
   const half=node.span/2;
-  const u=Math.max(node.u-half,Math.min(node.u+half,dot(camera.radial,basis.u)/denom));
-  const v=Math.max(node.v-half,Math.min(node.v+half,dot(camera.radial,basis.v)/denom));
+  const u=Math.max(node.u-half,Math.min(node.u+half,radial.u));
+  const v=Math.max(node.v-half,Math.min(node.v+half,radial.v));
   const nearest=faceDirection(node.face,u,v).map(x=>x*(RADIUS_KM+camera.altitude-camera.clearance));
   distance=Math.min(distance,length(sub(nearest,camera.eye)));
  }
@@ -200,6 +200,7 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
  budget=Math.max(6,Math.floor(budget));maxDepth=Math.min(MAX_DEPTH,Math.max(0,maxDepth));
  const eyeLength=length(camera.eye),inner=RADIUS_KM-HEIGHT_LIMIT_KM,outer=RADIUS_KM+HEIGHT_LIMIT_KM;
  const selection={eyeLength,inner,horizon:eyeLength>inner?Math.acos(Math.min(1,inner/eyeLength))+Math.acos(inner/outer):0,horizonCutoffs:new Map(),frustumX:Math.hypot(1,camera.tanX),frustumY:Math.hypot(1,camera.tanY)};
+ selection.faceRadial=FACE_BASES.map(basis=>{const denom=dot(camera.radial,basis.c);return {denom,u:denom>0?dot(camera.radial,basis.u)/denom:0,v:denom>0?dot(camera.radial,basis.v)/denom:0};});
  camera={...camera,selection,facing:directionToFace(camera.eye),focus:directionToFace(camera.focusDirection||camera.eye)};
  let leaves=new Map();for(let face=0;face<6;face++){const n=makeTile(face,0,0,0);leaves.set(n.key,n);}
  // A node's projected priority cannot change during one selection: the camera,
