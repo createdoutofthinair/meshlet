@@ -9,7 +9,10 @@ self.onmessage=({data})=>{
  if(data.errorEstimates!=null)cachedErrors=data.errorEstimates;
  if(data.snapshotPresent===true)cachedSelection={previousLeaves:data.options.previousLeaves,previousSplits:data.options.previousSplits,previousPatches:data.previousPatches,signatures:transitionSignatures(data.previousPatches||[])};
  const snapshot=data.snapshotPresent===true||data.snapshotPresent===false?cachedSelection:{previousLeaves:data.options.previousLeaves,previousSplits:data.options.previousSplits,previousPatches:data.previousPatches};
- const result=selectPatches(data.camera,{...data.options,previousLeaves:snapshot.previousLeaves,previousSplits:snapshot.previousSplits,errorEstimates:data.errorEstimates??data.options.errorEstimates??cachedErrors});
+ const result=selectPatches(data.camera,{...data.options,previousLeaves:snapshot.previousLeaves,previousSplits:snapshot.previousSplits,errorEstimates:data.errorEstimates??data.options.errorEstimates??cachedErrors,unchangedPatches:data.allowUnchanged?snapshot.previousPatches:null});
+ if(result.unchanged){
+  self.postMessage({id:data.id,key:data.key,camera:data.camera,...result,selectionMs:performance.now()-start});return;
+ }
  const signatures=transitionSignatures(result.visible),previous=snapshot.previousPatches||[];
  // A complete unchanged covering tree needs neither slot allocation nor a
  // replacement tree sent back through structured cloning.

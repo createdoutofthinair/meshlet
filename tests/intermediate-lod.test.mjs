@@ -60,3 +60,12 @@ test('stable target covering returns the same topology on repeated selection',()
  const repeated=selectPatches(camera,{...options,previousLeaves:first.leaves});
  assert.deepEqual(repeated,first);verify(first.leaves,repeated.leaves);
 });
+
+test('compact unchanged covering skips stitch graph only for a complete resident tree',()=>{
+ const camera=planetCamera({mode:'flight',altitude:500,longitude:.8,latitude:.4},960,600),options={budget:120,pixelSize:14,includeHidden:true};
+ const first=selectPatches(camera,options);
+ const compact=selectPatches(camera,{...options,previousLeaves:first.leaves,unchangedPatches:first.visible});
+ assert.deepEqual(compact,{unchanged:true,leafCount:first.leaves.length,deepest:first.deepest});
+ const partial=selectPatches(camera,{...options,previousLeaves:first.leaves,unchangedPatches:first.visible.slice(1)});
+ assert.equal(partial.unchanged,undefined);assert.deepEqual(partial,first);
+});

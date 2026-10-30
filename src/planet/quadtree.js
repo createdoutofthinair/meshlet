@@ -161,7 +161,7 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
  const errorPriority=projectedError*pixelSize/.5;
  return Math.max(projected,Math.min(errorPriority,projected*4))*localFocus*viewPriority;
 }
-export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10,previousSplits=null,hysteresis=.1,errorEstimates=null,previousLeaves=null,includeHidden=false}={}) {
+export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10,previousSplits=null,hysteresis=.1,errorEstimates=null,previousLeaves=null,includeHidden=false,unchangedPatches=null}={}) {
  budget=Math.max(6,Math.floor(budget));maxDepth=Math.min(MAX_DEPTH,Math.max(0,maxDepth));
  const eyeLength=length(camera.eye),inner=RADIUS_KM-HEIGHT_LIMIT_KM,outer=RADIUS_KM+HEIGHT_LIMIT_KM;
  const selection={eyeLength,inner,horizon:eyeLength>inner?Math.acos(Math.min(1,inner/eyeLength))+Math.acos(inner/outer):0,frustumX:Math.hypot(1,camera.tanX),frustumY:Math.hypot(1,camera.tanY)};
@@ -191,6 +191,13 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
  if(previousLeaves?.length){
   const unchanged=previousLeaves.length===leaves.size&&previousLeaves.every(node=>leaves.has(node.key));
   if(!unchanged)leaves=new Map(intermediateLeaves(previousLeaves,[...leaves.values()],budget,priority).map(p=>[p.key,p]));
+ }
+ // For a complete resident covering, the same leaf keys imply the same
+ // deterministic stitch graph. Skip rebuilding it when the caller retains
+ // the previous patches and explicitly accepts a compact unchanged result.
+ if(includeHidden&&previousLeaves?.length&&unchangedPatches?.length===leaves.size&&previousLeaves.length===leaves.size&&
+  previousLeaves.every(node=>leaves.has(node.key))&&unchangedPatches.every(node=>leaves.has(node.key))){
+  return {unchanged:true,leafCount:leaves.size,deepest:Math.max(...previousLeaves.map(node=>node.level),0)};
  }
  const all=[...leaves.values()];
  const visible=[];
