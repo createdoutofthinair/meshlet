@@ -76,7 +76,12 @@ export function intermediateLeaves(previous,target,budget,priority=()=>0){
   for(let level=node.level;level>=0;level--){const scale=2**(node.level-level);if(desired.has(`${node.face}/${level}/${Math.floor(node.x/scale)}/${Math.floor(node.y/scale)}`))return true;}
   return false;
  };
- const parents=new Map();for(const n of previous)if(n.level){const p=makeTile(n.face,n.level-1,Math.floor(n.x/2),Math.floor(n.y/2));parents.set(p.key,p);}
+ // Siblings share a parent. Construct its spherical geometry only once,
+ // rather than repeating that work for each child in the previous tree.
+ const parents=new Map();for(const n of previous)if(n.level){
+  const level=n.level-1,x=Math.floor(n.x/2),y=Math.floor(n.y/2),key=`${n.face}/${level}/${x}/${y}`;
+  if(!parents.has(key))parents.set(key,makeTile(n.face,level,x,y));
+ }
  for(const p of [...parents.values()].sort((a,b)=>b.level-a.level)){
   if(!coveredByTarget(p))continue;
   const keys=[0,1,2,3].map(i=>`${p.face}/${p.level+1}/${p.x*2+i%2}/${p.y*2+(i>>1)}`);
