@@ -86,6 +86,9 @@ export function intermediateLeaves(previous,target,budget,priority=()=>0){
  }
  const limit=Math.max(6,Math.floor(budget),previous.length);
  for(const node of [...previous].filter(n=>wantsSplit.has(n.key)).sort((a,b)=>priority(b)-priority(a))){
+  // Every successful split adds three leaves. Once even one split cannot
+  // fit, scanning and balancing the remaining candidates cannot make progress.
+  if(leaves.size+3>limit)break;
   if(!leaves.has(node.key))continue;
   // Plan every coarser balancing dependency before modifying the tree. This
   // retains atomic failure without copying the entire leaf map per candidate.
