@@ -21,3 +21,18 @@ test('downward surface rays terminate at the planet before the far-side clouds',
  const groundDistance=ground[1]>0&&ground[0]>=0?ground[0]:Infinity;
  assert.equal(Math.min(outer[1],groundDistance),0);
 });
+
+
+test('the horizon remains open to nearby clouds and closes at the rendered ground',()=>{
+ // At the surface, horizontal rays reach the cloud base; an artificial
+ // angular fade would remove those clouds and leave a visible empty strip.
+ const cloudBase=interval(1.7,0,1500);assert.ok(cloudBase[1]>100000&&cloudBase[1]<200000);
+ const groundDown=interval(1.7,-.01,0);assert.ok(groundDown[0]>0&&groundDown[0]<cloudBase[1]);
+ const skyUp=interval(1.7,.01,0);assert.ok(skyUp[1]<0);
+});
+
+test('the overlay uses rendered depth without an artificial horizon cloud gap',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const shader=await readFile(new URL('../src/planet/cloud-overlay.wgsl',import.meta.url),'utf8');
+ assert.match(shader,/textureLoad\(sceneDepth/);assert.match(shader,/ground\.x>=0\.0/);assert.doesNotMatch(shader,/horizonFilter/);
+});

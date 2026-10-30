@@ -12,7 +12,10 @@
  if(depth>0.0){sceneDistance=params.up.w*1000.0/(depth*max(.001,dot(worldRay,params.forward.xyz)));}
  var limit=sceneDistance;
  let ground=sphereInterval(origin.y,ray,0.0);
- if(params.sun.w>0.5 && ground.x>0.0){limit=min(limit,ground.x);}
+ // The sphere is only an occluder for the ocean. At sea level its near
+ // intersection is exactly zero; include it to prevent far-side clouds.
+ if(params.sun.w>0.5 && ground.y>0.0 && ground.x>=0.0){limit=min(limit,ground.x);}
+ if(params.sun.w>0.5 && origin.y<=0.5 && ray.y<0.0){limit=0.0;}
  let outer=sphereInterval(origin.y,ray,8000.0);let inner=sphereInterval(origin.y,ray,1500.0);
  var transmission=1.0;var light=vec3<f32>(0.0);
  if(params.sky.w>0.001 && params.cloud.x>0.001 && outer.y>0.0 && outer.y>outer.x){
@@ -43,13 +46,9 @@
    }
   }
  }
- // At low altitude, the cloud shell meets the planetary horizon at a very
- // shallow angle. Filter its coverage there to avoid a sharp marching cutoff.
+ // Preserve cloud coverage up to the visible horizon. The actual depth
+ // and sphere intersections already stop the march at the surface.
  let altitude=max(origin.y,0.0);
- let horizon= -sqrt(altitude*(2.0*PLANET_RADIUS+altitude))/(PLANET_RADIUS+altitude);
- let lowView=1.0-smoothstep(1200.0,2200.0,altitude);
- let horizonFilter=mix(1.0,smoothstep(horizon-.002,horizon+.035,ray.y),lowView);
- light*=horizonFilter;transmission=1.0-(1.0-transmission)*horizonFilter;
  let alpha=1.0-transmission;
  let sky=atmosphereSky(ray,sun,vec3<f32>(0,1,0),origin.y);
  if(depth==0.0){
