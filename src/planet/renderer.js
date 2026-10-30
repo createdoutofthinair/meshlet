@@ -206,7 +206,7 @@ export class PlanetRenderer {
  }
  resetPatchCache(){
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
-  this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;this.patchMetadataCache=new WeakMap();
+  this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;this.patchMetadataCache=new WeakMap();this.uploadedPatchEye=null;
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
   this.transitionErrors.clear();this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
   this.selectionResult=null;this.selectionRequest=null;this.reconcileSelection=false;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
@@ -578,9 +578,13 @@ export class PlanetRenderer {
   if(compare&&!this.prepareTransitionTopology(stage)){
    compare=false;stage.state='waiting';stage.nextMeasure=now+200;this.transition={...this.transition,waiting:true};
   }
+  let firstPatch=CAPACITY,lastPatch=-1;
+  let patchDirty=!this.uploadedPatchEye||camera.eye.some((value,i)=>value!==this.uploadedPatchEye[i]);
   const writePatch=(node,slots)=>{
    const i=node.slot*32,cache=this.patchMetadataCache||(this.patchMetadataCache=new WeakMap());
+   firstPatch=Math.min(firstPatch,node.slot);lastPatch=Math.max(lastPatch,node.slot);
    if(cache.get(node)!==slots){
+    patchDirty=true;
     const b=FACE_BASES[node.face],cube=faceCube(node.face,node.u,node.v);
     this.patchFloats.set([...cube,node.span],i);this.patchFloats.set([...b.u,0],i+4);this.patchFloats.set([...b.v,0],i+8);
     const high=node.direction.map(Math.fround),low=node.direction.map((x,k)=>x-high[k]);
@@ -617,7 +621,11 @@ export class PlanetRenderer {
   const east=normalize([camera.radial[2],0,-camera.radial[0]]),north=normalize([camera.radial[1]*east[2],camera.radial[2]*east[0]-camera.radial[0]*east[2],-camera.radial[1]*east[0]]);
   this.cloudWindDistance=(this.cloudWindDistance??0)+Math.max(0,Math.min(.25,(now-(this.cloudLastTime??now))*.001))*(this.cloudSpeed??8);this.cloudLastTime=now;
   const cloudData=new Float32Array(48);cloudData.set([camera.width,camera.height,0,0,this.cloudWindDistance,0,camera.altitude*1000,this.clouds===false?0:(this.cloudCoverage??.72),this.cloudDensity??1,1,this.seed%10000,0, this.cloudSize??2,0,0,0],0);cloudData.set([...camera.radial,0,...east,0,...north,0,...camera.forward,camera.tanX,...camera.right,camera.tanY,...camera.up,camera.near,...sun,separateOcean?1:0],16);cloudData.set([this.skyStrength??1,this.mieStrength??1,this.haloStrength??1,this.cloudQuality??.8],44);if(this.cloudUniform)d.queue.writeBuffer(this.cloudUniform,0,cloudData);
-  d.queue.writeBuffer(this.uniform,0,raw);d.queue.writeBuffer(this.patchBuffer,0,this.patchBytes);
+  d.queue.writeBuffer(this.uniform,0,raw);
+  if(patchDirty&&lastPatch>=firstPatch){
+   const offset=firstPatch*PATCH_BYTES,size=(lastPatch-firstPatch+1)*PATCH_BYTES;
+   d.queue.writeBuffer(this.patchBuffer,offset,new Uint8Array(this.patchBytes,offset,size));this.uploadedPatchEye=[...camera.eye];
+  }
   if(separateOcean){
    const view=new Float32Array(20);view.set([...camera.radial,camera.altitude],0);view.set([...camera.forward,camera.tanY],4);view.set([...camera.right,camera.tanX],8);view.set([...camera.up,camera.width],12);view[16]=camera.height;view[17]=camera.near;d.queue.writeBuffer(this.oceanView,0,view);
   }

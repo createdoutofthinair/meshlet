@@ -393,3 +393,13 @@ test('cached patch metadata preserves camera-relative updates and resets',async(
  assert.notDeepEqual([...new Float32Array(r.patchBuffer.data,(i+20)*4,3)],relativeBefore);
  const oldCache=r.patchMetadataCache;r.resetPatchCache();assert.notEqual(r.patchMetadataCache,oldCache);
 });
+
+test('patch uploads cover resident slot span and skip unchanged camera frames',async()=>{
+ const {r}=fakeRenderer(),writes=[],write=r.device.queue.writeBuffer;
+ r.device.queue.writeBuffer=(target,offset,source)=>{if(target===r.patchBuffer)writes.push({offset,size:source.byteLength});write(target,offset,source);};
+ r.frame(1000);await flush();const slots=r.patches.map(p=>p.slot);
+ assert.deepEqual(writes,[{offset:Math.min(...slots)*128,size:(Math.max(...slots)-Math.min(...slots)+1)*128}]);
+ r.frame(1100);await flush();assert.equal(writes.length,1);
+ r.cameraState.longitude+=.00001;r.frame(1200);await flush();assert.equal(writes.length,2);
+ r.resetPatchCache();r.frame(1400);await flush();assert.equal(writes.length,3);
+});
