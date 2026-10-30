@@ -37,7 +37,7 @@ export class PlanetRenderer {
   this.patchBytes=new ArrayBuffer(CAPACITY*PATCH_BYTES);this.patchFloats=new Float32Array(this.patchBytes);this.patchUints=new Uint32Array(this.patchBytes);
   this.slotByKey=new Map();this.stitchByKey=new Map();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.patches=[];this.pending=[];this.normalPending=[];
   this.needsSelection=true;this.lastSelection=0;this.previousSplits=null;this.lodErrors=new Map();this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
-  this.retiredSlots=new Set();this.transitionErrors=new Map();this.transitionCommitId=0;this.lastTransitionCommit=null;this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
+  this.retiredSlots=new Set();this.transitionErrors=new Map();this.transitionErrorVersion=0;this.workerErrorVersion=null;this.transitionCommitId=0;this.lastTransitionCommit=null;this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
   this.transitionTargetPixels=TRANSITION_TARGET_PIXELS;
   this.lastSample=0;this.pendingRead=false;this.generation=0;this.surfaceRevision=0;this.inFlight=0;this.probePending=false;this.lastProbeKey='';this.lastProbeTime=0;this.stats={leaves:0,visiblePatches:0,deepest:0,selectionMs:0,generated:0};
   this.hydrologySeed=null;
@@ -208,7 +208,7 @@ export class PlanetRenderer {
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
   this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;this.patchMetadataCache=new WeakMap();this.uploadedPatchEye=null;
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
-  this.transitionErrors.clear();this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
+  this.transitionErrors.clear();this.transitionErrorVersion++;this.workerErrorVersion=null;this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
   this.selectionResult=null;this.selectionRequest=null;this.reconcileSelection=false;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
   this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
  }
@@ -559,8 +559,10 @@ export class PlanetRenderer {
    if(!this.selectionWorker)this.select(camera,now);
    else{
     const id=(this.selectionSerial=(this.selectionSerial||0)+1),key=[this.generation,this.cameraState.mode,this.budget,this.maxDepth,this.pixelSize,camera.width,camera.height].join('/');
-    const options={budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth:this.cameraState.mode==='walk'?22:this.maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.transitionErrors,previousLeaves:this.coveringLeaves};
-    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,previousPatches:this.patches});
+    const options={budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth:this.cameraState.mode==='walk'?22:this.maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,previousLeaves:this.coveringLeaves};
+    const errorEstimates=this.workerErrorVersion===this.transitionErrorVersion?null:this.transitionErrors;
+    this.workerErrorVersion=this.transitionErrorVersion;
+    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,errorEstimates,previousPatches:this.patches});
    }
   }
   const stage=this.stage;
@@ -694,9 +696,10 @@ export class PlanetRenderer {
      const px=values[i*2],world=values[i*2+1],pair=stage.pairs[i];
      if(!Number.isFinite(px)||!Number.isFinite(world))throw new Error('Non-finite terrain transition measurement');
      maxPixel=Math.max(maxPixel,px);if(!pair.refining)maxMerge=Math.max(maxMerge,px);else maxRefine=Math.max(maxRefine,px);
-     this.transitionErrors.set(pair.coarse.key,Math.max(this.transitionErrors.get(pair.coarse.key)||0,world));
+     const previous=this.transitionErrors.get(pair.coarse.key),updated=Math.max(previous||0,world);
+     if(previous!==updated){this.transitionErrors.set(pair.coarse.key,updated);this.transitionErrorVersion++;}
     }
-    while(this.transitionErrors.size>8192)this.transitionErrors.delete(this.transitionErrors.keys().next().value);
+    while(this.transitionErrors.size>8192){this.transitionErrors.delete(this.transitionErrors.keys().next().value);this.transitionErrorVersion++;}
     stage.maxMerge=maxMerge;stage.maxRefine=maxRefine;
     stage.measurementView={eye:[...camera.eye],vp:[...camera.vp],width:camera.width,height:camera.height};
     if(morphMeasurement){

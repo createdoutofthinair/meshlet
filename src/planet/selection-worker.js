@@ -2,9 +2,11 @@ import {selectPatches} from './quadtree.js';
 import {transitionGroups} from './patch-transition.js';
 import {transitionCoordinates} from './transition-topology.js';
 import {packTransitionTopology} from './transition-upload.js';
+let cachedErrors=new Map();
 self.onmessage=({data})=>{
  const start=performance.now();
- const result=selectPatches(data.camera,data.options);
+ if(data.errorEstimates!=null)cachedErrors=data.errorEstimates;
+ const result=selectPatches(data.camera,{...data.options,errorEstimates:data.errorEstimates??data.options.errorEstimates??cachedErrors});
  // Topology depends on patch identities and stitch masks, not GPU slot IDs.
  // Build it here before handing the selection back to the render thread.
  const topology=new Map();

@@ -403,3 +403,16 @@ test('patch uploads cover resident slot span and skip unchanged camera frames',a
  r.cameraState.longitude+=.00001;r.frame(1200);await flush();assert.equal(writes.length,2);
  r.resetPatchCache();r.frame(1400);await flush();assert.equal(writes.length,3);
 });
+
+test('selection worker receives error estimates only when they change or reset',async()=>{
+ const old=globalThis.Worker;let worker;
+ globalThis.Worker=class {constructor(){worker=this;}postMessage(message){this.message=message;}terminate(){}};
+ try{
+  const {r}=fakeRenderer();const {selectPatches}=await import('../src/planet/quadtree.js');
+  r.frame(1000);await flush();assert.ok(worker.message.errorEstimates instanceof Map);
+  let m=worker.message;worker.onmessage({data:{...m,result:selectPatches(m.camera,m.options),selectionMs:1}});
+  r.frame(1200);await flush();r.cameraState.longitude+=.1;r.needsSelection=true;r.frame(1400);await flush();
+  assert.equal(worker.message.errorEstimates,null);
+  r.resetPatchCache();r.frame(1600);await flush();assert.ok(worker.message.errorEstimates instanceof Map);
+ }finally{if(old===undefined)delete globalThis.Worker;else globalThis.Worker=old;}
+});

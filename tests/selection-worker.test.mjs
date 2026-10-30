@@ -20,5 +20,11 @@ test('worker prepares stitched transition topology for the selected covering tre
    records.push({slot:checked,coordinates:buildTransitionTopology({mask:pair.coarse.stitch,originX:pair.originX,originY:pair.originY,scale:pair.scale},{mask:pair.fine.stitch}).coordinates});assert.equal(result.packedTopology.keys[checked],pair.fine.key);checked++;
   }
   assert.ok(checked>0);const expected=packTransitionTopology(records);assert.deepEqual(result.packedTopology.ranges,expected.ranges);assert.deepEqual(result.packedTopology.coordinates,expected.coordinates);
+  const errors=new Map([[first.visible[0].key,7]]);
+  self.onmessage({data:{id:2,key:'test',camera,options,errorEstimates:errors}});
+  self.onmessage({data:{id:3,key:'test',camera,options,errorEstimates:null}});
+  assert.deepEqual(messages[2].result,messages[1].result,'omitted errors reuse the worker snapshot');
+  const empty=new Map();self.onmessage({data:{id:4,key:'test',camera,options,errorEstimates:empty}});
+  assert.deepEqual(messages[3].result,selectPatches(camera,{...options,errorEstimates:empty}));
  }finally{delete globalThis.self;}
 });
