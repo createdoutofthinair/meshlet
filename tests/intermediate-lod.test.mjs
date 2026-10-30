@@ -53,3 +53,10 @@ test('resident covering selections produce complete transition groups across the
   verify(previous.leaves,next.leaves);previous=next;
  }
 });
+
+test('stable target covering returns the same topology on repeated selection',()=>{
+ const camera=planetCamera({mode:'flight',altitude:500,longitude:.8,latitude:.4,heading:.45,pitch:1.48},960,600);
+ const options={budget:120,pixelSize:14,includeHidden:true};const first=selectPatches(camera,options);
+ const repeated=selectPatches(camera,{...options,previousLeaves:first.leaves});
+ assert.deepEqual(repeated,first);verify(first.leaves,repeated.leaves);
+});

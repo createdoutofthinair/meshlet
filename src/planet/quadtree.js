@@ -164,7 +164,12 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
   for(const node of leaves.values())if(node.level<maxDepth){const s=priority(node);if(s>bestScore){best=node;bestScore=s;}}
   if(!best || leaves.size+3>budget || !splitBalanced(leaves,best,budget,maxDepth))break;
  }
- if(previousLeaves?.length)leaves=new Map(intermediateLeaves(previousLeaves,[...leaves.values()],budget,priority).map(p=>[p.key,p]));
+ // A stable target needs no balancing or split/merge transactions. This is
+ // common during steady flight and avoids cloning the covering tree repeatedly.
+ if(previousLeaves?.length){
+  const unchanged=previousLeaves.length===leaves.size&&previousLeaves.every(node=>leaves.has(node.key));
+  if(!unchanged)leaves=new Map(intermediateLeaves(previousLeaves,[...leaves.values()],budget,priority).map(p=>[p.key,p]));
+ }
  const all=[...leaves.values()];
  const visible=[];
  for(const node of all){
