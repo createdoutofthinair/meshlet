@@ -101,6 +101,10 @@ fn cloudDensityWithTerms(p:vec3<f32>,detailWeight:f32,height:f32,terms:CloudWeat
   // The margin keeps the rejection conservative under f32 rounding.
   let upper=coarse*(1.0-detailWeight)+(first*.68+.32001)*detailWeight+.08001*detailWeight;
   if(upper<=lower){return 0.0;}
+  // The second octave cannot lower the base; maximum erosion is .08.
+  // A safely saturated sample does not need either remaining noise lookup.
+  let saturatedLower=coarse*(1.0-detailWeight)+first*.68*detailWeight-.08001*detailWeight;
+  if(saturatedLower>=upperThreshold){return profile*params.cloud.x*terms.coverageFactor;}
   let baseShape=first*.68+cloudNoise(q*2.03+vec3<f32>(12.0,3.0,6.0))*.32;
   base=mix(coarse,baseShape,detailWeight);
  }

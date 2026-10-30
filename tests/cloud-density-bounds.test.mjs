@@ -56,3 +56,16 @@ test('saturated cloud samples remain above the upper threshold under maximum ero
   }
  }
 });
+
+test('first fine octave can only mark samples saturated when all remaining values are saturated',()=>{
+ for(let t=0;t<=40;t++)for(let c=0;c<=40;c++)for(let n=0;n<=40;n++)for(let k=0;k<=40;k++){
+  const detail=t/40,coarse=c/40,first=n/40,threshold=.3+.56*k/40;
+  for(const upper of [threshold+.23,threshold+.23+.16*(1-detail)]){
+   const lower=coarse*(1-detail)+first*.68*detail-.08001*detail;
+   if(lower>=upper)for(const second of [0,.5,1])for(const erosion of [0,.5,1]){
+    const sample=coarse*(1-detail)+(first*.68+second*.32)*detail+(erosion-.5)*.16*detail;
+    assert.ok(sample>=upper-1e-12);
+   }
+  }
+ }
+});
