@@ -40,10 +40,12 @@ export function encodeTransitionPairs(pairs,topologySlots=null){
 // Group overlapping patches by the actual coarse surface. Stitch-only changes
 // use their own group because they require a topology change at the same LOD.
 export function transitionGroups(previous,next,pairs=transitionPairs(previous,next)){
- const oldKeys=new Set(previous.map(p=>p.key)),newKeys=new Set(next.map(p=>p.key));
+ const oldNodes=new Map(),newNodes=new Map();
+ for(const p of previous)if(!oldNodes.has(p.key))oldNodes.set(p.key,p);
+ for(const p of next)if(!newNodes.has(p.key))newNodes.set(p.key,p);
  const groups=new Map();
  for(const p of pairs){
-  const type=p.fine.level===p.coarse.level?'stitch':(oldKeys.has(p.fine.key)&&!newKeys.has(p.fine.key)?'merge':'refine');
+  const type=p.fine.level===p.coarse.level?'stitch':(oldNodes.has(p.fine.key)&&!newNodes.has(p.fine.key)?'merge':'refine');
   const key=type+'/'+p.coarse.key;
   let group=groups.get(key);
   if(!group){group={key,type,coarse:p.coarse,pairs:[],slots:new Set()};groups.set(key,group);}
@@ -51,7 +53,7 @@ export function transitionGroups(previous,next,pairs=transitionPairs(previous,ne
  }
  return [...groups.values()].map(group=>({
   ...group,slots:[...group.slots],
-  pairs:group.type==='stitch'?[pair(next.find(p=>p.key===group.coarse.key),previous.find(p=>p.key===group.coarse.key))]:group.pairs
+  pairs:group.type==='stitch'?[pair(newNodes.get(group.coarse.key),oldNodes.get(group.coarse.key))]:group.pairs
  }));
 }
 
