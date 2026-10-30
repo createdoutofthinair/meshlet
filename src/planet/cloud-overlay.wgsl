@@ -1,8 +1,7 @@
 @group(0) @binding(1) var sceneDepth:texture_depth_2d;
 // A filtered far-field approximation: resolve large weather systems and
 // fractional coverage without evaluating subpixel cloud erosion in orbit.
-fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>)->vec4<f32>{
- let weather=weatherField(point);
+fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,weather:vec2<f32>)->vec4<f32>{
  // The same density field and weather drive both representations. Four
  // stratified volume samples approximate its integrated coverage in orbit.
  var density=0.0;
@@ -46,16 +45,21 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>)->vec4<f32>
    let span=end-start;
    // Blend representations across altitude so the handoff does not pop.
    let farWeight=smoothstep(50000.0,900000.0,origin.y);
+   let weather=weatherField(origin+ray*((start+end)*.5));
    var distant=vec4<f32>(0.0);
-   if(farWeight>0.0){distant=orbitalCloud(origin+ray*((start+end)*.5),span,ray,sun);}
+   if(farWeight>0.0){distant=orbitalCloud(origin+ray*((start+end)*.5),span,ray,sun,weather);}
    if(farWeight<.999){
    // Long, grazing rays need smaller steps than short vertical views.
    let targetSteps=max(mix(32.0,64.0,smoothstep(12000.0,100000.0,span)),span/2700.0);
    let steps=u32(max(16.0,min(96.0,targetSteps)*params.atmosphere.w));
-   let stepSize=(end-start)/f32(steps);let weather=weatherField(origin+ray*((start+end)*.5));
+   let stepSize=(end-start)/f32(steps);
    let footprint=max(stepSize,(start+end)*.58/params.view.y);
    let detail=1.0-smoothstep(900.0,7000.0,footprint);
    let orbital=smoothstep(80000.0,600000.0,origin.y);
+   let phase=.55+.45*pow(max(dot(ray,sun),0.0),6.0);
+   let extinction=stepSize*mix(.0018,.0009,orbital);
+   let shadowOffset=sun*mix(420.0,1600.0,orbital);
+   let shadowStrength=mix(1.15,2.0,orbital);
    // Small stable subpixel jitter breaks aligned slices without covering the
    // entire cloud in high-contrast per-pixel noise.
    let jitter=.5+(cloudHash(vec3<f32>(floor(input.pos.xy),1.0))-.5)*.24;
@@ -64,19 +68,18 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>)->vec4<f32>
     if(transmission<.02){break;}
     let point=origin+ray*(start+(f32(i)+jitter)*stepSize);let density=cloudDensity(point,weather,detail);
     if(density>.001){
-     let alpha=1.0-exp(-density*stepSize*mix(.0018,.0009,orbital));
+     let alpha=1.0-exp(-density*extinction);
      // Sample lighting less often, but interpolate rather than holding the
      // previous value in visible bands across three marching slices.
      if(!shadowReady || i>=shadowStep+3u){
-      if(!shadowReady){shadowFrom=exp(-cloudDensity(point+sun*mix(420.0,1600.0,orbital),weather,detail)*mix(1.15,2.0,orbital));}else{shadowFrom=shadowTo;}
+      if(!shadowReady){shadowFrom=exp(-cloudDensity(point+shadowOffset,weather,detail)*shadowStrength);}else{shadowFrom=shadowTo;}
       let ahead=point+ray*(stepSize*3.0);
-      shadowTo=exp(-cloudDensity(ahead+sun*mix(420.0,1600.0,orbital),weather,detail)*mix(1.15,2.0,orbital));
+      shadowTo=exp(-cloudDensity(ahead+shadowOffset,weather,detail)*shadowStrength);
       shadowStep=i;shadowReady=true;
      }
      let shadow=mix(shadowFrom,shadowTo,clamp(f32(i-shadowStep)/3.0,0.0,1.0));
      let cloudUp=normalize(vec3<f32>(point.x,PLANET_RADIUS+point.y,point.z));let elevation=dot(cloudUp,sun);
      let day=atmosphereDaylight(elevation);let twilight=atmosphereTwilight(elevation);
-     let phase=.55+.45*pow(max(dot(ray,sun),0.0),6.0);
      let cool=mix(vec3<f32>(.018,.025,.05),vec3<f32>(.24,.31,.39),day);
      let warm=mix(vec3<f32>(1.0,.92,.80),vec3<f32>(1.0,.32,.12),twilight*.85);
      let illumination=mix(cool,warm*max(.035,day+twilight*.30),clamp(shadow*phase*(.7+.45*clamp((planetAltitude(point)-1500.0)/6500.0,0.0,1.0)),0.0,1.0));
