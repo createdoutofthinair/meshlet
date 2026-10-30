@@ -1,5 +1,8 @@
 struct SurfaceData {height:f32,lake:f32,humidity:f32};
 fn naturalHeight(base:f32,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32)->f32{
+ // The relief mask is exactly zero below this threshold. Avoid four noise
+ // evaluations for terrain samples where they cannot affect the height.
+ if(base<=-.05){return base;}
  let micro=localNoise(high,low,delta,131072.0,seed+401u)*.0025
           +localNoise(high,low,delta,524288.0,seed+409u)*.00065
           +localNoise(high,low,delta,2097152.0,seed+419u)*.00018
