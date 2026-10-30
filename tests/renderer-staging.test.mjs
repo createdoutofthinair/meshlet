@@ -337,3 +337,15 @@ test('flight selection waits for meaningful camera movement but continues pendin
  r.reconcileSelection=true;assert.equal(r.shouldSelect(camera,1200),true);
  r.reconcileSelection=false;r.pixelSize++;assert.equal(r.shouldSelect(camera,1200),true);
 });
+
+test('worker-packed topology is remapped to resident GPU slots without repacking vertices',async()=>{
+ const {r}=fakeRenderer();const {packTransitionTopology,MORPH_RANGE_OFFSET,MORPH_COORD_OFFSET}=await import('../src/planet/transition-upload.js');
+ const records=[{key:'a',slot:7,coordinates:new Float32Array([0,0,1,0,0,1])},{key:'b',slot:23,coordinates:new Float32Array([8,8,9,8,8,9])}];
+ const packed=packTransitionTopology(records.map((v,slot)=>({...v,slot})));
+ r.uploadTransitionTopology(records.map(({key,slot})=>({key,slot})),{keys:['a','b'],...packed});
+ const ranges=new Uint32Array(r.morphBuffer.data,MORPH_RANGE_OFFSET,1024*32);
+ assert.deepEqual([...ranges.slice(7*32,8*32)],[...packed.ranges.slice(0,32)]);
+ assert.deepEqual([...ranges.slice(23*32,24*32)],[...packed.ranges.slice(32,64)]);
+ assert.deepEqual([...new Float32Array(r.morphBuffer.data,MORPH_COORD_OFFSET,packed.coordinates.length)],[...packed.coordinates]);
+ assert.throws(()=>r.uploadTransitionTopology([{key:'missing',slot:7}],{keys:['a'],...packed}),/Invalid prepared topology/);
+});

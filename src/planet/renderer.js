@@ -166,8 +166,17 @@ export class PlanetRenderer {
   run('initializeLake',1);for(let i=0;i<128;i++)run('spreadLakeMinimum',i&1);run('saveLakeMinimum');
   run('markRiverPresence');run('buildRiverPaths',0,this.worldCount*17);pass.end();d.queue.submit([encoder.finish()]);this.hydrologySeed=seed;
  }
- uploadTransitionTopology(records){
-  const packed=packTransitionTopology(records);
+ uploadTransitionTopology(records,prepacked=null){
+  let packed;
+  if(prepacked){
+   const ranges=new Uint32Array(1024*16*2),slots=new Set(),ids=new Map(prepacked.keys.map((key,index)=>[key,index]));
+   for(const record of records){
+    const index=ids.get(record.key);if(index===undefined||slots.has(record.slot))throw new Error('Invalid prepared topology');
+    ranges.set(prepacked.ranges.subarray(index*32,index*32+32),record.slot*32);slots.add(record.slot);
+   }
+   if(slots.size!==ids.size)throw new Error('Prepared topology does not match selection');
+   packed={ranges,slots,coordinates:prepacked.coordinates,vertexCount:prepacked.vertexCount};
+  }else packed=packTransitionTopology(records);
   this.device.queue.writeBuffer(this.morphBuffer,MORPH_RANGE_OFFSET,packed.ranges);
   if(packed.coordinates.length)this.device.queue.writeBuffer(this.morphBuffer,MORPH_COORD_OFFSET,packed.coordinates);
   this.topologySlots=packed.slots;this.morphVertexCount=packed.vertexCount;
@@ -303,7 +312,7 @@ export class PlanetRenderer {
   }
   const matched=new Set(pairs.map(p=>p.refining?p.fine.key:p.coarse.key));
   const uncovered=newNodes.some(n=>!matched.has(n.key));
-  this.stage={components:coordinateTransitions(this.patches,nodes),groups:transitionGroups(this.patches,nodes),result,nodes,slots,signatures,newNodes,todo:newNodes.map(n=>n.slot),normalPending,pairs,selectionMs,state:'building',generation:this.generation,reference:camera,previousEye,nextMeasure:0,uncovered,hasRefinement:pairs.some(p=>p.refining),waitingSince:null,computedTopology:computed?.topology};
+  this.stage={components:coordinateTransitions(this.patches,nodes),groups:transitionGroups(this.patches,nodes),result,nodes,slots,signatures,newNodes,todo:newNodes.map(n=>n.slot),normalPending,pairs,selectionMs,state:'building',generation:this.generation,reference:camera,previousEye,nextMeasure:0,uncovered,hasRefinement:pairs.some(p=>p.refining),waitingSince:null,computedTopology:computed?.topology,packedTopology:computed?.packedTopology};
   this.transition={...this.transition,pending:newNodes.length,waiting:false};
  }
  canMorphTransition(stage){
@@ -314,11 +323,11 @@ export class PlanetRenderer {
   const records=[];
   for(const group of stage.groups)for(const pair of group.pairs){
    if(group.type!=='stitch'&&!pair.fine.stitch&&!pair.coarse.stitch)continue;
-   const coordinates=stage.computedTopology?.get(pair.fine.key)??transitionCoordinates({mask:pair.coarse.stitch,originX:pair.originX,originY:pair.originY,scale:pair.scale},{mask:pair.fine.stitch});
-   records.push({slot:pair.fine.slot,coordinates});
+   const coordinates=stage.packedTopology?null:(stage.computedTopology?.get(pair.fine.key)??transitionCoordinates({mask:pair.coarse.stitch,originX:pair.originX,originY:pair.originY,scale:pair.scale},{mask:pair.fine.stitch}));
+   records.push({key:pair.fine.key,slot:pair.fine.slot,coordinates});
   }
   if(records.length){
-   try{this.uploadTransitionTopology(records);}
+   try{this.uploadTransitionTopology(records,stage.packedTopology);}
    catch(error){
     if(!error.message.includes('capacity exceeded'))throw error;
     this.transition={...this.transition,capacityDeferred:true};return false;
