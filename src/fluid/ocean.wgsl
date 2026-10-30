@@ -117,7 +117,11 @@ fn cubeImpactWash(position:vec2<f32>,faceNormal:vec2<f32>,time:f32)->f32{
    let toImpact=event.xy-position;let facing=dot(faceNormal,toImpact)/max(.001,length(toImpact));
    let directional=smoothstep(.05,.55,facing);
    let attack=smoothstep(0.0,.12,elapsed);let decay=1.0-smoothstep(1.2,4.0,elapsed);
-   response=max(response,near*directional*attack*decay);
+   // The event seed stays fixed throughout the wash, so patches adhere to
+   // the cube while different impacts wet different parts of the face.
+   let variant=hash(vec2<f32>(event.z*7.13+f32(i)*19.17,dot(event.xy,vec2<f32>(13.7,31.1))));
+   let patches=noise(position*8.0+vec2<f32>(variant*31.0,variant*17.0));
+   response=max(response,near*directional*attack*decay*mix(.35,1.0,smoothstep(.25,.75,patches)));
   }
  }
  return response;
@@ -125,11 +129,13 @@ fn cubeImpactWash(position:vec2<f32>,faceNormal:vec2<f32>,time:f32)->f32{
 // Impact-driven patches: a short upward surge followed by gravity-driven
 // drainage. Each patch has a different path, width and fall speed.
 fn cubeFoamDrain(position:vec2<f32>,faceNormal:vec2<f32>,height:f32,faceCoord:f32,time:f32)->f32{
- var result=0.0;let grid=(faceCoord+2.0)*7.0;let cell=floor(grid);let local=fract(grid);
- let seed=hash(vec2<f32>(cell,18.7));let shift=.25+.5*seed;
+ var result=0.0;
  for(var i=0u;i<30u;i++){
   let event=impact[i];let delta=event.xy-position;let dist=length(delta);let elapsed=time-event.z-dist/1.4;
   if(event.w>0.0 && elapsed>=0.0 && elapsed<4.8){
+   let variant=hash(vec2<f32>(event.z*7.13+f32(i)*19.17,dot(event.xy,vec2<f32>(13.7,31.1))+dot(faceNormal,vec2<f32>(5.3,9.7))));
+   let grid=(faceCoord+2.0)*7.0+(variant-.5)*1.6;let cell=floor(grid);let local=fract(grid);
+   let seed=hash(vec2<f32>(cell+variant*37.0,18.7+f32(i)*.9));let shift=.18+.64*seed;
    let facing=smoothstep(.05,.55,dot(faceNormal,delta)/max(.001,dist));let near=1.0-smoothstep(1.5,4.0,dist);
    let surge=(.20+.06*seed)*smoothstep(0.0,.38,elapsed);
    let drainage=max(0.0,elapsed-.42)*(.045+.022*seed);
