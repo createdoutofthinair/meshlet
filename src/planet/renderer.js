@@ -190,11 +190,23 @@ export class PlanetRenderer {
   if(!entries.length){this.topologySlots=null;this.morphVertexCount=96;}
   for(const {pair} of entries)if(this.topologySlots?.has(pair.fine.slot))words[pair.fine.slot*8+2]|=16;
   this.device.queue.writeBuffer(this.morphBuffer,0,raw);
+  this.morphMetadata=entries.length?raw:null;
+  this.surfaceRevision++;
+ }
+ updateMorphProgress(stage,progress){
+  // Slot ownership and mappings were checked by uploadMorphs at transition
+  // start. During progress only factors change; reuse the encoded metadata.
+  const values=new Float32Array(this.morphMetadata);let first=CAPACITY,last=-1;
+  for(const group of stage.groups)for(const pair of group.pairs){
+   const slot=pair.fine.slot;values[slot*8+7]=group.type==='merge'?1-progress:progress;
+   first=Math.min(first,slot);last=Math.max(last,slot);
+  }
+  if(last>=first)this.device.queue.writeBuffer(this.morphBuffer,first*32,new Uint8Array(this.morphMetadata,first*32,(last-first+1)*32));
   this.surfaceRevision++;
  }
  resetPatchCache(){
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
-  this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;
+  this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
   this.transitionErrors.clear();this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
   this.selectionResult=null;this.selectionRequest=null;this.reconcileSelection=false;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
@@ -365,7 +377,7 @@ export class PlanetRenderer {
  advanceTransition(camera,now){
   const stage=this.stage;if(stage?.state!=='transitioning'||this.surfaceReads>0)return;
   const m=stage.morph,before=m.factor,{factor,cancel}=advanceTransitionControl(m,camera,this.transitionTargetPixels);
-  if(factor!==before)this.uploadMorphs(this.transitionEntries(stage,factor));
+  if(factor!==before)this.updateMorphProgress(stage,factor);
   this.transition={...this.transition,morphProgress:factor,estimatedStepPixels:m.estimatedStepPixels,estimatedEndpointPixels:m.estimatedEndpointPixels,errorLimited:m.limited};
   if(factor===1)this.commitStage(now);
   else if(cancel){this.cancelStage();this.needsSelection=true;}

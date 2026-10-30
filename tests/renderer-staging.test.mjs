@@ -374,3 +374,13 @@ test('stationary morphs reuse their measured GPU endpoint errors',async()=>{
  r.frame(2500);await flush();r.frame(3000);await flush();assert.equal(comparisons,1);
  r.cameraState.longitude+=.001;r.frame(3500);await flush();assert.equal(comparisons,2);
 });
+
+test('morph progress reuses metadata and uploads only the active slot span',async()=>{
+ const {r,camera}=await preparedRefinement();r.beginTransition(camera);const stage=r.stage,m=stage.morph,metadata=r.morphMetadata;
+ const writes=[],write=r.device.queue.writeBuffer;
+ r.device.queue.writeBuffer=(target,offset,source)=>{if(target===r.morphBuffer)writes.push({offset,size:source.byteLength});write(target,offset,source);};
+ const halfway={...camera,eye:camera.eye.map((v,i)=>m.anchor[i]+(v-m.anchor[i])*(m.distance-m.band*.5)/m.distance)};
+ r.advanceTransition(halfway,2000);const slots=stage.groups.flatMap(g=>g.pairs.map(p=>p.fine.slot));
+ assert.equal(r.morphMetadata,metadata);assert.deepEqual(writes,[{offset:Math.min(...slots)*32,size:(Math.max(...slots)-Math.min(...slots)+1)*32}]);
+ const f=new Float32Array(r.morphBuffer.data);for(const slot of slots)assert.ok(Math.abs(f[slot*8+7]-.5)<1e-6);
+});
