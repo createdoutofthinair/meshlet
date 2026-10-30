@@ -2,9 +2,11 @@
 // patch or an ancestor/descendant on the same cube face; no geometric search
 // or rounded spherical coordinates are needed.
 function ancestorIn(map,node){
+ let x=node.x,y=node.y;
  for(let level=node.level;level>=0;level--){
-  const scale=2**(node.level-level),key=`${node.face}/${level}/${Math.floor(node.x/scale)}/${Math.floor(node.y/scale)}`;
+  const key=`${node.face}/${level}/${x}/${y}`;
   const ancestor=map.get(key);if(ancestor)return ancestor;
+  x=Math.floor(x/2);y=Math.floor(y/2);
  }
  return null;
 }
@@ -78,6 +80,7 @@ export function encodePatchMorphs(entries,capacity){
 // atomically. Keys already include cube face, so cross-face links need no UV
 // rounding or orientation guesses here.
 export function coordinateTransitions(previous,next,groups=transitionGroups(previous,next)){
+ if(groups.length===0)return [];
  const owners=new Map(),parent=groups.map((_,i)=>i);
  const root=i=>{while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i];}return i;};
  const join=(a,b)=>{parent[root(a)]=root(b);};
