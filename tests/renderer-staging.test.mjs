@@ -449,3 +449,12 @@ test('unchanged patch state avoids per-patch frame preparation',async()=>{
  r.cameraState.longitude+=.00001;r.frame(1200);await flush();assert.ok(reads>0);
  r.resetPatchCache();assert.equal(r.preparedPatchState,null);
 });
+
+test('compact unchanged worker response retains the active covering',async()=>{
+ const {r}=fakeRenderer();r.frame(1000);await flush();const patches=r.patches,leaves=r.coveringLeaves;
+ const {planetCamera}=await import('../src/planet/camera.js'),camera=planetCamera(r.cameraState,960,600);
+ const key=[r.generation,r.cameraState.mode,r.budget,r.maxDepth,r.pixelSize,camera.width,camera.height].join('/');
+ r.needsSelection=true;r.selectionResult={key,camera,unchanged:true,leafCount:leaves.length,deepest:r.stats.deepest,selectionMs:2};
+ r.frame(1200);await flush();assert.equal(r.patches,patches);assert.equal(r.coveringLeaves,leaves);
+ assert.equal(r.needsSelection,false);assert.equal(r.stage,null);assert.equal(r.stats.selectionMs,2);
+});

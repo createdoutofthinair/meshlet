@@ -559,8 +559,14 @@ export class PlanetRenderer {
    const ready=this.selectionResult;this.selectionResult=null;
    const current=[this.generation,this.cameraState.mode,this.budget,this.maxDepth,this.pixelSize,camera.width,camera.height].join('/');
    const movement=Math.hypot(...camera.eye.map((x,i)=>x-ready.camera.eye[i]));
-   if(!this.stage&&current===ready.key&&movement<=Math.max(.05,ready.camera.clearance*.7)&&dot(camera.forward,ready.camera.forward)>=Math.cos(20*Math.PI/180))this.select(ready.camera,now,ready);
-   else this.needsSelection=true;
+   if(!this.stage&&current===ready.key&&movement<=Math.max(.05,ready.camera.clearance*.7)&&dot(camera.forward,ready.camera.forward)>=Math.cos(20*Math.PI/180)){
+    if(ready.unchanged){
+     const maxDepth=this.cameraState.mode==='walk'?22:this.maxDepth;
+     this.selectionState={eye:[...ready.camera.eye],forward:[...ready.camera.forward],mode:this.cameraState.mode,budget:this.budget,maxDepth,pixelSize:this.pixelSize,width:ready.camera.width,height:ready.camera.height,generation:this.generation};
+     this.lastSelection=now;this.needsSelection=false;this.reconcileSelection=false;
+     this.stats={...this.stats,leaves:ready.leafCount,deepest:ready.deepest,selectionMs:ready.selectionMs,generated:0,normalUpdates:0,reusedNormalUpdates:0};
+    }else this.select(ready.camera,now,ready);
+   }else this.needsSelection=true;
   }
   if(this.shouldSelect(camera,now)){
    if(!this.selectionWorker)this.select(camera,now);
@@ -572,7 +578,7 @@ export class PlanetRenderer {
     if(snapshotPresent){options.previousSplits=this.previousSplits;options.previousLeaves=this.coveringLeaves;this.workerSelectionSnapshot={patches:this.patches,leaves:this.coveringLeaves,splits:this.previousSplits};}
     const errorEstimates=this.workerErrorVersion===this.transitionErrorVersion?null:this.transitionErrors;
     this.workerErrorVersion=this.transitionErrorVersion;
-    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,errorEstimates,snapshotPresent,previousPatches:snapshotPresent?this.patches:null});
+    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,errorEstimates,snapshotPresent,allowUnchanged:true,previousPatches:snapshotPresent?this.patches:null});
    }
   }
   const stage=this.stage;

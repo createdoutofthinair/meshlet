@@ -50,3 +50,17 @@ test('worker stitch signatures match the shared signature calculation',async()=>
   assert.deepEqual(messages[0].signatures,transitionSignatures(messages[0].result.visible));
  }finally{delete globalThis.self;}
 });
+
+test('unchanged resident covering returns a compact response',async()=>{
+ const messages=[];globalThis.self={postMessage:value=>messages.push(value)};
+ try{
+  await import('../src/planet/selection-worker.js?unchanged-test');
+  const camera=planetCamera({altitude:14000,longitude:.8,latitude:.4},960,600),options={budget:54,pixelSize:14,includeHidden:true};
+  const first=selectPatches(camera,options);
+  self.onmessage({data:{id:1,key:'test',camera,options:{...options,previousLeaves:first.leaves,previousSplits:first.splits},previousPatches:first.visible,snapshotPresent:true,allowUnchanged:true}});
+  assert.equal(messages[0].unchanged,true);assert.equal(messages[0].result,undefined);assert.equal(messages[0].leafCount,first.leaves.length);
+  const changed=planetCamera({altitude:50,longitude:2.2,latitude:-.2},960,600);
+  self.onmessage({data:{id:2,key:'test',camera:changed,options,snapshotPresent:false,allowUnchanged:true}});
+  assert.notEqual(messages[1].unchanged,true);assert.ok(messages[1].result);
+ }finally{delete globalThis.self;}
+});

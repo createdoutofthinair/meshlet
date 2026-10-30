@@ -7,13 +7,20 @@ let cachedSelection={previousLeaves:null,previousSplits:null,previousPatches:[]}
 self.onmessage=({data})=>{
  const start=performance.now();
  if(data.errorEstimates!=null)cachedErrors=data.errorEstimates;
- if(data.snapshotPresent===true)cachedSelection={previousLeaves:data.options.previousLeaves,previousSplits:data.options.previousSplits,previousPatches:data.previousPatches};
- const snapshot=data.snapshotPresent===false?cachedSelection:{previousLeaves:data.options.previousLeaves,previousSplits:data.options.previousSplits,previousPatches:data.previousPatches};
+ if(data.snapshotPresent===true)cachedSelection={previousLeaves:data.options.previousLeaves,previousSplits:data.options.previousSplits,previousPatches:data.previousPatches,signatures:transitionSignatures(data.previousPatches||[])};
+ const snapshot=data.snapshotPresent===true||data.snapshotPresent===false?cachedSelection:{previousLeaves:data.options.previousLeaves,previousSplits:data.options.previousSplits,previousPatches:data.previousPatches};
  const result=selectPatches(data.camera,{...data.options,previousLeaves:snapshot.previousLeaves,previousSplits:snapshot.previousSplits,errorEstimates:data.errorEstimates??data.options.errorEstimates??cachedErrors});
+ const signatures=transitionSignatures(result.visible),previous=snapshot.previousPatches||[];
+ // A complete unchanged covering tree needs neither slot allocation nor a
+ // replacement tree sent back through structured cloning.
+ if(data.allowUnchanged&&data.options.includeHidden&&previous.length>0&&result.visible.length===previous.length&&result.leaves.length===previous.length&&
+  snapshot.signatures&&result.visible.every(node=>snapshot.signatures.get(node.key)===signatures.get(node.key))){
+  self.postMessage({id:data.id,key:data.key,camera:data.camera,unchanged:true,leafCount:result.leaves.length,deepest:result.deepest,selectionMs:performance.now()-start});return;
+ }
  // Topology depends on patch identities and stitch masks, not GPU slot IDs.
  // Build it here before handing the selection back to the render thread.
  const topology=new Map();
- const previous=snapshot.previousPatches||[],pairs=transitionPairs(previous,result.visible),oldNodes=new Set(previous);
+ const pairs=transitionPairs(previous,result.visible),oldNodes=new Set(previous);
  const describe=p=>({fineKey:p.fine.key,coarseKey:p.coarse.key,fineOld:oldNodes.has(p.fine),coarseOld:oldNodes.has(p.coarse),originX:p.originX,originY:p.originY,scale:p.scale,refining:p.refining});
  const relationships=pairs.map(describe),groups=transitionGroups(previous,result.visible,pairs);
  // Ordinary group pairs already appear in relationships. Send indices instead
@@ -34,5 +41,5 @@ self.onmessage=({data})=>{
  try{if(keys.length)packed=packTransitionTopology(keys.map((key,slot)=>({slot,coordinates:topology.get(key)})));}
  catch(error){if(!error.message.includes('capacity exceeded'))throw error;}
  const transfers=packed?[packed.ranges.buffer,packed.coordinates.buffer]:[];
- self.postMessage({id:data.id,key:data.key,camera:data.camera,result,relationships,groupPlan,componentPlan,signatures:transitionSignatures(result.visible),topology:packed?null:topology,packedTopology:packed?{keys,ranges:packed.ranges,coordinates:packed.coordinates,vertexCount:packed.vertexCount}:null,selectionMs:performance.now()-start},transfers);
+ self.postMessage({id:data.id,key:data.key,camera:data.camera,result,relationships,groupPlan,componentPlan,signatures,topology:packed?null:topology,packedTopology:packed?{keys,ranges:packed.ranges,coordinates:packed.coordinates,vertexCount:packed.vertexCount}:null,selectionMs:performance.now()-start},transfers);
 };
