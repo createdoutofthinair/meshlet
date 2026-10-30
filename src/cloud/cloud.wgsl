@@ -59,12 +59,24 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  let height=(planetAltitude(p)-1500.0)/6500.0;
  return cloudDensityAtHeight(p,weather,detailWeight,height);
 }
+struct CloudWeatherTerms {typeBlend:f32,threshold:f32,coverageFactor:f32};
+fn cloudWeatherTerms(weather:vec2<f32>)->CloudWeatherTerms{
+ let humidity=smoothstep(.31,.67,weather.x);
+ let coverage=clamp(params.sky.w*.45+humidity*.72-.18,0.0,1.0);
+ return CloudWeatherTerms(smoothstep(.32,.68,weather.y),mix(.86,.30,coverage),smoothstep(0.0,.08,params.sky.w));
+}
+fn cloudDensityPrepared(p:vec3<f32>,detailWeight:f32,terms:CloudWeatherTerms)->f32{
+ return cloudDensityWithTerms(p,detailWeight,(planetAltitude(p)-1500.0)/6500.0,terms);
+}
 // A caller that also shades a sample can reuse its radial height.
 fn cloudDensityAtHeight(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32,height:f32)->f32{
+ return cloudDensityWithTerms(p,detailWeight,height,cloudWeatherTerms(weather));
+}
+fn cloudDensityWithTerms(p:vec3<f32>,detailWeight:f32,height:f32,terms:CloudWeatherTerms)->f32{
  // Low sheet clouds and taller cumulus coexist, with smooth regional changes.
  let low=smoothstep(0.0,.055,height)*(1.0-smoothstep(.18,.40,height));
  let tall=smoothstep(0.0,.08,height)*(1.0-smoothstep(.55,1.0,height));
- let profile=mix(low,tall,smoothstep(.32,.68,weather.y));
+ let profile=mix(low,tall,terms.typeBlend);
  if(profile<=0.0 || params.sky.w<=0.0){return 0.0;}
  let seed=params.cloud.z;let angle=params.sky.x*params.cloud.y/PLANET_RADIUS;let global=vec3<f32>(p.x,PLANET_RADIUS+p.y,p.z);
  let rotated=vec3<f32>(global.x*cos(angle)+global.z*sin(angle),global.y,-global.x*sin(angle)+global.z*cos(angle));
@@ -82,10 +94,8 @@ fn cloudDensityAtHeight(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32,height:f3
   erosion=(cloudNoise(q*4.1+vec3<f32>(2.0,7.0,4.0))-.5)*.16*detailWeight;
  }
  // Regional humidity gates broad clear areas and dense weather systems.
- let humidity=smoothstep(.31,.67,weather.x);
- let coverage=clamp(params.sky.w*.45+humidity*.72-.18,0.0,1.0);
- let threshold=mix(.86,.30,coverage);
- return smoothstep(threshold,threshold+.23,base+erosion)*profile*params.cloud.x*smoothstep(0.0,.08,params.sky.w);
+ let threshold=terms.threshold;
+ return smoothstep(threshold,threshold+.23,base+erosion)*profile*params.cloud.x*terms.coverageFactor;
 }
 @fragment fn fragment(input:Screen)->@location(0) vec4<f32>{
  let uv=vec2<f32>(input.pos.x/params.view.x*2.0-1.0,1.0-input.pos.y/params.view.y*2.0);let yaw=params.view.z;let pitch=params.view.w;

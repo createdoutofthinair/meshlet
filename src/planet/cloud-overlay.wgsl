@@ -1,13 +1,13 @@
 @group(0) @binding(1) var sceneDepth:texture_depth_2d;
 // A filtered far-field approximation: resolve large weather systems and
 // fractional coverage without evaluating subpixel cloud erosion in orbit.
-fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,weather:vec2<f32>)->vec4<f32>{
+fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:CloudWeatherTerms)->vec4<f32>{
  // The same density field and weather drive both representations. Four
  // stratified volume samples approximate its integrated coverage in orbit.
  var density=0.0;
  for(var i=0u;i<4u;i++){
   let samplePoint=point+ray*((f32(i)-1.5)*span*.25);
-  density+=cloudDensity(samplePoint,weather,0.0)*.25;
+  density+=cloudDensityPrepared(samplePoint,0.0,terms)*.25;
  }
  let opacity=1.0-exp(-density*max(span,0.0)*.0009);
  let shape=clamp(density,0.0,1.0);
@@ -46,8 +46,9 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,weather:vec
    // Blend representations across altitude so the handoff does not pop.
    let farWeight=smoothstep(50000.0,900000.0,origin.y);
    let weather=weatherField(origin+ray*((start+end)*.5));
+   let terms=cloudWeatherTerms(weather);
    var distant=vec4<f32>(0.0);
-   if(farWeight>0.0){distant=orbitalCloud(origin+ray*((start+end)*.5),span,ray,sun,weather);}
+   if(farWeight>0.0){distant=orbitalCloud(origin+ray*((start+end)*.5),span,ray,sun,terms);}
    if(farWeight<.999){
    // Long, grazing rays need smaller steps than short vertical views.
    let targetSteps=max(mix(32.0,64.0,smoothstep(12000.0,100000.0,span)),span/2700.0);
@@ -68,15 +69,15 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,weather:vec
     if(transmission<.02){break;}
     let point=origin+ray*(start+(f32(i)+jitter)*stepSize);
     let height=(planetAltitude(point)-1500.0)/6500.0;
-    let density=cloudDensityAtHeight(point,weather,detail,height);
+    let density=cloudDensityWithTerms(point,detail,height,terms);
     if(density>.001){
      let alpha=1.0-exp(-density*extinction);
      // Sample lighting less often, but interpolate rather than holding the
      // previous value in visible bands across three marching slices.
      if(!shadowReady || i>=shadowStep+3u){
-      if(!shadowReady){shadowFrom=exp(-cloudDensity(point+shadowOffset,weather,detail)*shadowStrength);}else{shadowFrom=shadowTo;}
+      if(!shadowReady){shadowFrom=exp(-cloudDensityPrepared(point+shadowOffset,detail,terms)*shadowStrength);}else{shadowFrom=shadowTo;}
       let ahead=point+ray*(stepSize*3.0);
-      shadowTo=exp(-cloudDensity(ahead+shadowOffset,weather,detail)*shadowStrength);
+      shadowTo=exp(-cloudDensityPrepared(ahead+shadowOffset,detail,terms)*shadowStrength);
       shadowStep=i;shadowReady=true;
      }
      let shadow=mix(shadowFrom,shadowTo,clamp(f32(i-shadowStep)/3.0,0.0,1.0));
