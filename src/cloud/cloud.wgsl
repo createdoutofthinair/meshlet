@@ -84,6 +84,7 @@ fn cloudDensityWithTerms(p:vec3<f32>,detailWeight:f32,height:f32,terms:CloudWeat
  let q=rotated*terms.scale+terms.seedOffset;
  let threshold=terms.threshold;
  let lower=threshold;
+ let upperThreshold=threshold+.23;
  // At full detail the coarse field has zero contribution to the mix.
  var coarse=0.0;
  if(detailWeight<1.0){coarse=cloudNoise(q*.16+vec3<f32>(8.0,14.0,3.0));}
@@ -107,9 +108,12 @@ fn cloudDensityWithTerms(p:vec3<f32>,detailWeight:f32,height:f32,terms:CloudWeat
  // Noise is in [0,1], so erosion can increase density by at most .08 times
  // the detail weight. Samples below that bound cannot produce cloud density.
  if(base+.080001*detailWeight<=lower){return 0.0;}
+ // Symmetrically, a sample above the upper threshold even at maximum erosion
+ // is fully saturated; its exact erosion noise cannot change its density.
+ if(base-.080001*detailWeight>=upperThreshold){return profile*params.cloud.x*terms.coverageFactor;}
  var erosion=0.0;
  if(detailWeight>0.0){erosion=(cloudNoise(q*4.1+vec3<f32>(2.0,7.0,4.0))-.5)*.16*detailWeight;}
- return smoothstep(lower,threshold+.23,base+erosion)*profile*params.cloud.x*terms.coverageFactor;
+ return smoothstep(lower,upperThreshold,base+erosion)*profile*params.cloud.x*terms.coverageFactor;
 }
 @fragment fn fragment(input:Screen)->@location(0) vec4<f32>{
  let uv=vec2<f32>(input.pos.x/params.view.x*2.0-1.0,1.0-input.pos.y/params.view.y*2.0);let yaw=params.view.z;let pitch=params.view.w;

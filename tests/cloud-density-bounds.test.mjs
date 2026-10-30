@@ -47,3 +47,12 @@ test('planet coarse-octave bound never rejects a sample above the density thresh
   }
  }
 });
+
+test('saturated cloud samples remain above the upper threshold under maximum erosion',()=>{
+ for(let t=0;t<=100;t++)for(let k=0;k<=100;k++)for(let b=0;b<=100;b++){
+  const detail=t/100,threshold=.3+.56*k/100,base=b/100;
+  for(const upper of [threshold+.23,threshold+.23+.16*(1-detail)])if(base-.080001*detail>=upper){
+   for(const noise of [0,.25,.5,.75,1])assert.ok(base+(noise-.5)*.16*detail>=upper-1e-12);
+  }
+ }
+});
