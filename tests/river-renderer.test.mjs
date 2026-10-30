@@ -9,19 +9,19 @@ function harness(){
  device.createCommandEncoder=()=>({beginComputePass(){return {setPipeline(p){operations.push(['compute',p]);},setBindGroup(){},dispatchWorkgroups(n){operations.push(['dispatch',n]);},end(){}};},beginRenderPass(descriptor){operations.push(['pass',descriptor]);return {setPipeline(p){operations.push(['render',p]);},setBindGroup(){},setIndexBuffer(){},draw(n,instances){operations.push(['draw',n,instances]);},drawIndexed(n){operations.push(['drawIndexed',n]);},end(){}};},finish(){return {};}});
  const canvas={width:800,height:500},context={getCurrentTexture:()=>({createView:()=>({})})},r=new RiverRenderer(canvas,{},device,context,()=>{});
  const texture=()=>({createView:()=>({})});
- Object.assign(r,{ready:true,dirty:true,frameBuffer:{data:new ArrayBuffer(224)},reflectionFrame:{data:new ArrayBuffer(224)},depthTexture:texture(),sceneTexture:texture(),reflectionTexture:texture(),reflectionDepth:texture(),geometryPipes:['bankCompute','waterCompute','rockCompute'],geometryBinds:[{},{},{}],flowPipe:'flowCompute',flowBind:{},skyPipe:'sky',skyBinds:[{},{}],compositePipe:'composite',compositeBind:{},volumePipe:'volumeRender',volumeBind:{},sprayPipe:'sprayRender',sprayBind:{},renderPipes:['bankRender','waterRender','reflectionRender','rockRender','rockReflectionRender'],renderBinds:[{},{},{},{},{}],indices:[{},{}]});
+ Object.assign(r,{ready:true,dirty:true,frameBuffer:{data:new ArrayBuffer(224)},reflectionFrame:{data:new ArrayBuffer(224)},depthTexture:texture(),sceneTexture:texture(),reflectionTexture:texture(),reflectionDepth:texture(),geometryPipes:['bankCompute','waterCompute','rockCompute'],geometryBinds:[{},{},{}],flowPipe:'flowCompute',flowBind:{},fluidInitPipe:'fluidInit',fluidInitBind:{},fluidStepPipe:'fluidStep',fluidStepBinds:[{},{}],fluidIndex:0,fluidReset:true,waterBinds:[{},{}],skyPipe:'sky',skyBinds:[{},{}],compositePipe:'composite',compositeBind:{},volumePipe:'volumeRender',volumeBinds:[{},{}],sprayPipe:'sprayRender',sprayBind:{},renderPipes:['bankRender','waterRender','reflectionRender','rockRender','rockReflectionRender'],renderBinds:[{},{},{},{},{}],indices:[{},{}]});
  r.resize=()=>{};return {r,operations};
 }
 test('GPU frame builds separate bank and water meshes and advances only unpaused water',async()=>{
  const {r,operations}=harness();assert.equal(r.frame(1000),true);await flush();
- assert.deepEqual(operations.filter(x=>x[0]==='compute').map(x=>x[1]),['bankCompute','waterCompute','rockCompute','flowCompute']);
+ assert.deepEqual(operations.filter(x=>x[0]==='compute').map(x=>x[1]),['bankCompute','waterCompute','rockCompute','fluidInit','fluidStep','flowCompute']);
  assert.deepEqual(operations.filter(x=>x[0]==='drawIndexed').map(x=>x[1]),[192*192*6,192*192*6,WATER_ALONG*WATER_ACROSS*6]);
  assert.deepEqual(operations.filter(x=>x[0]==='render').map(x=>x[1]),['sky','bankRender','rockRender','sky','reflectionRender','rockReflectionRender','composite','waterRender']);
  assert.equal(operations.filter(x=>x[0]==='draw'&&x[2]===RIVER_ROCKS).length,2,'GPU rocks appear in the scene and its reflection');
  const passes=operations.filter(x=>x[0]==='pass').map(x=>x[1]);assert.equal(passes[0].depthStencilAttachment.depthStoreOp,'store');
  assert.equal(passes[2].depthStencilAttachment.depthReadOnly,true);assert.equal(passes[2].depthStencilAttachment.depthLoadOp,undefined);assert.equal(passes[2].depthStencilAttachment.depthStoreOp,undefined);
  operations.length=0;r.showFlow=true;assert.equal(r.frame(1016),true);await flush();
- assert.deepEqual(operations.filter(x=>x[0]==='compute').map(x=>x[1]),['flowCompute']);
+ assert.deepEqual(operations.filter(x=>x[0]==='compute').map(x=>x[1]),['fluidStep','flowCompute']);
  let frame=new Float32Array(r.frameBuffer.data);assert.ok(Math.abs(frame[19]-.016)<1e-6);assert.equal(frame[31],1);
  assert.equal(r.frame(1516),true);await flush();frame=new Float32Array(r.frameBuffer.data);assert.ok(Math.abs(frame[19]-.5)<1e-6,'slow frames still advance the correct elapsed time');
  r.paused=true;r.dirty=true;assert.equal(r.frame(1532),true);await flush();frame=new Float32Array(r.frameBuffer.data);assert.equal(frame[19],0);
@@ -39,8 +39,8 @@ test('reflection quality recreates and rebinds appropriately sized GPU targets',
  globalThis.window={devicePixelRatio:1};globalThis.GPUTextureUsage={RENDER_ATTACHMENT:1,TEXTURE_BINDING:2,COPY_SRC:4};
  const created=[],groups=[],device={limits:{maxTextureDimension2D:4096},createTexture(descriptor){const texture={descriptor,destroyed:false,destroy(){this.destroyed=true;},createView(){return {texture:this};}};created.push(texture);return texture;},createBindGroup(descriptor){groups.push(descriptor);return descriptor;}};
  const canvas={width:0,height:0,getBoundingClientRect:()=>({width:800,height:500})},r=new RiverRenderer(canvas,{},device,{},()=>{});
- const pipe={getBindGroupLayout:()=>({})};Object.assign(r,{compositePipe:pipe,volumePipe:pipe,renderPipes:[null,pipe],renderBinds:[],frameBuffer:{},reach:{},vertices:[{},{}],motion:{},rocks:{},sceneSampler:{}});
- r.resize();assert.deepEqual(r.reflectionTexture.descriptor.size,[400,250]);assert.equal(created.length,4);assert.equal(groups.length,3);
- const previous=created.slice();r.reflectionScale=1;r.resize();assert.deepEqual(r.reflectionTexture.descriptor.size,[800,500]);assert.ok(previous.every(t=>t.destroyed));assert.equal(groups.length,6);
+ const pipe={getBindGroupLayout:()=>({})};Object.assign(r,{compositePipe:pipe,volumePipe:pipe,fluid:[{},{}],renderPipes:[null,pipe],renderBinds:[],frameBuffer:{},reach:{},vertices:[{},{}],motion:{},rocks:{},sceneSampler:{}});
+ r.resize();assert.deepEqual(r.reflectionTexture.descriptor.size,[400,250]);assert.equal(created.length,4);assert.equal(groups.length,5);
+ const previous=created.slice();r.reflectionScale=1;r.resize();assert.deepEqual(r.reflectionTexture.descriptor.size,[800,500]);assert.ok(previous.every(t=>t.destroyed));assert.equal(groups.length,10);
  r.resize();assert.equal(created.length,8,'unchanged dimensions and quality reuse existing textures');
 });
