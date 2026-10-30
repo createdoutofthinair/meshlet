@@ -4,15 +4,22 @@
 struct TransitionPair {slots:vec4<u32>,mapping:vec4<f32>};
 @group(0) @binding(3) var<storage,read> pairs:array<TransitionPair>;
 @group(0) @binding(4) var<storage,read_write> errors:array<vec2<f32>>;
+@group(0) @binding(5) var<storage,read> morphs:MorphStorage;
 var<workgroup> pixelErrors:array<f32,64>;
 var<workgroup> worldErrors:array<f32,64>;
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) group:vec3<u32>,@builtin(local_invocation_index) lane:u32){
  let p=pairs[group.x];var maxPixel=0.0;var maxWorld=0.0;
- for(var i=lane;i<INNER_COUNT;i+=64u){
-  let grid=vec2<u32>(i%17u,i/17u);let actual=stitchCoord(grid,p.slots.z);
-  let child=at(p.slots.x,grid,p.slots.z);
-  let parent=parentSurface(p.slots.y,p.mapping.xy+vec2<f32>(actual)*p.mapping.z,p.slots.w);
+ let overlay=p.mapping.w>.5;var count=INNER_COUNT;var start=0u;
+ if(overlay){
+  start=morphs.ranges[p.slots.x*16u].x;count=0u;
+  for(var meshlet=0u;meshlet<16u;meshlet++){count+=morphs.ranges[p.slots.x*16u+meshlet].y;}
+ }
+ for(var i=lane;i<count;i+=64u){
+  let grid=vec2<u32>(i%17u,i/17u);var q=vec2<f32>(stitchCoord(grid,p.slots.z));
+  if(overlay){q=morphs.coordinates[start+i];}
+  let child=parentSurface(p.slots.x,q,p.slots.z);
+  let parent=parentSurface(p.slots.y,p.mapping.xy+q*p.mapping.z,p.slots.w);
   maxWorld=max(maxWorld,length(child-parent));
   let a=frame.viewProjection*vec4<f32>(child,1.0);let b=frame.viewProjection*vec4<f32>(parent,1.0);
   // Ignore pairs wholly outside a generous viewport margin. Otherwise a

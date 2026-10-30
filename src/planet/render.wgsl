@@ -3,6 +3,7 @@
 @group(0) @binding(2) var<storage,read> vertices:array<PlanetVertex>;
 @group(0) @binding(3) var<storage,read> visible:array<u32>;
 @group(0) @binding(5) var<storage,read> plates:array<vec4<f32>>;
+@group(0) @binding(6) var<storage,read> morphs:MorphStorage;
 struct Output {
  @builtin(position) position:vec4<f32>,
  @location(0) normal:vec3<f32>,
@@ -20,11 +21,11 @@ struct Output {
  @location(12) @interpolate(flat) debugIds:vec2<u32>,
 };
 struct TerrainPixel {@location(0) color:vec4<f32>,@location(1) waterDepth:f32};
-fn onPatchEdge(a:vec2<u32>,b:vec2<u32>)->bool {
- return (a.x==b.x && (a.x==0u || a.x==CELLS)) || (a.y==b.y && (a.y==0u || a.y==CELLS));
+fn onPatchEdge(a:vec2<f32>,b:vec2<f32>)->bool {
+ return (a.x==b.x && (a.x==0.0 || a.x==16.0)) || (a.y==b.y && (a.y==0.0 || a.y==16.0));
 }
-fn onMeshletEdge(a:vec2<u32>,b:vec2<u32>)->bool {
- return (a.x==b.x && a.x%4u==0u)||(a.y==b.y && a.y%4u==0u);
+fn onMeshletEdge(a:vec2<f32>,b:vec2<f32>)->bool {
+ return (a.x==b.x && a.x%4.0==0.0)||(a.y==b.y && a.y%4.0==0.0);
 }
 fn debugHash(value:u32)->u32{
  var x=value;x=(x^(x>>16u))*2246822519u;x=(x^(x>>13u))*3266489917u;return x^(x>>16u);
@@ -32,22 +33,39 @@ fn debugHash(value:u32)->u32{
 @vertex
 fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->Output {
  let entry=visible[instance];let slot=entry>>4u;let meshlet=entry&15u;let tile=patches[slot];
+ let overlay=morphs.patches[slot].slots.w!=0u && (morphs.patches[slot].slots.z&16u)!=0u;
+ let range=morphs.ranges[slot*16u+meshlet];
+ if((overlay && vertex>=range.y)||(!overlay && vertex>=96u)){
+  var empty:Output;empty.position=vec4<f32>(2.0,2.0,2.0,1.0);return empty;
+ }
  let cell=vertex/6u;let corner=vertex%6u;
  let offsets=array<vec2<u32>,6>(vec2<u32>(0u,0u),vec2<u32>(1u,0u),vec2<u32>(0u,1u),vec2<u32>(1u,0u),vec2<u32>(1u,1u),vec2<u32>(0u,1u));
  let cellOrigin=vec2<u32>((meshlet%4u)*4u+cell%4u,(meshlet/4u)*4u+cell/4u);
  let triBase=(corner/3u)*3u;
- let a=cellOrigin+offsets[triBase];let b=cellOrigin+offsets[triBase+1u];let c=cellOrigin+offsets[triBase+2u];
- let stitch=tile.details.z;let coord=stitchCoord(cellOrigin+offsets[corner],stitch);
- let vert=vertices[slot*GRID_COUNT+(coord.y+2u)*GRID+coord.x+2u];
- let relative=tile.relative.xyz+vert.position.xyz;
+ var a=vec2<f32>(cellOrigin+offsets[triBase]);var b=vec2<f32>(cellOrigin+offsets[triBase+1u]);var c=vec2<f32>(cellOrigin+offsets[triBase+2u]);
+ let stitch=tile.details.z;var coord=stitchCoord(cellOrigin+offsets[corner],stitch);
+ var q=vec2<f32>(coord);
+ if(overlay){
+  q=morphs.coordinates[range.x+vertex];coord=vec2<u32>(round(q));
+  let first=range.x+vertex-vertex%3u;
+  a=morphs.coordinates[first];b=morphs.coordinates[first+1u];c=morphs.coordinates[first+2u];
+ }
+ var vert=vertices[slot*GRID_COUNT+(coord.y+2u)*GRID+coord.x+2u];
+ if(morphs.patches[slot].slots.w!=0u){
+  let attributeMask=select(stitch,morphs.patches[slot].slots.z&15u,overlay);
+  vert=displayedAttributes(slot,q,attributeMask);
+ }
+ var relative=displayedPosition(slot,coord,stitch);
+ if(overlay){relative=displayedSample(slot,q);}
+ let local=vert.position.xyz+(relative-(tile.relative.xyz+vert.position.xyz));
  var mask=0u;
  if((frame.counts.w & 8u)!=0u){if(onPatchEdge(b,c)){mask|=1u;}if(onPatchEdge(c,a)){mask|=2u;}if(onPatchEdge(a,b)){mask|=4u;}}
  if((frame.counts.w & 256u)!=0u){if(onMeshletEdge(b,c)){mask|=8u;}if(onMeshletEdge(c,a)){mask|=16u;}if(onMeshletEdge(a,b)){mask|=32u;}}
  var bary=vec3<f32>(0.0,0.0,1.0);if(corner%3u==0u){bary=vec3<f32>(1.0,0.0,0.0);}else if(corner%3u==1u){bary=vec3<f32>(0.0,1.0,0.0);}
  var out:Output;out.position=frame.viewProjection*vec4<f32>(relative,1.0);out.normal=vert.normal.xyz;
- out.direction=normalize(tile.centerDirection.xyz+vert.position.xyz/frame.settings.x);out.relative=relative;out.height=vert.position.w;
+ out.direction=normalize(tile.centerDirection.xyz+(tile.centerLow.xyz+local/frame.settings.x));out.relative=relative;out.height=vert.position.w;
  out.level=tile.details.y;out.bary=bary;out.edgeMask=mask;out.cavity=vert.normal.w;out.surface=vert.surface;
- out.detailHigh=tile.centerDirection.xyz;out.detailLow=tile.centerLow.xyz;out.detailOffset=vert.position.xyz/frame.settings.x;
+ out.detailHigh=tile.centerDirection.xyz;out.detailLow=tile.centerLow.xyz;out.detailOffset=local/frame.settings.x;
  out.debugIds=vec2<u32>(0u);
  if((frame.counts.w&192u)!=0u){
   let patchId=debugHash(bitcast<u32>(tile.cube.x)^debugHash(bitcast<u32>(tile.cube.y))^debugHash(bitcast<u32>(tile.cube.z))^tile.details.y);

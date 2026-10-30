@@ -1,15 +1,18 @@
+import {transitionCoordinates} from './transition-topology.js';
+import {createTransitionControl,advanceTransitionControl} from './transition-control.js';
+import {packTransitionTopology,MORPH_BUFFER_BYTES,MORPH_RANGE_OFFSET,MORPH_COORD_OFFSET} from './transition-upload.js';
 import {RADIUS_KM,PATCH_CELLS,FACE_BASES,faceCube,directionToFace,seedPlates,normalize,add,scale,dot} from './planet-math.js';
 import {planetCloudSource} from './cloud-compose.js';
 import {planetCamera} from './camera.js';
 import {selectPatches} from './quadtree.js';
-import {transitionPairs,encodeTransitionPairs} from './patch-transition.js';
+import {transitionPairs,encodeTransitionPairs,transitionGroups,encodePatchMorphs,coordinateTransitions} from './patch-transition.js';
 import {buildWorldGrid} from './world-grid.js';
 import {regionsAround,REGION_CAPACITY,REGION_GRID,REGION_SAMPLES,REGION_LOOKUPS} from './regions.js';
 const BUFFER=globalThis.GPUBufferUsage;
 // A second set of slots lets the currently drawn patches stay resident while
 // their replacements are generated and measured.
 const CAPACITY=1024,GRID=21,VERTEX_BYTES=48,MESHLETS=16,PATCH_BYTES=128;
-const TRANSITION_BATCH=12,TRANSITION_TARGET_PIXELS=.5,REFINEMENT_WAIT_MS=1200;
+const TRANSITION_BATCH=12,TRANSITION_TARGET_PIXELS=.5;
 const REGION_LOOKUP_OFFSET=24578*(48+17*16+4);
 const REGION_VALUES_OFFSET=Math.ceil((REGION_LOOKUP_OFFSET+REGION_LOOKUPS*4)/16)*16;
 const WORLD_BYTES=REGION_VALUES_OFFSET+REGION_CAPACITY*REGION_SAMPLES*16;
@@ -34,7 +37,7 @@ export class PlanetRenderer {
   this.patchBytes=new ArrayBuffer(CAPACITY*PATCH_BYTES);this.patchFloats=new Float32Array(this.patchBytes);this.patchUints=new Uint32Array(this.patchBytes);
   this.slotByKey=new Map();this.stitchByKey=new Map();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.patches=[];this.pending=[];this.normalPending=[];
   this.needsSelection=true;this.lastSelection=0;this.previousSplits=null;this.lodErrors=new Map();this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
-  this.transitionErrors=new Map();this.transitionCommitId=0;this.lastTransitionCommit=null;this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
+  this.retiredSlots=new Set();this.transitionErrors=new Map();this.transitionCommitId=0;this.lastTransitionCommit=null;this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
   this.transitionTargetPixels=TRANSITION_TARGET_PIXELS;
   this.lastSample=0;this.pendingRead=false;this.generation=0;this.surfaceRevision=0;this.inFlight=0;this.probePending=false;this.lastProbeKey='';this.lastProbeTime=0;this.stats={leaves:0,visiblePatches:0,deepest:0,selectionMs:0,generated:0};
   this.hydrologySeed=null;
@@ -45,16 +48,16 @@ export class PlanetRenderer {
  }
  async init(){
   const d=this.device;d.addEventListener('uncapturederror',e=>this.onError?.(`WebGPU: ${e.error.message}`));
-  d.lost.then(info=>this.onError?.(`WebGPU device lost: ${info.message||info.reason}. Reload to retry.`));
+  d.lost.then(info=>this.handleDeviceLoss(info));
   this.context.configure({device:d,format:this.format,alphaMode:'opaque'});
   const fetchText=async p=>{const r=await fetch(new URL(p,import.meta.url));if(!r.ok)throw new Error(`Failed to load ${p}`);return r.text();};
-  const [common,terrainCore,riverCurve,hydrologySource,worldField,riverDetailSource,regionalSource,terrainSurface,walkProbeSource,patchSurface,...sources]=await Promise.all(['./common.wgsl','./terrain-core.wgsl','./river-curve.wgsl','./hydrology.wgsl','./world-field.wgsl','./river-detail.wgsl','./regional-hydrology.wgsl','./terrain-surface.wgsl','./walk-probe.wgsl','./patch-surface.wgsl','./generate.wgsl','./normal.wgsl','./bounds.wgsl','./cull.wgsl','./render.wgsl','./lod-error.wgsl','./transition-error.wgsl','./ocean.wgsl'].map(fetchText));
+  const [common,terrainCore,riverCurve,hydrologySource,worldField,riverDetailSource,regionalSource,terrainSurface,walkProbeSource,patchSurface,patchMorph,...sources]=await Promise.all(['./common.wgsl','./terrain-core.wgsl','./river-curve.wgsl','./hydrology.wgsl','./world-field.wgsl','./river-detail.wgsl','./regional-hydrology.wgsl','./terrain-surface.wgsl','./walk-probe.wgsl','./patch-surface.wgsl','./patch-morph.wgsl','./generate.wgsl','./normal.wgsl','./bounds.wgsl','./cull.wgsl','./render.wgsl','./lod-error.wgsl','./transition-error.wgsl','./ocean.wgsl'].map(fetchText));
   const labels=['Terrain generation','Terrain normals','Meshlet bounds','Meshlet culling','Planet rendering','Terrain LOD residual','Terrain transition comparison','Ocean surface'];
-  const modules=await Promise.all(sources.map((s,i)=>shader(d,common+'\n'+(i===0||i===1||i===4||i===7?terrainCore+'\n'+riverCurve+'\n'+worldField+'\n'+terrainSurface+'\n':'')+(i===4||i===6?patchSurface+'\n':'')+s,labels[i])));
+  const modules=await Promise.all(sources.map((s,i)=>shader(d,common+'\n'+(i===0||i===1||i===4||i===7?terrainCore+'\n'+riverCurve+'\n'+worldField+'\n'+terrainSurface+'\n':'')+(i===4||i===6?patchSurface+'\n':'')+(i===4?patchMorph+'\n':'')+s,labels[i])));
   [this.generatePipe,this.normalPipe,this.boundsPipe,this.cullPipe]=await Promise.all(modules.slice(0,4).map(module=>d.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}})));
   this.lodErrorPipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:modules[5],entryPoint:'main'}});
   this.transitionPipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:modules[6],entryPoint:'main'}});
-  const walkProbeModule=await shader(d,common+'\n'+patchSurface+'\n'+walkProbeSource,'Walking surface probe');
+  const walkProbeModule=await shader(d,common+'\n'+patchSurface+'\n'+patchMorph+'\n'+walkProbeSource,'Walking surface probe');
   this.walkProbePipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:walkProbeModule,entryPoint:'main'}});
   [this.highlandsPipe,this.pointPipe,this.valleyPipe,this.riverPipe]=await Promise.all(['highlands','point','valleyCandidates','riverCandidates'].map(entryPoint=>d.createComputePipelineAsync({layout:'auto',compute:{module:modules[0],entryPoint}})));
   this.renderPipe=await d.createRenderPipelineAsync({layout:'auto',vertex:{module:modules[4],entryPoint:'vs'},fragment:{module:modules[4],entryPoint:'fs',targets:[{format:this.format},{format:'r32float'}]},primitive:{topology:'triangle-list',cullMode:'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'}});
@@ -73,6 +76,7 @@ export class PlanetRenderer {
   this.uniform=make('Planet frame',224,BUFFER.UNIFORM|BUFFER.COPY_DST);
   this.oceanView=make('Camera for analytic ocean',80,BUFFER.UNIFORM|BUFFER.COPY_DST);
   this.patchBuffer=make('Planet patches',this.patchBytes.byteLength,BUFFER.STORAGE|BUFFER.COPY_DST);
+  this.morphBuffer=make('Patch morph metadata',MORPH_BUFFER_BYTES,BUFFER.STORAGE|BUFFER.COPY_DST);
   this.vertices=make('Cached GPU terrain vertices',CAPACITY*GRID*GRID*VERTEX_BYTES,BUFFER.STORAGE|BUFFER.COPY_SRC);
   this.lodErrorBuffer=make('Measured terrain LOD residuals',CAPACITY*4,BUFFER.STORAGE|BUFFER.COPY_SRC);
   this.transitionPairsBuffer=make('Terrain transition pairs',CAPACITY*32,BUFFER.STORAGE|BUFFER.COPY_DST);
@@ -129,16 +133,16 @@ export class PlanetRenderer {
   this.regionFinishBind=bindEntries(this.regionPipes.finishRegion,[[0,this.uniform],[7,this.world],[13,this.regionQueueBuffer],[14,this.regionA]]);
   this.generateBind=bindEntries(this.generatePipe,[[0,this.uniform],[1,this.patchBuffer],[2,this.vertices],[3,this.queueBuffer],[4,this.plates],[7,this.world],[8,this.worldDirections],[10,this.worldFaces],[11,this.riverMasks]]);
   this.lodErrorBind=bind(this.lodErrorPipe,[this.uniform,this.vertices,this.queueBuffer,this.lodErrorBuffer]);
-  this.transitionBind=bind(this.transitionPipe,[this.uniform,this.patchBuffer,this.vertices,this.transitionPairsBuffer,this.transitionErrorBuffer]);
+  this.transitionBind=bind(this.transitionPipe,[this.uniform,this.patchBuffer,this.vertices,this.transitionPairsBuffer,this.transitionErrorBuffer,this.morphBuffer]);
   this.riverDetailBind=bindEntries(this.riverDetailPipe,[[0,this.uniform],[1,this.patchBuffer],[3,this.queueBuffer],...worldEntries,[11,this.riverMasks]]);
   this.normalBind=bindEntries(this.normalPipe,[[0,this.uniform],[1,this.patchBuffer],[2,this.vertices],[3,this.normalQueueBuffer],[4,this.plates],[7,this.world],[8,this.worldDirections],[10,this.worldFaces]]);
   this.boundsBind=bind(this.boundsPipe,[this.uniform,this.vertices,this.bounds,this.queueBuffer]);
-  this.cullBind=bind(this.cullPipe,[this.uniform,this.patchBuffer,this.bounds,this.activeBuffer,this.visible,this.indirect]);
-  this.renderBind=bindEntries(this.renderPipe,[[0,this.uniform],[1,this.patchBuffer],[2,this.vertices],[3,this.visible],[5,this.plates],...worldEntries]);
+  this.cullBind=bind(this.cullPipe,[this.uniform,this.patchBuffer,this.bounds,this.activeBuffer,this.visible,this.indirect,this.morphBuffer]);
+  this.renderBind=bindEntries(this.renderPipe,[[0,this.uniform],[1,this.patchBuffer],[2,this.vertices],[3,this.visible],[5,this.plates],[6,this.morphBuffer],...worldEntries]);
   this.highlandsBind=bindEntries(this.highlandsPipe,[[0,this.uniform],[4,this.plates],[5,this.sampleBuffer],...worldEntries]);
   this.valleyBind=d.createBindGroup({layout:this.valleyPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.uniform}},{binding:4,resource:{buffer:this.plates}},{binding:5,resource:{buffer:this.sampleBuffer}}]});
   this.pointBind=bindEntries(this.pointPipe,[[0,this.uniform],[4,this.plates],[5,this.sampleBuffer],[6,this.probeInput],...worldEntries]);
-  this.walkProbeBind=bind(this.walkProbePipe,[this.patchBuffer,this.vertices,this.walkProbeInput,this.walkProbeResult]);
+  this.walkProbeBind=bind(this.walkProbePipe,[this.patchBuffer,this.vertices,this.walkProbeInput,this.walkProbeResult,this.morphBuffer]);
   this.riverBind=bindEntries(this.riverPipe,[[5,this.sampleBuffer],[7,this.world],[8,this.worldDirections]]);
   if(this.timing){this.queries=d.createQuerySet({type:'timestamp',count:8});this.resolve=make('GPU timestamp resolve',64,BUFFER.QUERY_RESOLVE|BUFFER.COPY_SRC);}
   d.queue.writeBuffer(this.plates,0,seedPlates(this.seed));
@@ -157,12 +161,37 @@ export class PlanetRenderer {
   run('initializeLake',1);for(let i=0;i<128;i++)run('spreadLakeMinimum',i&1);run('saveLakeMinimum');
   run('markRiverPresence');run('buildRiverPaths',0,this.worldCount*17);pass.end();d.queue.submit([encoder.finish()]);this.hydrologySeed=seed;
  }
+ uploadTransitionTopology(records){
+  const packed=packTransitionTopology(records);
+  this.device.queue.writeBuffer(this.morphBuffer,MORPH_RANGE_OFFSET,packed.ranges);
+  if(packed.coordinates.length)this.device.queue.writeBuffer(this.morphBuffer,MORPH_COORD_OFFSET,packed.coordinates);
+  this.topologySlots=packed.slots;this.morphVertexCount=packed.vertexCount;
+ }
+ uploadMorphs(entries){
+  const resident=new Set([...this.slotByKey.values(),...(this.stage?.newNodes.map(node=>node.slot)||[])]);
+  for(const {pair} of entries){
+   if(!resident.has(pair.fine.slot)||!resident.has(pair.coarse.slot))throw new Error('Morph references a nonresident patch');
+  }
+  const raw=encodePatchMorphs(entries,CAPACITY),words=new Uint32Array(raw);
+  if(!entries.length){this.topologySlots=null;this.morphVertexCount=96;}
+  for(const {pair} of entries)if(this.topologySlots?.has(pair.fine.slot))words[pair.fine.slot*8+2]|=16;
+  this.device.queue.writeBuffer(this.morphBuffer,0,raw);
+  this.surfaceRevision++;
+ }
  resetPatchCache(){
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
-  this.lodErrors.clear();
+  this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;
+  if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
   this.transitionErrors.clear();this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
-  this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';
+  this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
   this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
+ }
+ handleDeviceLoss(info){
+  if(this.deviceLost)return;
+  this.deviceLost=true;
+  // Invalidate readbacks and retirement fences without submitting more GPU work.
+  this.resetPatchCache();this.needsSelection=false;
+  this.onError?.(`WebGPU device lost: ${info.message||info.reason}. Reload to retry.`);
  }
  resetRegions(){
   this.regionSeed=this.seed>>>0;this.regions.clear();this.regionFree=Array.from({length:REGION_CAPACITY},(_,i)=>REGION_CAPACITY-1-i);
@@ -170,6 +199,7 @@ export class PlanetRenderer {
   this.device.queue.writeBuffer(this.world,REGION_LOOKUP_OFFSET,this.regionLookup);
  }
  invalidateTerrain(){
+  if(this.deviceLost)return;
   this.resetPatchCache();if(this.regionSeed!==(this.seed>>>0))this.resetRegions();
   this.device.queue.writeBuffer(this.plates,0,seedPlates(this.seed));
   if(this.cameraState.altitude<50)this.cameraState.surfaceHeight=10;
@@ -212,7 +242,7 @@ export class PlanetRenderer {
  select(camera,now){
   const start=performance.now();
   const maxDepth=this.cameraState.mode==='walk'?22:this.maxDepth;
-  const result=selectPatches(camera,{budget:this.budget,maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.transitionErrors});
+  const result=selectPatches(camera,{budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.transitionErrors,previousLeaves:this.coveringLeaves});
   const wantedNodes=new Map(result.visible.map(p=>[p.key,p]));
   // A changed stitch graph may alter geometry even for a retained patch.
   const signatureFor=node=>{
@@ -249,39 +279,140 @@ export class PlanetRenderer {
    return {...node,slot};
   });
   const selectionMs=performance.now()-start;
+  const previousEye=this.selectionState?.eye;
   this.selectionState={eye:[...camera.eye],forward:[...camera.forward],mode:this.cameraState.mode,budget:this.budget,maxDepth,pixelSize:this.pixelSize,width:camera.width,height:camera.height,generation:this.generation};
   this.lastSelection=now;this.needsSelection=false;
   if(!this.patches.length){
-   this.slotByKey=slots;this.stitchByKey=signatures;this.patches=nodes;this.previousSplits=result.splits;
+   this.slotByKey=slots;this.stitchByKey=signatures;this.patches=nodes;this.previousSplits=result.splits;this.coveringLeaves=result.leaves;
    this.pending=newNodes.map(n=>n.slot);this.normalPending=normalPending;
    this.stats={leaves:result.leaves.length,visiblePatches:nodes.length,deepest:result.deepest,selectionMs,generated:newNodes.length,normalUpdates:normalPending.length,reusedNormalUpdates:normalPending.length-newNodes.length};
    return;
   }
   if(!newNodes.length&&nodes.length===this.patches.length&&topologyChanges===0){
-   this.patches=nodes;this.previousSplits=result.splits;this.stats={...this.stats,leaves:result.leaves.length,deepest:result.deepest,selectionMs,generated:0,normalUpdates:0,reusedNormalUpdates:0};return;
+   this.patches=nodes;this.previousSplits=result.splits;this.coveringLeaves=result.leaves;this.stats={...this.stats,leaves:result.leaves.length,deepest:result.deepest,selectionMs,generated:0,normalUpdates:0,reusedNormalUpdates:0};return;
   }
   const pairs=transitionPairs(this.patches,nodes).map(p=>({...p,refining:p.refining??slots.has(p.fine.key)}));
-  if(pairs.length>CAPACITY)throw new Error('Terrain transition comparison capacity exceeded.');
+  if(pairs.length>CAPACITY){
+   for(const node of newNodes)this.free.push(node.slot);
+   this.needsSelection=true;this.transition={...this.transition,pending:pairs.length,waiting:true,capacityDeferred:true};return;
+  }
   const matched=new Set(pairs.map(p=>p.refining?p.fine.key:p.coarse.key));
   const uncovered=newNodes.some(n=>!matched.has(n.key));
-  this.stage={result,nodes,slots,signatures,newNodes,todo:newNodes.map(n=>n.slot),normalPending,pairs,selectionMs,state:'building',generation:this.generation,reference:camera,nextMeasure:0,uncovered,hasRefinement:pairs.some(p=>p.refining),waitingSince:null};
+  this.stage={components:coordinateTransitions(this.patches,nodes),groups:transitionGroups(this.patches,nodes),result,nodes,slots,signatures,newNodes,todo:newNodes.map(n=>n.slot),normalPending,pairs,selectionMs,state:'building',generation:this.generation,reference:camera,previousEye,nextMeasure:0,uncovered,hasRefinement:pairs.some(p=>p.refining),waitingSince:null};
   this.transition={...this.transition,pending:newNodes.length,waiting:false};
+ }
+ canMorphTransition(stage){
+  return !!stage.components?.length&&!stage.uncovered&&stage.groups.every(g=>['refine','merge','stitch'].includes(g.type))&&stage.components.every(c=>c.deferredReasons.every(r=>['stitch-change','stitched-parent','stitched-child'].includes(r)));
+ }
+ prepareTransitionTopology(stage){
+  if(stage.topologyReady)return true;
+  const records=[];
+  for(const group of stage.groups)for(const pair of group.pairs){
+   if(group.type!=='stitch'&&!pair.fine.stitch&&!pair.coarse.stitch)continue;
+   const coordinates=transitionCoordinates({mask:pair.coarse.stitch,originX:pair.originX,originY:pair.originY,scale:pair.scale},{mask:pair.fine.stitch});
+   records.push({slot:pair.fine.slot,coordinates});
+  }
+  if(records.length){
+   try{this.uploadTransitionTopology(records);}
+   catch(error){
+    if(!error.message.includes('capacity exceeded'))throw error;
+    this.transition={...this.transition,capacityDeferred:true};return false;
+   }
+  }else{this.topologySlots=null;this.morphVertexCount=96;}
+  stage.topologyReady=true;return true;
+ }
+ beginTransition(camera){
+  const stage=this.stage;if(!this.canMorphTransition(stage)||!this.prepareTransitionTopology(stage))return false;
+  const refining=stage.groups.filter(g=>g.type!=='merge'),focus=refining.length?refining:stage.groups;
+  // Choose a nearby patch; averaging opposite cube faces can put the anchor
+  // at the planet's center and freeze lateral travel.
+  const radius=RADIUS_KM+(this.cameraState.surfaceHeight||0);
+  const nearest=focus.reduce((best,g)=>{
+   const distance=Math.hypot(...g.coarse.direction.map((v,i)=>v*radius-camera.eye[i]));
+   return !best||distance<best.distance?{direction:g.coarse.direction,distance}:best;
+  },null);
+  // Draw the finest covering set at both endpoints: new children for splits,
+  // existing children for merges. Target parents remain resident but hidden.
+  const merging=new Set(stage.groups.filter(g=>g.type==='merge').map(g=>g.coarse.key));
+  const drawn=new Map(stage.nodes.filter(p=>!merging.has(p.key)).map(p=>[p.key,p]));
+  for(const group of stage.groups)if(group.type==='merge')for(const pair of group.pairs)drawn.set(pair.fine.key,pair.fine);
+  stage.drawNodes=[...drawn.values()];
+  const anchor=nearest.direction.map(v=>v*radius);
+  stage.morph=createTransitionControl(camera,{anchor,approaching:refining.length>0,previousEye:stage.previousEye,
+   endpointPixels:Math.max(stage.maxRefine||0,stage.maxMerge||0),targetPixels:this.transitionTargetPixels});
+  stage.state='transitioning';this.uploadMorphs(this.transitionEntries(stage,0));
+  this.transition={...this.transition,morphProgress:0,retainedParents:stage.groups.length};return true;
+ }
+ transitionEntries(stage,progress){
+  return stage.groups.flatMap(group=>group.pairs.map(pair=>({pair,factor:group.type==='merge'?1-progress:progress})));
+ }
+ advanceTransition(camera,now){
+  const stage=this.stage;if(stage?.state!=='transitioning'||this.surfaceReads>0)return;
+  const m=stage.morph,before=m.factor,{factor,cancel}=advanceTransitionControl(m,camera,this.transitionTargetPixels);
+  if(factor!==before)this.uploadMorphs(this.transitionEntries(stage,factor));
+  this.transition={...this.transition,morphProgress:factor,estimatedStepPixels:m.estimatedStepPixels,estimatedEndpointPixels:m.estimatedEndpointPixels,errorLimited:m.limited};
+  if(factor===1)this.commitStage(now);
+  else if(cancel){this.cancelStage();this.needsSelection=true;}
+ }
+ retireSlots(slots){
+  if(!slots.length)return;
+  const generation=this.generation,retired=this.retiredSlots;
+  if(new Set(slots).size!==slots.length||slots.some(slot=>retired.has(slot)))throw new Error('Patch slot retired twice');
+  for(const slot of slots)retired.add(slot);
+  // All commands referencing the old selection have already been submitted.
+  // Keep its slots unavailable until those commands and probe copies finish.
+  this.device.queue.onSubmittedWorkDone().then(()=>{
+   if(this.generation!==generation||this.retiredSlots!==retired)return;
+   for(const slot of slots){retired.delete(slot);this.free.push(slot);}
+   if(this.transition.capacityDeferred)this.needsSelection=true;
+  }).catch(error=>{if(generation===this.generation&&!this.deviceLost)this.onError?.(`Terrain slot retirement: ${error.message}`);});
  }
  cancelStage(){
   if(!this.stage)return;
-  for(const node of this.stage.newNodes)this.free.push(node.slot);
-  this.stage=null;this.transition={...this.transition,pending:0,waiting:false};
+  if(this.stage.state==='transitioning'){
+   if(this.stage.morph.factor!==0)throw new Error('Cannot cancel a visible intermediate morph');
+  }
+  if(this.stage.topologyReady)this.uploadMorphs([]);
+  this.retireSlots(this.stage.newNodes.map(node=>node.slot));
+  this.stage=null;this.transition={...this.transition,pending:0,waiting:false,morphProgress:null,retainedParents:0,reselectionPending:false};
  }
  commitStage(now){
   const stage=this.stage;if(!stage)return;
-  for(const [key,slot] of this.slotByKey)if(!stage.slots.has(key))this.free.push(slot);
+  if(stage.state==='transitioning'){
+   if(stage.morph.factor!==1)throw new Error('Cannot commit an intermediate morph');
+  }
+  if(stage.topologyReady)this.uploadMorphs([]);
+  this.retireSlots([...this.slotByKey].filter(([key])=>!stage.slots.has(key)).map(([,slot])=>slot));
   this.lastTransitionCommit={id:++this.transitionCommitId,at:now,pairs:stage.pairs.length,refinements:stage.pairs.filter(p=>p.refining).length,merges:stage.pairs.filter(p=>!p.refining).length,maxRefinementPixels:stage.maxRefine??null,maxMergePixels:stage.maxMerge??null,maxPixels:this.transition.pixels,uncovered:stage.uncovered};
-  this.slotByKey=stage.slots;this.stitchByKey=stage.signatures;this.patches=stage.nodes;this.previousSplits=stage.result.splits;
+  this.slotByKey=stage.slots;this.stitchByKey=stage.signatures;this.patches=stage.nodes;this.previousSplits=stage.result.splits;this.coveringLeaves=stage.result.leaves;
   // New patches were shaded while staged; world-space normals do not depend
   // on which neighboring LOD is currently selected.
   this.normalPending=[];
   this.stats={leaves:stage.result.leaves.length,visiblePatches:stage.nodes.length,deepest:stage.result.deepest,selectionMs:stage.selectionMs,generated:stage.newNodes.length,normalUpdates:stage.normalPending.length,reusedNormalUpdates:0};
-  this.stage=null;this.surfaceRevision++;this.lastSelection=now;this.transition={...this.transition,pending:0,waiting:false,capacityDeferred:false};
+  this.stage=null;this.surfaceRevision++;this.needsSelection=true;this.lastSelection=now;this.transition={...this.transition,pending:0,waiting:false,capacityDeferred:false,morphProgress:null,retainedParents:0,reselectionPending:false};
+ }
+ selectionSettingsChanged(camera){
+  const s=this.selectionState,maxDepth=this.cameraState.mode==='walk'?22:this.maxDepth;
+  return !s||s.mode!==this.cameraState.mode||s.budget!==this.budget||s.maxDepth!==maxDepth||s.pixelSize!==this.pixelSize||s.width!==camera.width||s.height!==camera.height||s.generation!==this.generation;
+ }
+ invalidateSelection(camera){
+  const stage=this.stage;if(!stage)return;
+  const settingsChanged=this.selectionSettingsChanged(camera);
+  if(stage.state==='transitioning'){
+   if(!settingsChanged)return;
+   // Only endpoint zero can be cancelled without changing displayed geometry.
+   // At intermediate factors, finish or reverse spatially before reselecting.
+   if(stage.morph.factor!==0||this.surfaceReads>0){
+    this.needsSelection=true;this.transition={...this.transition,reselectionPending:true};return;
+   }
+  }else if(!settingsChanged){
+   const reference=stage.reference,ratio=camera.clearance/Math.max(.0001,reference.clearance);
+   const moved=Math.hypot(...camera.eye.map((x,i)=>x-reference.eye[i]));
+   const waitingWalk=this.cameraState.mode==='walk'&&stage.state==='waiting';
+   const maxMove=waitingWalk ? .002 : Math.max(.05,reference.clearance*.7),maxTurn=(waitingWalk?5:20)*Math.PI/180;
+   if(ratio>=.6&&ratio<=1.7&&moved<=maxMove&&dot(camera.forward,reference.forward)>=Math.cos(maxTurn))return;
+  }
+  this.cancelStage();this.needsSelection=true;this.lastSelection=0;
  }
  shouldSelect(camera,now){
   if(this.stage)return false;
@@ -290,7 +421,7 @@ export class PlanetRenderer {
   if(now-this.lastSelection<=100)return false;
   if(this.cameraState.mode!=='walk')return true;
   const s=this.selectionState;
-  if(!s||s.mode!=='walk'||s.budget!==this.budget||s.maxDepth!==22||s.pixelSize!==this.pixelSize||s.width!==camera.width||s.height!==camera.height||s.generation!==this.generation)return true;
+  if(this.selectionSettingsChanged(camera))return true;
   // A full balanced selection is expensive. At walking speed, wait until the
   // camera moves 75 cm or turns five degrees; retained patches are still drawn
   // from the current camera every frame. This also limits small LOD churn.
@@ -298,6 +429,8 @@ export class PlanetRenderer {
   return distance>=.00075||dot(camera.forward,s.forward)<Math.cos(5*Math.PI/180);
  }
  async sampleTerrain(direction=null,kind='terrain'){
+  if(this.deviceLost)throw new Error('WebGPU device is lost. Reload to retry.');
+  const generation=this.generation;
   const d=this.device,all=!direction,count=all?(kind==='rivers'?this.worldCount:6*24*24):1,size=count*16;
   d.queue.writeBuffer(this.uniform,164,new Float32Array([this.relief]));
   d.queue.writeBuffer(this.uniform,172,new Float32Array([this.valleys]));
@@ -308,7 +441,8 @@ export class PlanetRenderer {
   const pipe=kind==='rivers'?this.riverPipe:kind==='valleys'?this.valleyPipe:this.highlandsPipe,bind=kind==='rivers'?this.riverBind:kind==='valleys'?this.valleyBind:this.highlandsBind;
   const pass=encoder.beginComputePass();pass.setPipeline(all?pipe:this.pointPipe);pass.setBindGroup(0,all?bind:this.pointBind);pass.dispatchWorkgroups(all?Math.ceil(count/64):1);pass.end();
   encoder.copyBufferToBuffer(this.sampleBuffer,0,readback,0,size);d.queue.submit([encoder.finish()]);
-  try{await readback.mapAsync(GPUMapMode.READ);const data=new Float32Array(readback.getMappedRange().slice(0));readback.unmap();return data;}
+  try{await readback.mapAsync(GPUMapMode.READ);const data=new Float32Array(readback.getMappedRange().slice(0));readback.unmap();return generation===this.generation?data:null;}
+  catch(error){if(this.deviceLost||generation!==this.generation)return null;throw error;}
   finally{readback.destroy();}
  }
  async findHighlands(){
@@ -329,10 +463,11 @@ export class PlanetRenderer {
   return generation===this.generation?{direction,height:height[3],flow:data[best+3]}:null;
  }
  async sampleRenderedSurface(direction){
-  if(!this.lastFrameEye||!this.patches.length)return null;
+  const displayed=this.displayedPatches||this.patches;
+  if(this.deviceLost||!this.lastFrameEye||!displayed.length)return null;
   const revision=this.surfaceRevision,generation=this.generation;
   const face=directionToFace(direction),epsilon=1e-12;
-  const patch=this.patches.filter(p=>p.face===face.face&&Math.abs(face.u-p.u)<=p.span/2+epsilon&&Math.abs(face.v-p.v)<=p.span/2+epsilon).sort((a,b)=>b.level-a.level)[0];
+  const patch=displayed.filter(p=>p.face===face.face&&Math.abs(face.u-p.u)<=p.span/2+epsilon&&Math.abs(face.v-p.v)<=p.span/2+epsilon).sort((a,b)=>b.level-a.level)[0];
   if(!patch)return null;
   const cell=(value,center)=>Math.max(0,Math.min(PATCH_CELLS-1,Math.floor((value-center+patch.span/2)/patch.span*PATCH_CELLS)));
   // Keep the ray origin near the camera even on high mountains: subtracting
@@ -344,9 +479,10 @@ export class PlanetRenderer {
   const d=this.device;d.queue.writeBuffer(this.walkProbeInput,0,raw);
   const readback=d.createBuffer({size:16,usage:BUFFER.COPY_DST|BUFFER.MAP_READ}),encoder=d.createCommandEncoder({label:'Walkable terrain probe'});
   const pass=encoder.beginComputePass();pass.setPipeline(this.walkProbePipe);pass.setBindGroup(0,this.walkProbeBind);pass.dispatchWorkgroups(1);pass.end();
-  encoder.copyBufferToBuffer(this.walkProbeResult,0,readback,0,16);d.queue.submit([encoder.finish()]);
+  encoder.copyBufferToBuffer(this.walkProbeResult,0,readback,0,16);d.queue.submit([encoder.finish()]);this.surfaceReads=(this.surfaceReads||0)+1;
   try{await readback.mapAsync(GPUMapMode.READ);const values=new Float32Array(readback.getMappedRange().slice(0));readback.unmap();return generation===this.generation&&revision===this.surfaceRevision&&values[1]>.5?values[0]:null;}
-  finally{readback.destroy();}
+  catch(error){if(this.deviceLost||generation!==this.generation)return null;throw error;}
+  finally{readback.destroy();this.surfaceReads--;}
  }
  requestSurface(camera,now){
   if(this.cameraState.mode==='walk'||this.cameraState.mode==='flight')return;
@@ -364,36 +500,34 @@ export class PlanetRenderer {
   }).catch(e=>this.onError?.(`Terrain probe: ${e.message}`)).finally(()=>{this.probePending=false;});
  }
  frame(now){
-  if(this.inFlight>=2)return null;
+  if(this.deviceLost||this.inFlight>=2)return null;
   const cpuStart=performance.now();this.resize();
   const camera=planetCamera(this.cameraState,this.canvas.width,this.canvas.height);
   const regionsChanged=this.simulateRegionsForAnalysis&&this.prepareRegions(camera);
   if(!regionsChanged)this.requestSurface(camera,now);
-  if(this.stage){
-   const s=this.selectionState,ratio=camera.clearance/Math.max(.0001,this.stage.reference.clearance);
-   const moved=Math.hypot(...camera.eye.map((x,i)=>x-this.stage.reference.eye[i]));
-   const waitingWalk=this.cameraState.mode==='walk'&&this.stage.state==='waiting';
-   const maxMove=waitingWalk ? .002 : Math.max(.05,this.stage.reference.clearance*.7);
-   const maxTurn=(waitingWalk?5:20)*Math.PI/180;
-   if(!s||s.mode!==this.cameraState.mode||s.budget!==this.budget||s.pixelSize!==this.pixelSize||s.width!==camera.width||s.height!==camera.height||ratio<.6||ratio>1.7||moved>maxMove||dot(camera.forward,this.stage.reference.forward)<Math.cos(maxTurn)){
-    this.cancelStage();this.needsSelection=true;this.lastSelection=0;
+  this.invalidateSelection(camera);
+  if(this.stage?.state==='ready'){
+   const stage=this.stage;
+   const large=Math.max(stage.maxMerge||0,stage.maxRefine||0)>this.transitionTargetPixels;
+   if(!large)this.commitStage(now);
+   else if(!this.beginTransition(camera)){
+    stage.state='waiting';stage.nextMeasure=now+200;
+    this.transition={...this.transition,waiting:true};
    }
   }
-  if(this.stage?.state==='ready'){
-   const stage=this.stage,largeMerge=stage.maxMerge>this.transitionTargetPixels&&!stage.uncovered;
-   if(largeMerge && stage.waitingSince===null)stage.waitingSince=now;
-   // Do not indefinitely block newly requested detail when the budget also
-   // needs an above-target merge elsewhere. Pure coarsening remains held.
-   const blocksRefinement=stage.hasRefinement&&now-stage.waitingSince>=REFINEMENT_WAIT_MS;
-   if(largeMerge&&!blocksRefinement){stage.state='waiting';stage.nextMeasure=now+200;this.transition={...this.transition,waiting:true};}
-   else this.commitStage(now);
-  }
+  this.advanceTransition(camera,now);
   if(this.stage?.state==='waiting'&&now>=this.stage.nextMeasure){this.stage.state='building';this.transition={...this.transition,waiting:false};}
   if(this.shouldSelect(camera,now))this.select(camera,now);
   const stage=this.stage;
+  const drawPatches=stage?.state==='transitioning'?stage.drawNodes:this.patches;
+  this.stats.visiblePatches=drawPatches.length;
   if(stage?.state==='building')this.pending=stage.todo.splice(0,TRANSITION_BATCH);
   const normals=stage?.state==='building'?[...this.normalPending,...this.pending]:this.normalPending;
-  const compare=stage?.state==='building'&&stage.todo.length===0;
+  const morphMeasurement=stage?.state==='transitioning'&&!stage.measurementPending&&now>=(stage.nextMeasure||0);
+  let compare=(stage?.state==='building'&&stage.todo.length===0)||morphMeasurement;
+  if(compare&&!this.prepareTransitionTopology(stage)){
+   compare=false;stage.state='waiting';stage.nextMeasure=now+200;this.transition={...this.transition,waiting:true};
+  }
   const writePatch=(node,slots)=>{
    const i=node.slot*32,b=FACE_BASES[node.face],cube=faceCube(node.face,node.u,node.v);
    this.patchFloats.set([...cube,node.span],i);this.patchFloats.set([...b.u,0],i+4);this.patchFloats.set([...b.v,0],i+8);
@@ -420,7 +554,7 @@ export class PlanetRenderer {
   f.set([...sun,0],36);f.set([RADIUS_KM,this.relief,this.ocean?1:0,this.valleys],40);
   const separateOcean=this.ocean&&!this.lodColors&&!this.patchColors&&!this.meshletColors&&!this.wireframe&&!this.patchLines&&!this.meshletLines;
   const flags=(this.culling?1:0)|(this.lodColors?2:0)|(this.wireframe?4:0)|(this.patchLines?8:0)|(this.biomes?16:0)|(separateOcean?32:0)|(this.patchColors?64:0)|(this.meshletColors?128:0)|(this.meshletLines?256:0);
-  u.set([this.patches.length,this.pending.length,this.seed>>>0,flags],44);
+  u.set([drawPatches.length,this.pending.length,this.seed>>>0,flags],44);
   u.set([normals.length,this.regionPending.length,camera.width,camera.height],48);
   f.set([this.erosion,this.rivers?1:0,this.regional?1:0,this.debugOpacity],52);
   const d=this.device;
@@ -431,11 +565,11 @@ export class PlanetRenderer {
   if(separateOcean){
    const view=new Float32Array(20);view.set([...camera.radial,camera.altitude],0);view.set([...camera.forward,camera.tanY],4);view.set([...camera.right,camera.tanX],8);view.set([...camera.up,camera.width],12);view[16]=camera.height;view[17]=camera.near;d.queue.writeBuffer(this.oceanView,0,view);
   }
-  if(this.patches.length)d.queue.writeBuffer(this.activeBuffer,0,new Uint32Array(this.patches.map(p=>p.slot)));
+  if(drawPatches.length)d.queue.writeBuffer(this.activeBuffer,0,new Uint32Array(drawPatches.map(p=>p.slot)));
   if(this.pending.length)d.queue.writeBuffer(this.queueBuffer,0,new Uint32Array(this.pending));
   if(normals.length)d.queue.writeBuffer(this.normalQueueBuffer,0,new Uint32Array(normals));
-  if(compare&&stage.pairs.length)d.queue.writeBuffer(this.transitionPairsBuffer,0,encodeTransitionPairs(stage.pairs));
-  d.queue.writeBuffer(this.indirect,0,new Uint32Array([96,0,0,0]));
+  if(compare&&stage.pairs.length)d.queue.writeBuffer(this.transitionPairsBuffer,0,encodeTransitionPairs(stage.pairs,this.topologySlots));
+  d.queue.writeBuffer(this.indirect,0,new Uint32Array([this.morphVertexCount||96,0,0,0]));
   this.ensureHydrology();
   const generatedOnSample=this.pending.length;
   const sample=((generatedOnSample>0&&!stage)||now-this.lastSample>500)&&!this.pendingRead;if(sample){this.lastSample=now;this.pendingRead=true;}
@@ -457,7 +591,7 @@ export class PlanetRenderer {
   dispatch(this.normalPipe,this.normalBind,normals.length*17*17);
   dispatch(this.boundsPipe,this.boundsBind,this.pending.length*MESHLETS);
   if(compare&&stage.pairs.length){cp.setPipeline(this.transitionPipe);cp.setBindGroup(0,this.transitionBind);cp.dispatchWorkgroups(stage.pairs.length);}
-  dispatch(this.cullPipe,this.cullBind,this.patches.length*MESHLETS);cp.end();
+  dispatch(this.cullPipe,this.cullBind,drawPatches.length*MESHLETS);cp.end();
   const colorView=this.context.getCurrentTexture().createView(),depthView=this.depth.createView();
   const cloudActive=!!this.cloudPipe&&!this.lodColors&&!this.patchColors&&!this.meshletColors&&!this.wireframe&&!this.patchLines&&!this.meshletLines;
   const descriptor={colorAttachments:[
@@ -472,13 +606,15 @@ export class PlanetRenderer {
    const waterPass=encoder.beginRenderPass(waterDescriptor);waterPass.setPipeline(this.oceanPipe);waterPass.setBindGroup(0,this.oceanBind);waterPass.draw(3);waterPass.end();
   }
   if(cloudActive){const cloudDescriptor={colorAttachments:[{view:colorView,loadOp:'load',storeOp:'store'}]};if(sample&&this.timing)cloudDescriptor.timestampWrites={querySet:this.queries,beginningOfPassWriteIndex:6,endOfPassWriteIndex:7};const clouds=encoder.beginRenderPass(cloudDescriptor);clouds.setPipeline(this.cloudPipe);clouds.setBindGroup(0,this.cloudBind);clouds.draw(3);clouds.end();}
-  const measured=sample?this.patches.map(({key,slot})=>({key,slot})):null;
+  const measured=sample?drawPatches.map(({key,slot})=>({key,slot})):null;
   let readback;if(sample){readback=d.createBuffer({size:80+CAPACITY*4,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});encoder.copyBufferToBuffer(this.indirect,0,readback,0,16);encoder.copyBufferToBuffer(this.lodErrorBuffer,0,readback,80,CAPACITY*4);if(this.timing){encoder.resolveQuerySet(this.queries,0,8,this.resolve,0);encoder.copyBufferToBuffer(this.resolve,0,readback,16,64);}}
   let transitionRead;if(compare&&stage.pairs.length){
-   stage.state='measuring';transitionRead=d.createBuffer({size:stage.pairs.length*8,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});
+   if(!morphMeasurement)stage.state='measuring';
+   stage.measurementPending=true;stage.nextMeasure=now+200;
+   transitionRead=d.createBuffer({size:stage.pairs.length*8,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});
    encoder.copyBufferToBuffer(this.transitionErrorBuffer,0,transitionRead,0,stage.pairs.length*8);
   }else if(compare){stage.maxMerge=0;stage.state='ready';this.transition={...this.transition,pixels:0,pending:0,overTarget:false};}
-  d.queue.submit([encoder.finish()]);this.lastFrameEye=camera.eye;this.pending=[];this.normalPending=[];this.regionPending=[];this.inFlight++;
+  d.queue.submit([encoder.finish()]);this.lastFrameEye=camera.eye;this.displayedPatches=drawPatches;this.pending=[];this.normalPending=[];this.regionPending=[];this.inFlight++;
   if(stage)this.transition={...this.transition,pending:stage.todo.length};
   d.queue.onSubmittedWorkDone().then(()=>{this.inFlight--;}).catch(()=>{this.inFlight--;});
   if(transitionRead)transitionRead.mapAsync(GPUMapMode.READ).then(()=>{
@@ -491,10 +627,16 @@ export class PlanetRenderer {
      this.transitionErrors.set(pair.coarse.key,Math.max(this.transitionErrors.get(pair.coarse.key)||0,world));
     }
     while(this.transitionErrors.size>8192)this.transitionErrors.delete(this.transitionErrors.keys().next().value);
-    stage.maxMerge=maxMerge;stage.maxRefine=maxRefine;stage.state='ready';this.transition={pixels:maxPixel,pending:0,overTarget:maxPixel>this.transitionTargetPixels,waiting:false};
+    stage.maxMerge=maxMerge;stage.maxRefine=maxRefine;
+    if(morphMeasurement){
+     // Refresh the error budget at the current view without changing progress.
+     // Near-plane crossings must not leave a permanently enormous old estimate.
+     stage.morph.endpointPixels=maxPixel;stage.morph.focalPixels=camera.focalPixels;stage.morph.clearance=Math.max(.0001,camera.clearance);
+    }else stage.state='ready';
+    this.transition={...this.transition,pixels:maxPixel,pending:0,overTarget:maxPixel>this.transitionTargetPixels,waiting:false};
    }
    transitionRead.unmap();
-  }).catch(e=>{if(this.stage===stage){this.cancelStage();this.needsSelection=true;this.onError?.(`Terrain transition: ${e.message}`);}}).finally(()=>transitionRead.destroy());
+  }).catch(e=>{if(this.stage===stage){if(!morphMeasurement){this.cancelStage();this.needsSelection=true;}this.onError?.(`Terrain transition: ${e.message}`);}}).finally(()=>{stage.measurementPending=false;transitionRead.destroy();});
   if(readback){const generation=this.generation;readback.mapAsync(GPUMapMode.READ).then(()=>{
    const data=readback.getMappedRange(),visibleMeshlets=new Uint32Array(data,0,4)[1];let gpuComputeMs=null,gpuRenderMs=null,gpuTerrainMs=null,gpuOceanMs=null,gpuCloudMs=null;
    if(this.timing){const t=new BigUint64Array(data,16,8);const elapsed=(a,b)=>t[b]>=t[a]?Number(t[b]-t[a])/1e6:null;gpuComputeMs=elapsed(0,1);gpuTerrainMs=elapsed(2,3);gpuOceanMs=separateOcean?elapsed(4,5):null;gpuCloudMs=cloudActive?elapsed(6,7):null;gpuRenderMs=gpuTerrainMs==null?null:gpuTerrainMs+(gpuOceanMs??0)+(gpuCloudMs??0);}
@@ -504,7 +646,7 @@ export class PlanetRenderer {
     while(this.lodErrors.size>8192)this.lodErrors.delete(this.lodErrors.keys().next().value);
     this.latest={visibleMeshlets,gpuComputeMs,gpuRenderMs,gpuTerrainMs,gpuOceanMs,gpuCloudMs,gpuSampleAt:now,generatedPatchesSample:generatedOnSample};
    }readback.unmap();
-  }).catch(e=>this.onError?.(`GPU telemetry: ${e.message}`)).finally(()=>{readback.destroy();this.pendingRead=false;});}
+  }).catch(e=>{if(generation===this.generation&&!this.deviceLost)this.onError?.(`GPU telemetry: ${e.message}`);}).finally(()=>{readback.destroy();this.pendingRead=false;});}
   return performance.now()-cpuStart;
  }
 }

@@ -23,6 +23,7 @@ function fakeRenderer(){
  const canvas={width:960,height:600},context={getCurrentTexture:()=>({createView:()=>({})})};
  const r=new PlanetRenderer(canvas,{},device,context,false,error=>{throw Error(error);});
  r.resize=()=>{};r.ensureHydrology=()=>{};r.requestSurface=()=>{};r.depth={createView:()=>({})};r.waterDepth={createView:()=>({})};r.budget=120;r.pixelSize=14;r.lastSample=Infinity;
+ r.morphBuffer=buffer(17*1024*1024);
  for(const key of ['uniform','oceanView','patchBuffer','vertices','queueBuffer','normalQueueBuffer','activeBuffer','indirect','lodErrorBuffer','transitionPairsBuffer','transitionErrorBuffer']){
   const size={uniform:224,oceanView:80,patchBuffer:1024*128,vertices:1024*441*48,queueBuffer:1024*4,normalQueueBuffer:1024*4,activeBuffer:1024*4,indirect:16,lodErrorBuffer:1024*4,transitionPairsBuffer:1024*32,transitionErrorBuffer:1024*8}[key];r[key]=buffer(size);
  }
@@ -51,11 +52,11 @@ test('renderer prepares new geometry before swapping and keeps coverage while me
  assert.equal(r.free.length,1024-r.patches.length);assert.equal(new Set(r.free).size,r.free.length);
 });
 
-test('an excessive coarsening difference holds old geometry until it becomes subpixel',async()=>{
+test('an unsupported coarsening difference holds old geometry until it becomes subpixel',async()=>{
  const {r,value}=fakeRenderer();r.frame(1000);await flush();r.cameraState.altitude=500;r.needsSelection=true;
  for(let i=0;i<100;i++){r.frame(1200+i*150);await flush();if(!r.stage)break;}
  const before=r.patches.map(p=>p.key);value.pixels=2;r.cameraState.altitude=900;r.needsSelection=true;r.lastSelection=0;r.frame(20000);await flush();
- assert.ok(r.stage);r.stage.uncovered=false;r.stage.hasRefinement=false;
+ assert.ok(r.stage);r.stage.uncovered=false;r.stage.hasRefinement=false;for(const c of r.stage.components)c.deferredReasons.push('unsupported-test-topology');
  for(let i=0;i<100&&!r.transition.waiting;i++){r.frame(20150+i*150);await flush();}
  assert.equal(r.transition.waiting,true);assert.deepEqual(r.patches.map(p=>p.key),before);
  value.pixels=.1;
@@ -63,13 +64,13 @@ test('an excessive coarsening difference holds old geometry until it becomes sub
  assert.equal(r.stage,null);assert.ok(r.transition.pixels<.5);assert.notDeepEqual(r.patches.map(p=>p.key),before);
 });
 
-test('an above-target merge cannot indefinitely prevent a requested refinement',async()=>{
+test('an unsupported above-target mixed transition never commits through a timeout',async()=>{
  const {r,value}=fakeRenderer();r.frame(1000);await flush();r.cameraState.altitude=500;r.needsSelection=true;
  for(let i=0;i<100;i++){r.frame(1200+i*150);await flush();if(!r.stage)break;}
  value.pixels=2;r.cameraState.altitude=900;r.needsSelection=true;r.lastSelection=0;r.frame(20000);await flush();
- assert.ok(r.stage);r.stage.uncovered=false;r.stage.hasRefinement=true;let sawWaiting=false;
+ assert.ok(r.stage);r.stage.uncovered=false;r.stage.hasRefinement=true;for(const c of r.stage.components)c.deferredReasons.push('unsupported-test-topology');let sawWaiting=false;
  for(let i=0;i<100&&r.stage;i++){r.frame(20150+i*250);await flush();sawWaiting||=r.transition.waiting;}
- assert.ok(sawWaiting);assert.equal(r.stage,null);assert.equal(r.transition.overTarget,true);
+ assert.ok(sawWaiting);assert.ok(r.stage);assert.equal(r.transition.overTarget,true);
 });
 
 
@@ -92,4 +93,224 @@ test('surface readback is discarded when displayed patch selection changes',asyn
  r.device.createCommandEncoder=()=>{const e=encoder();e.copyBufferToBuffer=()=>{};return e;};
  const pending=r.sampleRenderedSurface(direction);r.surfaceRevision++;release();
  assert.equal(await pending,null);
+});
+
+test('morph upload changes the surface revision and rejects nonresident parents',async()=>{
+ const {r}=fakeRenderer();r.frame(1000);await flush();
+ r.morphBuffer=r.device.createBuffer({size:1024*32});
+ const [fine,coarse]=r.patches;
+ const pair={fine,coarse,originX:0,originY:0,scale:.5};
+ const before=r.surfaceRevision;r.uploadMorphs([{pair,factor:.4}]);
+ assert.equal(r.surfaceRevision,before+1);
+ const words=new Uint32Array(r.morphBuffer.data);assert.equal(words[fine.slot*8+3],1);
+ const revision=r.surfaceRevision;
+ assert.throws(()=>r.uploadMorphs([{pair:{...pair,coarse:{...coarse,slot:1023}},factor:0}]),/nonresident/);
+ assert.equal(r.surfaceRevision,revision);
+ r.uploadMorphs([]);assert.ok(new Uint32Array(r.morphBuffer.data).every(v=>v===0));
+});
+
+async function preparedRefinement(){
+ const {makeTile}=await import('../src/planet/planet-math.js');
+ const {transitionPairs,transitionGroups,coordinateTransitions}=await import('../src/planet/patch-transition.js');
+ const {planetCamera}=await import('../src/planet/camera.js');
+ const {r}=fakeRenderer();r.frame(1000);await flush();r.morphBuffer=r.device.createBuffer({size:1024*32});
+ const parent=r.patches.find(p=>p.stitch===0);assert.ok(parent);
+ const children=[0,1,2,3].map(i=>({...makeTile(parent.face,parent.level+1,parent.x*2+i%2,parent.y*2+(i>>1)),slot:r.free.pop(),stitch:0,normalStitch:0,edgeKeys:[null,null,null,null],cornerKeys:[[],[],[],[]]}));
+ const nodes=[...r.patches.filter(p=>p!==parent),...children],slots=new Map(nodes.map(p=>[p.key,p.slot]));
+ const groups=transitionGroups(r.patches,nodes),pairs=transitionPairs(r.patches,nodes).map(p=>({...p,refining:true}));
+ r.stage={nodes,slots,groups,pairs,components:coordinateTransitions(r.patches,nodes),uncovered:false,newNodes:children,normalPending:[],todo:[],signatures:new Map(),result:{leaves:nodes,splits:new Set(),deepest:parent.level+1},selectionMs:0,state:'ready',generation:r.generation,maxRefine:.25,maxMerge:0};
+ return {r,parent,children,camera:planetCamera(r.cameraState,960,600)};
+}
+
+test('refinement draws a shared spatial factor and retains its parent through completion',async()=>{
+ const {r,parent,camera}=await preparedRefinement();assert.equal(r.beginTransition(camera),true);
+ const m=r.stage.morph;assert.equal(m.factor,0);assert.ok(!r.free.includes(parent.slot));
+ const atDistance=d=>({...camera,eye:camera.eye.map((v,i)=>m.anchor[i]+(v-m.anchor[i])*d/m.distance)});
+ r.advanceTransition(camera,2000);assert.equal(m.factor,0,'elapsed time alone cannot morph terrain');
+ r.advanceTransition(atDistance(m.distance-m.band*.5),2100);assert.ok(Math.abs(m.factor-.5)<1e-8);
+ const data=new Float32Array(r.morphBuffer.data);
+ for(const p of r.stage.pairs)assert.ok(Math.abs(data[p.fine.slot*8+7]-.5)<1e-6);
+ assert.throws(()=>r.cancelStage(),/intermediate/);assert.throws(()=>r.commitStage(2200),/intermediate/);
+ r.surfaceReads=1;r.advanceTransition(atDistance(m.distance-m.band*2),2300);assert.ok(Math.abs(m.factor-.5)<1e-8);
+ r.surfaceReads=0;r.advanceTransition(atDistance(m.distance-m.band*2),2400);assert.equal(r.stage,null);
+ assert.ok(!r.free.includes(parent.slot),'parent is held until the GPU fence completes');await flush();assert.ok(r.free.includes(parent.slot));
+});
+
+test('camera reversal returns to the old surface before cancelling the refinement',async()=>{
+ const {r,camera}=await preparedRefinement(),old=r.patches;r.beginTransition(camera);const m=r.stage.morph;
+ const atDistance=d=>({...camera,eye:camera.eye.map((v,i)=>m.anchor[i]+(v-m.anchor[i])*d/m.distance)});
+ r.advanceTransition(atDistance(m.distance-m.band*.4),2000);assert.ok(m.factor>0);
+ r.advanceTransition(atDistance(m.distance+m.band*.1),2100);assert.equal(r.stage,null);assert.equal(r.patches,old);
+ assert.ok(new Uint32Array(r.morphBuffer.data).every(x=>x===0));await flush();
+ assert.equal(r.free.length,1024-r.patches.length);
+});
+
+async function preparedMerge(){
+ const {r,parent,children,camera}=await preparedRefinement();
+ const {transitionPairs,transitionGroups,coordinateTransitions}=await import('../src/planet/patch-transition.js');
+ const target=r.patches,previous=r.stage.nodes;r.patches=previous;r.slotByKey=new Map(previous.map(p=>[p.key,p.slot]));
+ Object.assign(r.stage,{nodes:target,slots:new Map(target.map(p=>[p.key,p.slot])),newNodes:[parent],groups:transitionGroups(previous,target),pairs:transitionPairs(previous,target).map(p=>({...p,refining:false})),components:coordinateTransitions(previous,target),maxRefine:0,maxMerge:.25});
+ return {r,parent,children,camera};
+}
+
+test('merge keeps fine children drawn until they coincide with the target parent',async()=>{
+ const {r,parent,children,camera}=await preparedMerge();assert.ok(r.beginTransition(camera));const m=r.stage.morph;
+ assert.equal(m.approaching,false);assert.ok(!r.stage.drawNodes.some(p=>p.key===parent.key));
+ assert.ok(children.every(c=>r.stage.drawNodes.some(p=>p.key===c.key)));
+ const atDistance=d=>({...camera,eye:camera.eye.map((v,i)=>m.anchor[i]+(v-m.anchor[i])*d/m.distance)});
+ const factors=()=>children.map(c=>new Float32Array(r.morphBuffer.data)[c.slot*8+7]);
+ assert.deepEqual(factors(),[1,1,1,1]);
+ r.advanceTransition(atDistance(m.distance+m.band*.5),2000);for(const f of factors())assert.ok(Math.abs(f-.5)<1e-6);
+ r.advanceTransition(atDistance(m.distance+m.band*2),2100);assert.equal(r.stage,null);
+ assert.ok(r.patches.some(p=>p.key===parent.key));assert.ok(children.every(c=>!r.free.includes(c.slot)));
+ await flush();assert.ok(children.every(c=>r.free.includes(c.slot)));assert.equal(r.free.length,1024-r.patches.length);
+});
+
+test('merge reversal restores the original fine surface',async()=>{
+ const {r,camera}=await preparedMerge(),old=r.patches;r.beginTransition(camera);const m=r.stage.morph;
+ const atDistance=d=>({...camera,eye:camera.eye.map((v,i)=>m.anchor[i]+(v-m.anchor[i])*d/m.distance)});
+ r.advanceTransition(atDistance(m.distance+m.band*.5),2000);assert.ok(m.factor>0);
+ r.advanceTransition(atDistance(m.distance-m.band*.1),2100);assert.equal(r.stage,null);assert.equal(r.patches,old);
+ await flush();assert.equal(r.free.length,1024-r.patches.length);
+});
+
+test('mixed progress uses complementary fine factors for splits and merges',async()=>{
+ const {r}=fakeRenderer();
+ const groups=[{type:'refine',pairs:[{fine:{slot:4}}]},{type:'merge',pairs:[{fine:{slot:8}}]}];
+ for(const t of [0,.25,.5,.75,1]){
+  const entries=r.transitionEntries({groups},t);assert.equal(entries[0].factor,t);assert.equal(entries[1].factor,1-t);
+ }
+});
+
+test('mixed split and merge draws each region once and commits both atomically',async()=>{
+ const {r,parent,camera}=await preparedRefinement();
+ const {makeTile}=await import('../src/planet/planet-math.js');
+ const {transitionPairs,transitionGroups,coordinateTransitions}=await import('../src/planet/patch-transition.js');
+ const other=r.patches.find(p=>p.key!==parent.key&&p.stitch===0);assert.ok(other);
+ const fine=[0,1,2,3].map(i=>({...makeTile(other.face,other.level+1,other.x*2+i%2,other.y*2+(i>>1)),slot:r.free.pop(),stitch:0,normalStitch:0,edgeKeys:[null,null,null,null],cornerKeys:[[],[],[],[]]}));
+ r.patches=[...r.patches.filter(p=>p!==other),...fine];r.slotByKey=new Map(r.patches.map(p=>[p.key,p.slot]));
+ r.stage.newNodes.push(other);r.stage.groups=transitionGroups(r.patches,r.stage.nodes);r.stage.components=coordinateTransitions(r.patches,r.stage.nodes);r.stage.pairs=transitionPairs(r.patches,r.stage.nodes);
+ assert.ok(r.beginTransition(camera));const m=r.stage.morph;assert.equal(m.approaching,true);
+ const draw=r.stage.drawNodes;assert.ok(!draw.some(p=>p.key===parent.key||p.key===other.key));
+ assert.equal(new Set(draw.map(p=>p.key)).size,draw.length);
+ assert.ok(fine.every(c=>draw.some(p=>p.key===c.key)));
+ const target=new Set(r.stage.nodes.map(p=>p.key));
+ const close={...camera,eye:camera.eye.map((v,i)=>m.anchor[i]+(v-m.anchor[i])*(m.distance-2*m.band)/m.distance)};
+ r.advanceTransition(close,2000);assert.equal(r.stage,null);assert.deepEqual(new Set(r.patches.map(p=>p.key)),target);
+ await flush();assert.equal(r.free.length,1024-r.patches.length);assert.equal(new Set(r.free).size,r.free.length);
+});
+
+test('retained stitch changes use one common mesh and one morph record per slot',async()=>{
+ const {r}=fakeRenderer();r.frame(1000);await flush();
+ const {MORPH_BUFFER_BYTES,MORPH_RANGE_OFFSET}=await import('../src/planet/transition-upload.js');
+ const {transitionPairs,transitionGroups,coordinateTransitions}=await import('../src/planet/patch-transition.js');
+ const {planetCamera}=await import('../src/planet/camera.js');
+ r.morphBuffer=r.device.createBuffer({size:MORPH_BUFFER_BYTES});
+ const original=r.patches[0];r.patches=r.patches.map(p=>p===original?{...p,stitch:1}:p);
+ const next=r.patches.map(p=>p.key===original.key?{...p,stitch:2}:p),groups=transitionGroups(r.patches,next);
+ r.stage={nodes:next,slots:new Map(r.slotByKey),signatures:new Map(),newNodes:[],normalPending:[],todo:[],groups,pairs:transitionPairs(r.patches,next),components:coordinateTransitions(r.patches,next),result:{leaves:next,splits:new Set(),deepest:original.level},selectionMs:0,generation:r.generation,state:'ready',maxRefine:.25,maxMerge:.25,uncovered:false};
+ const camera=planetCamera(r.cameraState,960,600);assert.ok(r.beginTransition(camera));
+ assert.equal(r.transitionEntries(r.stage,0).length,1);assert.ok(r.topologySlots.has(original.slot));
+ const words=new Uint32Array(r.morphBuffer.data);assert.equal(words[original.slot*8],original.slot);
+ assert.equal(words[original.slot*8+1],1);assert.equal(words[original.slot*8+2],2|16);
+ const ranges=new Uint32Array(r.morphBuffer.data,MORPH_RANGE_OFFSET,1024*16*2);
+ let vertices=0;for(let i=0;i<16;i++)vertices+=ranges[(original.slot*16+i)*2+1];assert.ok(vertices>0);
+ const m=r.stage.morph,close={...camera,eye:camera.eye.map((v,i)=>m.anchor[i]+(v-m.anchor[i])*(m.distance-2*m.band)/m.distance)};
+ r.advanceTransition(close,2000);assert.equal(r.stage,null);assert.equal(r.patches.find(p=>p.key===original.key).stitch,2);
+ assert.equal(r.morphVertexCount,96);assert.equal(r.topologySlots,null);
+});
+
+test('actual camera-driven selection starts a complete resident morph without missing children',async()=>{
+ const {r,value}=fakeRenderer();r.frame(1000);await flush();
+ assert.equal(r.patches.length,r.coveringLeaves.length);assert.ok(r.patches.length<=r.budget);
+ value.pixels=3;r.cameraState.altitude=500;r.needsSelection=true;r.frame(1200);await flush();
+ for(let i=0;i<100&&r.stage?.state!=='transitioning';i++){r.frame(1400+i*150);await flush();}
+ assert.equal(r.stage?.state,'transitioning');assert.equal(r.stage.uncovered,false);
+ assert.ok(r.stage.components.every(c=>!c.deferredReasons.includes('incomplete-children')));
+ const slots=[...new Uint32Array(r.activeBuffer.data,0,r.stage.drawNodes.length)];
+ assert.deepEqual(slots,r.stage.drawNodes.map(p=>p.slot));assert.equal(new Set(slots).size,slots.length);
+ for(const group of r.stage.groups)for(const slot of group.slots)assert.ok(!r.free.includes(slot));
+});
+
+test('quality, viewport and mode changes cancel only at the original morph endpoint',async()=>{
+ const changes=[r=>{r.budget--;},r=>{r.pixelSize++;},r=>{r.maxDepth--;},(r,c)=>{c.width++;},(r,c)=>{c.height++;},r=>{r.cameraState.mode='walk';}];
+ for(const change of changes){
+  const {r,camera}=await preparedRefinement();r.beginTransition(camera);const old=r.patches;
+  change(r,camera);r.invalidateSelection(camera);
+  assert.equal(r.stage,null);assert.equal(r.patches,old);assert.equal(r.needsSelection,true);
+  await flush();assert.equal(new Set(r.free).size,1024-r.patches.length);
+ }
+});
+
+test('settings changes preserve intermediate geometry and reselect after reversal',async()=>{
+ const {r,camera}=await preparedRefinement();r.beginTransition(camera);const stage=r.stage,m=stage.morph;
+ const atDistance=d=>({...camera,eye:camera.eye.map((v,i)=>m.anchor[i]+(v-m.anchor[i])*d/m.distance)});
+ const halfway=atDistance(m.distance-m.band*.5);r.advanceTransition(halfway,2000);
+ const before=r.morphBuffer.data.slice(0);r.maxDepth--;r.budget--;r.pixelSize++;camera.width++;r.cameraState.mode='walk';
+ r.invalidateSelection(camera);assert.equal(r.stage,stage);assert.equal(r.transition.reselectionPending,true);
+ assert.deepEqual(r.morphBuffer.data,before,'settings do not rewrite intermediate morph geometry');
+ r.advanceTransition(halfway,900000);assert.deepEqual(r.morphBuffer.data,before,'elapsed time does not complete the deferred morph');
+ r.advanceTransition(atDistance(m.distance+m.band*.1),900100);
+ assert.equal(r.stage,null);assert.equal(r.transition.reselectionPending,false);assert.equal(r.needsSelection,true);
+ await flush();assert.equal(r.free.length,1024-r.patches.length);
+});
+
+test('pending rendered probes prevent settings cancellation even at endpoint zero',async()=>{
+ const {r,camera}=await preparedRefinement();r.beginTransition(camera);const stage=r.stage;
+ r.surfaceReads=1;r.maxDepth--;r.invalidateSelection(camera);
+ assert.equal(r.stage,stage);assert.equal(r.transition.reselectionPending,true);
+ r.surfaceReads=0;r.invalidateSelection(camera);assert.equal(r.stage,null);await flush();
+});
+
+test('max depth changes invalidate staged geometry before it becomes visible',async()=>{
+ const {r,camera}=await preparedRefinement();r.stage.state='building';const old=r.patches;
+ r.maxDepth--;r.invalidateSelection(camera);assert.equal(r.stage,null);assert.equal(r.patches,old);
+ await flush();assert.equal(r.free.length,1024-r.patches.length);
+});
+
+test('terrain reset invalidates an active morph and ignores its previous retirement fence',async()=>{
+ const {r,camera}=await preparedRefinement();r.beginTransition(camera);const m=r.stage.morph;
+ r.advanceTransition({...camera,eye:camera.eye.map((v,i)=>m.anchor[i]+(v-m.anchor[i])*(m.distance-m.band*.5)/m.distance)},2000);
+ let finish;const done=new Promise(resolve=>{finish=resolve;});r.device.queue.onSubmittedWorkDone=()=>done;
+ const spare=r.free.pop();r.retireSlots([spare]);const generation=r.generation;
+ r.resetPatchCache();assert.equal(r.stage,null);assert.equal(r.generation,generation+1);assert.equal(r.lastFrameEye,null);
+ assert.equal(r.coveringLeaves,null);assert.equal(r.selectionState,null);assert.equal(r.previousSplits,null);
+ assert.ok(new Uint32Array(r.morphBuffer.data).every(x=>x===0));
+ finish();await flush();assert.equal(r.free.length,1024);assert.equal(new Set(r.free).size,1024);
+});
+
+test('device loss rejects pending probe results and stops further GPU submissions',async()=>{
+ const {r,camera}=await preparedRefinement();r.beginTransition(camera);
+ r.walkProbeInput=r.device.createBuffer({size:48});r.walkProbeResult=r.device.createBuffer({size:16});r.walkProbePipe={};r.walkProbeBind={};
+ new Float32Array(r.walkProbeResult.data).set([4,1,0,0]);
+ let reject;const ready=new Promise((resolve,no)=>{reject=no;});const create=r.device.createBuffer;
+ r.device.createBuffer=options=>{const b=create(options);b.mapAsync=()=>ready;return b;};
+ const pending=r.sampleRenderedSurface(r.patches[0].direction);assert.equal(r.surfaceReads,1);
+ const errors=[];r.onError=e=>errors.push(e);
+ r.device.queue.writeBuffer=()=>{throw Error('write after loss');};r.device.queue.submit=()=>{throw Error('submit after loss');};
+ const generation=r.generation;r.handleDeviceLoss({reason:'destroyed'});r.handleDeviceLoss({reason:'destroyed'});
+ assert.equal(r.generation,generation+1);assert.equal(r.stage,null);assert.equal(errors.length,1);
+ reject(Error('device lost'));assert.equal(await pending,null);assert.equal(r.surfaceReads,0);
+ assert.equal(r.frame(3000),null);assert.equal(await r.sampleRenderedSurface([1,0,0]),null);
+ await assert.rejects(r.sampleTerrain([1,0,0]),/device is lost/);r.invalidateTerrain();
+});
+
+test('analytic terrain readback cannot return values from a reset world',async()=>{
+ const {r}=fakeRenderer();r.probeInput=r.device.createBuffer({size:16});r.sampleBuffer=r.device.createBuffer({size:16});
+ r.pointPipe={};r.pointBind={};let release;const ready=new Promise(resolve=>{release=resolve;});const create=r.device.createBuffer;
+ r.device.createBuffer=options=>{const b=create(options);b.mapAsync=()=>ready;return b;};
+ const pending=r.sampleTerrain([1,0,0]);r.resetPatchCache();release();assert.equal(await pending,null);
+});
+
+test('GPU remeasurement refreshes an active morph without restarting its progress',async()=>{
+ const {r,camera}=await preparedRefinement();r.stage.maxRefine=8;r.beginTransition(camera);const stage=r.stage,m=stage.morph;
+ const moved={...camera,eye:camera.eye.map((v,i)=>m.anchor[i]+(v-m.anchor[i])*(m.distance-m.band*2)/m.distance)};
+ r.advanceTransition(moved,2000);assert.ok(Math.abs(m.factor-.0625)<1e-8);
+ const before=r.morphBuffer.data.slice(0);r.advanceTransition(moved,900000);assert.deepEqual(r.morphBuffer.data,before);
+ // Hold geometry during the fake frame; the comparison pipeline reports .25 px.
+ r.surfaceReads=1;r.frame(900100);await flush();
+ assert.equal(r.stage,stage);assert.equal(stage.state,'transitioning');assert.equal(m.factor,.0625);
+ assert.equal(m.endpointPixels,.25);assert.equal(stage.measurementPending,false);
+ r.surfaceReads=0;r.advanceTransition({...moved,eye:moved.eye.map((v,i)=>v-m.direction[i]*.001)},900200);
+ assert.equal(r.stage,null);await flush();
 });

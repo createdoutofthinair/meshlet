@@ -15,3 +15,10 @@ test('reports missing GPU timestamps and caps long sessions',()=>{
 test('records each actual LOD commit once with refinement and merge errors',()=>{
  const r=makeRenderer(),rec=new StatisticsRecorder();rec.start(0,r);r.lastTransitionCommit={id:1,at:80,pairs:4,refinements:3,merges:1,maxRefinementPixels:3,maxMergePixels:.2};rec.record(100,16,1,r);rec.record(110,16,1,r);const out=rec.stop(150);assert.equal(out.transitionEvents.length,1);assert.equal(out.transitionEvents[0].maxRefinementPixels,3);assert.equal(out.transitionEvents[0].elapsedMs,80);
 });
+
+test('records measured endpoint errors separately from estimated morph displacement',()=>{
+ const r=makeRenderer(),rec=new StatisticsRecorder();r.transition={pixels:8,morphProgress:.25,estimatedStepPixels:.5,estimatedEndpointPixels:12,errorLimited:true,retainedParents:4,reselectionPending:true};r.stage={state:'transitioning'};
+ rec.start(0,r);rec.record(0,16,1,r);const sample=rec.stop(1).samples[0];
+ assert.equal(sample.lodErrorPixels,8);assert.equal(sample.estimatedMorphStepPixels,.5);assert.equal(sample.estimatedEndpointPixels,12);
+ assert.equal(sample.morphProgress,.25);assert.equal(sample.morphErrorLimited,true);assert.equal(sample.reselectionPending,true);assert.equal(sample.transitionState,'transitioning');
+});

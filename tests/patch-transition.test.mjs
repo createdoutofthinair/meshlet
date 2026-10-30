@@ -34,9 +34,9 @@ test('retained patches compare edge stitch changes in the appropriate direction'
 import {PlanetRenderer} from '../src/planet/renderer.js';
 import {planetCamera} from '../src/planet/camera.js';
 
-test('visible patches stay resident while replacements are staged or cancelled',()=>{
+test('visible patches stay resident while replacements are staged or cancelled',async()=>{
  const r=Object.create(PlanetRenderer.prototype);
- Object.assign(r,{budget:120,maxDepth:20,pixelSize:14,cameraState:{mode:'orbit'},generation:1,
+ Object.assign(r,{retiredSlots:new Set(),device:{queue:{onSubmittedWorkDone:async()=>{}}},budget:120,maxDepth:20,pixelSize:14,cameraState:{mode:'orbit'},generation:1,
   slotByKey:new Map(),stitchByKey:new Map(),free:Array.from({length:1024},(_,i)=>1023-i),patches:[],pending:[],normalPending:[],previousSplits:null,transitionErrors:new Map(),transition:{pixels:null,pending:0,overTarget:false,waiting:false},stats:{},stage:null});
  const a=planetCamera({mode:'orbit',altitude:14000,longitude:.8,latitude:.4},960,600);
  const b=planetCamera({mode:'orbit',altitude:500,longitude:.8,latitude:.4},960,600);
@@ -44,14 +44,14 @@ test('visible patches stay resident while replacements are staged or cancelled',
  r.pending=[];r.normalPending=[];r.select(b,300);assert.ok(r.stage,'new selection should be staged');
  assert.equal(r.patches,previous,'previous terrain remains drawn during preparation');assert.deepEqual(r.slotByKey,oldSlots);
  const staged=r.stage.newNodes.map(n=>n.slot);assert.ok(staged.length>0);assert.ok(staged.every(slot=>![...oldSlots.values()].includes(slot)));
- r.cancelStage();assert.equal(r.patches,previous);assert.deepEqual(r.slotByKey,oldSlots);assert.equal(new Set(r.free).size,r.free.length);
- r.select(b,500);assert.ok(r.stage);const wanted=r.stage.nodes.map(n=>n.key);r.commitStage(600);
+ r.cancelStage();await Promise.resolve();assert.equal(r.patches,previous);assert.deepEqual(r.slotByKey,oldSlots);assert.equal(new Set(r.free).size,r.free.length);
+ r.select(b,500);assert.ok(r.stage);const wanted=r.stage.nodes.map(n=>n.key);r.commitStage(600);await Promise.resolve();
  assert.deepEqual(r.patches.map(n=>n.key),wanted);assert.equal(r.stage,null);assert.equal(r.free.length,1024-r.patches.length);assert.equal(new Set(r.free).size,r.free.length);
 });
 
 test('slot pressure defers the whole replacement without losing visible coverage',()=>{
  const r=Object.create(PlanetRenderer.prototype);
- Object.assign(r,{budget:120,maxDepth:20,pixelSize:14,cameraState:{mode:'orbit'},generation:1,
+ Object.assign(r,{retiredSlots:new Set(),device:{queue:{onSubmittedWorkDone:async()=>{}}},budget:120,maxDepth:20,pixelSize:14,cameraState:{mode:'orbit'},generation:1,
   slotByKey:new Map(),stitchByKey:new Map(),free:Array.from({length:1024},(_,i)=>1023-i),patches:[],pending:[],normalPending:[],previousSplits:null,transitionErrors:new Map(),transition:{pixels:null,pending:0,overTarget:false,waiting:false},stats:{},stage:null});
  const a=planetCamera({mode:'orbit',altitude:14000,longitude:.8,latitude:.4},960,600);
  const b=planetCamera({mode:'orbit',altitude:500,longitude:.8,latitude:.4},960,600);
@@ -60,4 +60,75 @@ test('slot pressure defers the whole replacement without losing visible coverage
  assert.equal(r.patches,oldPatches);assert.deepEqual(r.slotByKey,oldSlots);
  assert.deepEqual(r.free,[]);assert.equal(r.stage,null);assert.equal(r.needsSelection,true);
  assert.equal(r.transition.capacityDeferred,true);assert.ok(r.transition.pending>0);
+});
+
+test('transition groups retain each referenced slot once for splits and merges',async()=>{
+ const {transitionGroups}=await import('../src/planet/patch-transition.js');
+ const parent=tile(1,2,1,2,5),children=[tile(1,3,2,4,10),tile(1,3,3,4,11),tile(1,3,2,5,12),tile(1,3,3,5,13)];
+ for(const [old,next,type] of [[ [parent],children,'refine'],[children,[parent],'merge']]){
+  const groups=transitionGroups(old,next);assert.equal(groups.length,1);assert.equal(groups[0].type,type);
+  assert.equal(groups[0].pairs.length,4);assert.deepEqual(groups[0].slots.slice().sort((a,b)=>a-b),[5,10,11,12,13]);
+ }
+});
+
+test('retired slots are unavailable until the GPU fence completes',async()=>{
+ let done;const fence=new Promise(resolve=>{done=resolve;});
+ const r=Object.create(PlanetRenderer.prototype);
+ Object.assign(r,{device:{queue:{onSubmittedWorkDone:()=>fence}},generation:3,retiredSlots:new Set(),free:[],transition:{capacityDeferred:true},needsSelection:false});
+ r.retireSlots([8,9]);assert.deepEqual(r.free,[]);assert.deepEqual([...r.retiredSlots],[8,9]);
+ assert.throws(()=>r.retireSlots([8]),/twice/);done();await Promise.resolve();
+ assert.deepEqual(r.free,[8,9]);assert.equal(r.retiredSlots.size,0);assert.equal(r.needsSelection,true);
+});
+
+test('an old retirement fence cannot add slots to a reset cache',async()=>{
+ let done;const fence=new Promise(resolve=>{done=resolve;});
+ const r=Object.create(PlanetRenderer.prototype);
+ Object.assign(r,{device:{queue:{onSubmittedWorkDone:()=>fence}},generation:3,retiredSlots:new Set(),free:[],transition:{}});
+ r.retireSlots([8]);r.generation++;r.retiredSlots=new Set();r.free=[8];
+ done();await Promise.resolve();assert.deepEqual(r.free,[8]);
+});
+
+test('morph upload maps child slots to parents, clamps factors, and disables omitted slots',async()=>{
+ const {encodePatchMorphs}=await import('../src/planet/patch-transition.js');
+ const parent=tile(0,1,0,0,2,1),child=tile(0,2,1,0,5,4);
+ const [pair]=transitionPairs([parent],[child]);
+ for(const factor of [-1,0,.25,1,2]){
+  const raw=encodePatchMorphs([{pair,factor}],8),u=new Uint32Array(raw),f=new Float32Array(raw);
+  assert.deepEqual([...u.slice(40,44)],[2,1,4,1]);assert.deepEqual([...f.slice(44,48)],[8,0,.5,Math.max(0,Math.min(1,factor))]);
+  assert.equal(u[2*8+3],0);assert.equal(u[7*8+3],0);
+ }
+ assert.throws(()=>encodePatchMorphs([{pair,factor:NaN}],8),/mapping/);
+ assert.throws(()=>encodePatchMorphs([{pair,factor:0},{pair,factor:1}],8),/slot/);
+ assert.ok(new Uint32Array(encodePatchMorphs([],8)).every(x=>x===0));
+});
+
+test('boundary coordination links transitions across cube faces and corners',async()=>{
+ const {coordinateTransitions}=await import('../src/planet/patch-transition.js');
+ const a=tile(0,1,0,0,0),b=tile(2,1,0,0,1),c=tile(4,1,0,0,2);
+ a.edgeKeys=[b.key];b.cornerKeys=[[c.key]];
+ const children=(p,start)=>[0,1,2,3].map(i=>tile(p.face,p.level+1,p.x*2+(i%2),p.y*2+(i>>1),start+i));
+ const components=coordinateTransitions([a,b,c],[...children(a,10),...children(b,20),...children(c,30)]);
+ assert.equal(components.length,1);assert.equal(components[0].groups.length,3);
+ assert.equal(new Set(components[0].slots).size,15);assert.deepEqual(components[0].deferredReasons,[]);
+});
+
+test('incomplete children and skipped levels cannot be silently treated as a full split',async()=>{
+ const {coordinateTransitions}=await import('../src/planet/patch-transition.js');
+ const a=tile(0,1,0,0,0),child=tile(0,2,0,0,1),deep=tile(0,4,0,0,2);
+ assert.deepEqual(coordinateTransitions([a],[child])[0].deferredReasons,['incomplete-children']);
+ assert.ok(coordinateTransitions([a],[deep])[0].deferredReasons.includes('skipped-levels'));
+});
+
+test('a retained stitch change defers its connected refinement component',async()=>{
+ const {coordinateTransitions}=await import('../src/planet/patch-transition.js');
+ const a=tile(0,1,0,0,0),b=tile(0,2,2,0,1,1);a.edgeKeys=[b.key];
+ const children=[0,1,2,3].map(i=>tile(0,2,i%2,i>>1,10+i));
+ const components=coordinateTransitions([a,b],[...children,{...b,stitch:0}]);
+ assert.equal(components.length,1);assert.ok(components[0].deferredReasons.includes('stitch-change'));
+});
+
+test('stitched children request common triangulation even with an unstitched parent',async()=>{
+ const {coordinateTransitions}=await import('../src/planet/patch-transition.js');
+ const parent=tile(0,1,0,0,0),children=[0,1,2,3].map(i=>tile(0,2,i%2,i>>1,i+1,i===0?1:0));
+ assert.deepEqual(coordinateTransitions([parent],children)[0].deferredReasons,['stitched-child']);
 });

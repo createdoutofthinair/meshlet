@@ -71,8 +71,8 @@ test('a stationary walker does not repeatedly rebuild the same patch selection',
 
 test('walking only rebuilds patch selection after meaningful movement, rotation or setting changes',()=>{
  const camera={eye:[6373,0,0],forward:[0,1,0],width:1280,height:720};
- const r={needsSelection:true,patches:[{}],lastSelection:100,cameraState:{mode:'walk'},budget:512,pixelSize:14,generation:1,
-  selectionState:{...camera,mode:'walk',budget:512,maxDepth:22,pixelSize:14,generation:1}};
+ const r=Object.assign(Object.create(PlanetRenderer.prototype),{needsSelection:true,patches:[{}],lastSelection:100,cameraState:{mode:'walk'},budget:512,pixelSize:14,generation:1,
+  selectionState:{...camera,mode:'walk',budget:512,maxDepth:22,pixelSize:14,generation:1}});
  const select=c=>PlanetRenderer.prototype.shouldSelect.call(r,c,500);
  assert.equal(select(camera),false);
  assert.equal(select({...camera,eye:[6373,.0003,0]}),false);

@@ -1,7 +1,7 @@
 import {RADIUS_KM,HEIGHT_LIMIT_KM,PATCH_CELLS,MAX_DEPTH,FACE_BASES,faceCube,faceDirection,directionToFace,makeTile,dot,sub,length} from './planet-math.js';
 
-// Covering leaves include the entire planet. Only visible leaves become GPU
-// patches; retaining invisible leaves lets us balance edges across the horizon.
+// Covering leaves include the entire planet. The renderer can request every
+// leaf as a resident patch so transitions never depend on partial visibility.
 function tileAt(leaves,face,u,v,maxDepth) {
  const uu=Math.min(1-Number.EPSILON,Math.max(0,(u+1)/2));
  const vv=Math.min(1-Number.EPSILON,Math.max(0,(v+1)/2));
@@ -41,6 +41,42 @@ function splitBalanced(leaves,node,budget,maxDepth,seen=new Set()) {
  }
  if(leaves.size+3>budget)return false;
  split(leaves,node);return true;
+}
+// Reconcile complete covering trees by at most one generation per region.
+// Transactions include balancing dependencies; failed splits cannot leave a
+// partially modified tree. A reduced budget is approached by safe merges.
+export function intermediateLeaves(previous,target,budget,priority=()=>0){
+ const original=new Map(previous.map(p=>[p.key,p])),desired=new Map(target.map(p=>[p.key,p]));
+ let leaves=new Map(original);const wantsSplit=new Set();
+ for(const node of target)for(let level=0;level<node.level;level++){
+  const scale=2**(node.level-level);wantsSplit.add(`${node.face}/${level}/${Math.floor(node.x/scale)}/${Math.floor(node.y/scale)}`);
+ }
+ const coveredByTarget=node=>{
+  for(let level=node.level;level>=0;level--){const scale=2**(node.level-level);if(desired.has(`${node.face}/${level}/${Math.floor(node.x/scale)}/${Math.floor(node.y/scale)}`))return true;}
+  return false;
+ };
+ const parents=new Map();for(const n of previous)if(n.level){const p=makeTile(n.face,n.level-1,Math.floor(n.x/2),Math.floor(n.y/2));parents.set(p.key,p);}
+ for(const p of [...parents.values()].sort((a,b)=>b.level-a.level)){
+  if(!coveredByTarget(p))continue;
+  const keys=[0,1,2,3].map(i=>`${p.face}/${p.level+1}/${p.x*2+i%2}/${p.y*2+(i>>1)}`);
+  if(!keys.every(k=>original.has(k)&&leaves.has(k)))continue;
+  if([0,1,2,3].some(e=>neighbors(leaves,p,e).some(n=>n.level>p.level+1)))continue;
+  for(const key of keys)leaves.delete(key);leaves.set(p.key,p);
+ }
+ const limit=Math.max(6,Math.floor(budget),previous.length);
+ const splitStep=(tree,node,seen=new Set())=>{
+  if(!tree.has(node.key))return true;
+  if(!original.has(node.key)||seen.has(node.key))return false;
+  seen.add(node.key);
+  for(let e=0;e<4;e++)for(const n of neighbors(tree,node,e))if(n.level<node.level&&!splitStep(tree,n,seen))return false;
+  if(tree.size+3>limit)return false;
+  split(tree,node);return true;
+ };
+ for(const node of [...previous].filter(n=>wantsSplit.has(n.key)).sort((a,b)=>priority(b)-priority(a))){
+  if(!leaves.has(node.key))continue;
+  const trial=new Map(leaves);if(splitStep(trial,node))leaves=trial;
+ }
+ return [...leaves.values()];
 }
 function score(node,camera,pixelSize=10,errorEstimates=null) {
  const center=node.direction.map(x=>x*RADIUS_KM);
@@ -105,10 +141,10 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
  const errorPriority=projectedError*pixelSize/.5;
  return Math.max(projected,Math.min(errorPriority,projected*4))*localFocus*viewPriority;
 }
-export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10,previousSplits=null,hysteresis=.1,errorEstimates=null}={}) {
+export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10,previousSplits=null,hysteresis=.1,errorEstimates=null,previousLeaves=null,includeHidden=false}={}) {
  budget=Math.max(6,Math.floor(budget));maxDepth=Math.min(MAX_DEPTH,Math.max(0,maxDepth));
  camera={...camera,facing:directionToFace(camera.eye),focus:directionToFace(camera.focusDirection||camera.eye)};
- const leaves=new Map();for(let face=0;face<6;face++){const n=makeTile(face,0,0,0);leaves.set(n.key,n);}
+ let leaves=new Map();for(let face=0;face<6;face++){const n=makeTile(face,0,0,0);leaves.set(n.key,n);}
  // A node's projected priority cannot change during one selection: the camera,
  // previous splits and error estimates are fixed. Cache it instead of repeating
  // the expensive projection and horizon tests on every balancing iteration.
@@ -126,13 +162,14 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
   for(const node of leaves.values())if(node.level<maxDepth){const s=priority(node);if(s>bestScore){best=node;bestScore=s;}}
   if(!best || leaves.size+3>budget || !splitBalanced(leaves,best,budget,maxDepth))break;
  }
+ if(previousLeaves?.length)leaves=new Map(intermediateLeaves(previousLeaves,[...leaves.values()],budget,priority).map(p=>[p.key,p]));
  const all=[...leaves.values()];
  const visible=[];
  for(const node of all){
-  if(!score(node,camera))continue;
+  if(!includeHidden&&!score(node,camera))continue;
   let stitch=0,corners=0;const coarseKeys=[null,null,null,null],edgeKeys=[null,null,null,null],adjacentEdges=[];
   for(let edge=0;edge<4;edge++){
-   const adjacent=neighbors(leaves,node,edge,maxDepth);adjacentEdges.push(adjacent);
+   const adjacent=neighbors(leaves,node,edge,MAX_DEPTH);adjacentEdges.push(adjacent);
    const coarse=adjacent.find(other=>other.level<node.level);
    if(coarse){stitch|=1<<edge;coarseKeys[edge]=coarse.key;edgeKeys[edge]=coarse.key;}
    else{const peer=adjacent.find(other=>other.level===node.level);if(peer)edgeKeys[edge]=peer.key;}
@@ -143,7 +180,7 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
   for(let corner=0;corner<4;corner++){
    const sx=corner&1?1:-1,sy=corner&2?1:-1;
    const f=directionToFace(faceCube(node.face,node.u+sx*(half+eps),node.v+sy*(half+eps)));
-   const diagonal=tileAt(leaves,f.face,f.u,f.v,maxDepth);
+   const diagonal=tileAt(leaves,f.face,f.u,f.v,MAX_DEPTH);
    if(diagonal && diagonal.level<node.level)corners|=1<<(corner+4);
    const around=[...adjacentEdges[sx<0?0:1],...adjacentEdges[sy<0?2:3]];
    if(diagonal)around.push(diagonal);

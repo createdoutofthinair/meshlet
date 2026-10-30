@@ -110,7 +110,7 @@ function updateTelemetry(){
  el['selection-ms'].textContent=ms(s.selectionMs);el['compute-label'].textContent=t.generatedPatchesSample?'GPU generation + cull':'GPU visibility';el['compute-ms'].textContent=ms(t.gpuComputeMs);el['render-ms'].textContent=ms(t.gpuRenderMs);
  const transition=renderer.transition;if(transition){
   el['transition-error'].textContent=transition.pixels==null?'—':`${transition.pixels.toFixed(2)} px${transition.overTarget?' · ABOVE TARGET':''}`;
-  el['transition-status'].textContent=transition.waiting?'HOLDING DETAIL':renderer.stage?.state==='measuring'?'MEASURING':renderer.stage?`${transition.pending} PATCHES PENDING`:'READY';
+  el['transition-status'].textContent=renderer.stage?.state==='transitioning'?`TRANSITION ${Math.round((transition.morphProgress||0)*100)}%`:transition.waiting?'HOLDING DETAIL':renderer.stage?.state==='measuring'?'MEASURING':renderer.stage?`${transition.pending} PATCHES PENDING`:'READY';
  }
  el['generation-status'].textContent=`${fmt(s.leaves)} QUADTREE LEAVES · ${fmt(s.generated)} PATCHES LAST GENERATED`;
  if(frames.length){const avg=frames.reduce((a,b)=>a+b,0)/frames.length;el.fps.textContent=(1000/avg).toFixed(1);el['frame-ms'].textContent=avg.toFixed(1);}

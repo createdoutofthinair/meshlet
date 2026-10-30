@@ -19,7 +19,7 @@ const read=async path=>readFile(join(root,path),'utf8');
 const planet=async name=>read(`src/planet/${name}.wgsl`);
 const [common,core,curve,field,surface,patchSurface]=await Promise.all(['common','terrain-core','river-curve','world-field','terrain-surface','patch-surface'].map(planet));
 const covered={
- 'src/planet':new Set(['common','terrain-core','river-curve','world-field','terrain-surface','generate','normal','bounds','cull','render','ocean','lod-error','transition-error','patch-surface','hydrology','regional-hydrology','river-detail','walk-probe','cloud-overlay']),
+ 'src/planet':new Set(['common','terrain-core','river-curve','world-field','terrain-surface','generate','normal','bounds','cull','render','ocean','lod-error','transition-error','patch-surface','patch-morph','hydrology','regional-hydrology','river-detail','walk-probe','cloud-overlay']),
  'src/river':new Set(['shared','select','geometry','animate','simulation','render']),
  'src/gpu':new Set(['common','cull','render','projection'])
 };
@@ -32,7 +32,7 @@ const modules={
  'planet-normal':[...full,await planet('normal')],
  'planet-bounds':[common,await planet('bounds')],
  'planet-cull':[common,await planet('cull')],
- 'planet-render':[...full,patchSurface,await planet('render')],
+ 'planet-render':[...full,patchSurface,await planet('patch-morph'),await planet('render')],
  'planet-ocean':[...full,await planet('ocean')],
  'planet-ocean-smoke':[...full,await planet('ocean'),await read('tests/ocean-smoke.wgsl')],
  'planet-lod-error':[common,await planet('lod-error')],
@@ -40,7 +40,7 @@ const modules={
  'planet-hydrology':[common,core,curve,await planet('hydrology')],
  'planet-regional':[common,core,curve,field.replace('var<storage,read> world:','var<storage,read_write> world:'),await planet('regional-hydrology')],
  'planet-river-detail':[common,curve,field,await planet('river-detail')],
- 'planet-walk-probe':[common,patchSurface,await planet('walk-probe')]
+ 'planet-walk-probe':[common,patchSurface,await planet('patch-morph'),await planet('walk-probe')]
 };
 const atmosphere=await read('src/atmosphere/atmosphere.wgsl');
 const riverShared=await read('src/river/shared.wgsl');

@@ -52,3 +52,7 @@ const REGION_HALO:u32=14u;
 const REGION_GRID:u32=93u;
 const REGION_GRID_COUNT:u32=8649u;
 const REGION_SAMPLE_COUNT:u32=4225u;
+
+struct PatchMorph {slots:vec4<u32>,mapping:vec4<f32>};
+
+struct MorphStorage {patches:array<PatchMorph,1024>,ranges:array<vec2<u32>,16384>,coordinates:array<vec2<f32>>};
