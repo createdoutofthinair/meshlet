@@ -230,15 +230,19 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
  }
  // A stable target needs no balancing or split/merge transactions. This is
  // common during steady flight and avoids cloning the covering tree repeatedly.
+ let previousCoverUnchanged=false;
  if(previousLeaves?.length){
-  const unchanged=previousLeaves.length===leaves.size&&previousLeaves.every(node=>leaves.has(node.key));
-  if(!unchanged)leaves=new Map(intermediateLeaves(previousLeaves,[...leaves.values()],budget,priority).map(p=>[p.key,p]));
+  previousCoverUnchanged=previousLeaves.length===leaves.size&&previousLeaves.every(node=>leaves.has(node.key));
+  if(!previousCoverUnchanged){
+   leaves=new Map(intermediateLeaves(previousLeaves,[...leaves.values()],budget,priority).map(p=>[p.key,p]));
+   previousCoverUnchanged=!!(includeHidden&&unchangedPatches?.length===leaves.size&&previousLeaves.length===leaves.size&&previousLeaves.every(node=>leaves.has(node.key)));
+  }
  }
  // For a complete resident covering, the same leaf keys imply the same
  // deterministic stitch graph. Skip rebuilding it when the caller retains
  // the previous patches and explicitly accepts a compact unchanged result.
- if(includeHidden&&previousLeaves?.length&&unchangedPatches?.length===leaves.size&&previousLeaves.length===leaves.size&&
-  previousLeaves.every(node=>leaves.has(node.key))&&unchangedPatches.every(node=>leaves.has(node.key))){
+ if(includeHidden&&previousCoverUnchanged&&unchangedPatches?.length===leaves.size&&
+  unchangedPatches.every(node=>leaves.has(node.key))){
   return {unchanged:true,leafCount:leaves.size,deepest:Math.max(...previousLeaves.map(node=>node.level),0)};
  }
  const all=[...leaves.values()];
