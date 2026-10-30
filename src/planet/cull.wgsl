@@ -60,7 +60,8 @@ fn main(@builtin(global_invocation_id) gid:vec3<u32>,@builtin(local_invocation_i
  var localIndex=0u;
  if(keep){localIndex=atomicAdd(&visibleCount,1u);}
  workgroupBarrier();
- if(lane==0u){let count=atomicLoad(&visibleCount);visibleBase=atomicAdd(&indirect.instanceCount,count);}
+ // Fully culled groups have no output and need no global counter update.
+ if(lane==0u){let count=atomicLoad(&visibleCount);if(count>0u){visibleBase=atomicAdd(&indirect.instanceCount,count);}}
  workgroupBarrier();
  if(keep){visible[visibleBase+localIndex]=encoded;}
 }
