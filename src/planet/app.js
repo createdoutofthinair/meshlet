@@ -2,7 +2,7 @@ import {PlanetRenderer} from './renderer.js';
 import {SurfaceWalker,WALK_EYE_HEIGHT_KM,directionFromCamera,setCameraDirection,walkStep} from './walk.js';
 import {PlanetInspector} from './inspector.js';
 const $=id=>document.getElementById(id);
-const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','walk','walk-help','generation-status','seed-form','seed','river-link','random','orbit','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','transition-error','transition-status','timing-note'];
+const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','flight-controls','flight-settings','flight-speed','flight-speed-value','fly','walk','walk-help','generation-status','seed-form','seed','river-link','random','orbit','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','transition-error','transition-status','timing-note'];
 const el=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const MIN_ALT=.03,MAX_ALT=30000;
 const fmt=n=>Math.round(n).toLocaleString('en-US');
@@ -16,8 +16,8 @@ function seedNumber(value){
 }
 let renderer,walker,previous=0,frames=[],cpuFrames=[],ready=false,findBusy=false,walkEpoch=0,walkLanding=false;
 const inspector=new PlanetInspector(()=>renderer);
-const keys=new Set(),touchWalk=new Set(),orbitHint=el['planet-hint'].innerHTML;
-const inputForWalk=()=>({forward:Number(keys.has('KeyW')||keys.has('ArrowUp')||touchWalk.has('forward'))-Number(keys.has('KeyS')||keys.has('ArrowDown')||touchWalk.has('back')),strafe:Number(keys.has('KeyD')||keys.has('ArrowRight')||touchWalk.has('right'))-Number(keys.has('KeyA')||keys.has('ArrowLeft')||touchWalk.has('left')),fast:keys.has('ShiftLeft')||keys.has('ShiftRight')});
+const keys=new Set(),touchWalk=new Set(),touchFlight=new Set(),orbitHint=el['planet-hint'].innerHTML;
+const inputForWalk=()=>({forward:Number(keys.has('KeyW')||keys.has('ArrowUp')||(touchWalk.has('forward')||touchFlight.has('forward')))-Number(keys.has('KeyS')||keys.has('ArrowDown')||(touchWalk.has('back')||touchFlight.has('back'))),strafe:Number(keys.has('KeyD')||keys.has('ArrowRight')||(touchWalk.has('right')||touchFlight.has('right')))-Number(keys.has('KeyA')||keys.has('ArrowLeft')||(touchWalk.has('left')||touchFlight.has('left'))),fast:keys.has('ShiftLeft')||keys.has('ShiftRight')});
 function loading(show,title='Creating your world',detail='Generating terrain on the GPU'){el.loading.hidden=!show;el['loading-title'].textContent=title;el['loading-detail'].textContent=detail;}
 function fail(message){loading(false);el.error.hidden=false;el['error-message'].textContent=message;el['device-status'].textContent='ENGINE ERROR';console.error(message);}
 function setAltitude(km){
@@ -28,9 +28,9 @@ function setAltitude(km){
  el['altitude-range'].value=String(toSlider(next));el.altitude.textContent=altitudeText(next);el['altitude-overlay'].textContent=altitudeText(next);
 }
 function leaveWalk(){
- walkEpoch++;walkLanding=false;walker?.stop();keys.clear();touchWalk.clear();
+ walkEpoch++;walkLanding=false;walker?.stop();keys.clear();touchWalk.clear();touchFlight.clear();flightGeneration++;
  if(document.pointerLockElement===el.view)document.exitPointerLock();
- el.view.parentElement.classList.remove('walking');el['walk-controls'].hidden=true;el['walk-help'].hidden=true;el.walk.disabled=false;el.walk.textContent='WALK ON SURFACE';
+ el.view.parentElement.classList.remove('walking');el['walk-controls'].hidden=true;el['flight-controls'].hidden=true;el['flight-settings'].hidden=true;el['walk-help'].hidden=true;el.walk.disabled=false;el.walk.textContent='WALK ON SURFACE';
  el['altitude-range'].disabled=false;el['clearance-label'].textContent='CAMERA CLEARANCE';el['clearance-note'].textContent='above sampled surface near ground';el['planet-hint'].innerHTML=orbitHint;
 }
 async function enterWalk({touchdown=false}={}){
@@ -83,7 +83,7 @@ function setMode(mode){
  renderer.cameraState.mode=mode;el.mode.value=mode;
  if(renderer.cameraState.altitude<MIN_ALT)setAltitude(MIN_ALT);
  if(mode==='flyover'&&renderer.cameraState.altitude>40)setAltitude(15);
- if(mode==='flight'){el['planet-hint'].textContent='W/S FLY FORWARD / BACK · A/D STRAFE · Q/E DESCEND / ASCEND · SHIFT BOOST · DRAG TO LOOK';el['walk-help'].hidden=false;el['walk-help'].textContent='Fly toward the surface to land automatically. Drag to look; Q and E move down and up.';}
+ if(mode==='flight'){el['flight-controls'].hidden=false;el['flight-settings'].hidden=false;el['planet-hint'].textContent='W/S FLY FORWARD / BACK · A/D STRAFE · Q/E DESCEND / ASCEND · SHIFT BOOST · DRAG TO LOOK';el['walk-help'].hidden=false;el['walk-help'].textContent='Fly toward the surface to land automatically. Drag to look; Q and E move down and up.';}
  renderer.needsSelection=true;
 }
 function rebuildTerrain(title){
@@ -115,12 +115,14 @@ function advanceFlight(now){
  const camera=renderer?.cameraState;if(!camera||camera.mode!=='flight'){flightTime=0;flightGeneration++;return;}
  const dt=flightTime?Math.min(.05,(now-flightTime)/1000):0;flightTime=now;
  if(walkLanding||flightProbe)return;
- const input=inputForWalk(),vertical=Number(keys.has('KeyE'))-Number(keys.has('KeyQ'));
+ const input=inputForWalk(),vertical=Number(keys.has('KeyE')||touchFlight.has('up'))-Number(keys.has('KeyQ')||touchFlight.has('down'));
  if(!input.forward&&!input.strafe&&!vertical)return;
  // Speed adapts continuously to clearance, permitting both orbital travel and a controlled approach.
- const speed=Math.max(.004,Math.min(1800,Math.max(camera.altitude,.01)*.45))*(input.fast?3:1);
+ const surfaceSpeed=Math.max(.005,Math.min(.2,(Number(el['flight-speed'].value)||20)/1000));
+ const speed=Math.max(surfaceSpeed,Math.min(1800,Math.max(0,camera.altitude-10)*.45))*(input.fast?3:1);
  const travel=speed*dt,dir=directionFromCamera(camera);
- const next=walkStep(dir,camera.heading,input.forward*Math.cos(camera.pitch),input.strafe,travel);
+ const tangentForward=input.forward*Math.cos(camera.pitch);
+ const next=walkStep(dir,camera.heading,tangentForward,input.strafe,travel*Math.min(1,Math.hypot(tangentForward,input.strafe)));
  const absolute=camera.altitude+camera.surfaceHeight+travel*(vertical-input.forward*Math.sin(camera.pitch));
  // Near the surface, wait for the GPU's rendered mesh before committing motion.
  if(absolute<12){
@@ -163,6 +165,8 @@ el['seed-form'].addEventListener('submit',e=>{e.preventDefault();setSeed(el.seed
 el.random.addEventListener('click',()=>{const value=new Uint32Array(1);crypto.getRandomValues(value);setSeed(String(value[0]));});
 el.orbit.addEventListener('click',()=>{if(!renderer)return;renderer.cameraState.surfaceHeight=0;setMode('orbit');setAltitude(14000);});
 el.walk.addEventListener('click',()=>enterWalk());
+el.fly.addEventListener('click',()=>setMode('flight'));
+el['flight-speed'].addEventListener('input',()=>{el['flight-speed-value'].textContent=`${el['flight-speed'].value} m/s`;});
 el.highlands.addEventListener('click',async()=>{
  if(!renderer||findBusy)return;setMode('flyover');findBusy=true;el.highlands.disabled=true;el.highlands.textContent='SEARCHING…';
  try{
@@ -234,7 +238,7 @@ function look(dx,dy){
 }
 el.view.addEventListener('pointerdown',event=>{
  if(!renderer)return;el.view.focus({preventScroll:true});drag={x:event.clientX,y:event.clientY,look:event.shiftKey};el.view.setPointerCapture(event.pointerId);
- if(renderer.cameraState.mode==='walk'&&event.pointerType==='mouse'&&event.button===0&&!document.pointerLockElement&&el.view.requestPointerLock){
+ if(['walk','flight'].includes(renderer.cameraState.mode)&&event.pointerType==='mouse'&&event.button===0&&!document.pointerLockElement&&el.view.requestPointerLock){
   try{const request=el.view.requestPointerLock();request?.catch?.(()=>{});}catch{/* Drag remains available if pointer lock is denied. */}
  }
 });
@@ -246,7 +250,7 @@ el.view.addEventListener('pointermove',event=>{
  renderer.needsSelection=true;drag={x:event.clientX,y:event.clientY,look:drag.look};
 });
 el.view.addEventListener('pointerup',()=>{drag=null;});el.view.addEventListener('pointercancel',()=>{drag=null;});
-document.addEventListener('mousemove',event=>{if(renderer?.cameraState.mode==='walk'&&document.pointerLockElement===el.view)look(event.movementX,event.movementY);});
+document.addEventListener('mousemove',event=>{if(['walk','flight'].includes(renderer?.cameraState.mode)&&document.pointerLockElement===el.view)look(event.movementX,event.movementY);});
 el.view.addEventListener('wheel',event=>{if(!renderer)return;event.preventDefault();if(renderer.cameraState.mode!=='walk')setAltitude(renderer.cameraState.altitude*Math.exp(event.deltaY*.001));},{passive:false});
 const walkKeys=new Set(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','ShiftLeft','ShiftRight','KeyQ','KeyE']);
 document.addEventListener('keydown',event=>{
@@ -261,6 +265,10 @@ for(const button of el['walk-controls'].querySelectorAll('button')){
  button.addEventListener('pointerdown',event=>{event.preventDefault();button.setPointerCapture(event.pointerId);touchWalk.add(direction);});
  for(const name of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(name,()=>touchWalk.delete(direction));
 }
-window.addEventListener('blur',()=>{keys.clear();touchWalk.clear();});
-document.addEventListener('visibilitychange',()=>{previous=0;keys.clear();touchWalk.clear();});
+for(const button of el['flight-controls'].querySelectorAll('button')){
+ const direction=button.dataset.flight;button.addEventListener('pointerdown',event=>{event.preventDefault();button.setPointerCapture(event.pointerId);touchFlight.add(direction);});
+ for(const name of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(name,()=>touchFlight.delete(direction));
+}
+window.addEventListener('blur',()=>{keys.clear();touchWalk.clear();touchFlight.clear();});
+document.addEventListener('visibilitychange',()=>{previous=0;keys.clear();touchWalk.clear();touchFlight.clear();});
 start();

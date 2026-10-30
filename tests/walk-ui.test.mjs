@@ -101,3 +101,19 @@ test('tabs expose their panels and atmosphere and cloud sliders update the rende
  element('cloud-enabled').checked=false;element('cloud-enabled').dispatchEvent(new Event('change'));assert.equal(renderer.clouds,false);
  element('cloud-quality').value='.5';element('cloud-quality').dispatchEvent(new Event('change'));assert.equal(renderer.cloudQuality,.5);
 });
+
+
+test('flight button provides speed control and follows the view above terrain',async()=>{
+ const element=id=>doc.getElementById(id);renderer.sampleTerrain=async direction=>new Float32Array([...(direction||[1,0,0]),1]);renderer.sampleRenderedSurface=async()=>1;renderer.ocean=true;
+ element('orbit').click();cameraState.latitude=0;cameraState.longitude=0;cameraState.surfaceHeight=1;cameraState.altitude=.3;cameraState.heading=0;cameraState.pitch=0;
+ element('flight-speed').value='20';element('fly').click();assert.equal(cameraState.mode,'flight');assert.equal(element('flight-controls').hidden,false);assert.equal(element('flight-settings').hidden,false);
+ await tick(10000);key('keydown','KeyW');await tick(10050);key('keyup','KeyW');assert.ok(cameraState.latitude>0,'forward flies over the surface');
+ const before=cameraState.altitude;key('keydown','KeyE');await tick(10100);key('keyup','KeyE');assert.ok(cameraState.altitude>before,'E ascends');
+ element('flight-speed').value='55';element('flight-speed').dispatchEvent(new Event('input'));assert.equal(element('flight-speed-value').textContent,'55 m/s');
+ element('orbit').click();assert.equal(element('flight-controls').hidden,true);
+});
+
+test('flight touchdown changes to walk at the rendered dry surface',async()=>{
+ const element=id=>doc.getElementById(id);element('orbit').click();cameraState.latitude=0;cameraState.longitude=0;cameraState.surfaceHeight=1;cameraState.altitude=.0018;renderer.ocean=true;renderer.sampleTerrain=async direction=>new Float32Array([...(direction||[1,0,0]),1]);renderer.sampleRenderedSurface=async()=>1;
+ element('fly').click();cameraState.altitude=.0018;await tick(20000);key('keydown','KeyQ');await tick(20050);await flush();key('keyup','KeyQ');assert.equal(cameraState.mode,'walk');assert.ok(Math.abs(cameraState.altitude-.0017)<1e-9);
+});
