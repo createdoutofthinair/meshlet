@@ -3,6 +3,13 @@ import {RADIUS_KM,HEIGHT_LIMIT_KM,PATCH_CELLS,MAX_DEPTH,FACE_BASES,faceCube,face
 // Covering leaves include the entire planet. The renderer can request every
 // leaf as a resident patch so transitions never depend on partial visibility.
 const numericTileKey=(face,level,x,y)=>(face*32+level)*17592186044416+y*4194304+x;
+function indexedLeaves(entries=[]){
+ const leaves=new Map(entries);leaves.tileIndex=new Map();
+ for(const node of leaves.values())leaves.tileIndex.set(numericTileKey(node.face,node.level,node.x,node.y),node);
+ return leaves;
+}
+function setLeaf(leaves,node){leaves.set(node.key,node);leaves.tileIndex.set(numericTileKey(node.face,node.level,node.x,node.y),node);}
+function deleteLeaf(leaves,key){const node=leaves.get(key);if(node)leaves.tileIndex.delete(numericTileKey(node.face,node.level,node.x,node.y));leaves.delete(key);}
 function tileAt(leaves,face,u,v,maxDepth,index=null) {
  const uu=Math.min(1-Number.EPSILON,Math.max(0,(u+1)/2));
  const vv=Math.min(1-Number.EPSILON,Math.max(0,(v+1)/2));
@@ -16,6 +23,7 @@ function tileAt(leaves,face,u,v,maxDepth,index=null) {
  return null;
 }
 export function neighbors(leaves,node,edge,maxDepth=MAX_DEPTH,index=null) {
+ index=index||leaves.tileIndex||null;
  const half=node.span/2,eps=node.span*1e-6,found=[];
  for(const fraction of [-.499,-.25,0,.25,.499]) {
   let u=node.u,v=node.v;
@@ -37,10 +45,10 @@ export function neighbors(leaves,node,edge,maxDepth=MAX_DEPTH,index=null) {
  return found;
 }
 function split(leaves,node,onChild=null){
- leaves.delete(node.key);
+ deleteLeaf(leaves,node.key);
  const children=[];
  for(let y=0;y<2;y++)for(let x=0;x<2;x++){
-  const child=makeTile(node.face,node.level+1,node.x*2+x,node.y*2+y);leaves.set(child.key,child);if(onChild)children.push(child);
+  const child=makeTile(node.face,node.level+1,node.x*2+x,node.y*2+y);setLeaf(leaves,child);if(onChild)children.push(child);
  }
  if(onChild)for(const child of children)onChild(child);
 }
@@ -87,7 +95,7 @@ function addAncestors(keys,node){
 // partially modified tree. A reduced budget is approached by safe merges.
 export function intermediateLeaves(previous,target,budget,priority=()=>0){
  const original=new Map(previous.map(p=>[p.key,p])),desired=new Set(target.map(p=>p.key));
- let leaves=new Map(original);const wantsSplit=new Set();
+ let leaves=indexedLeaves(original);const wantsSplit=new Set();
  for(const node of target)addAncestors(wantsSplit,node);
  // Neighboring candidates share much of the same ancestor chain. Cache
  // whether each visited ancestor is covered by a target leaf for this pass.
@@ -116,7 +124,7 @@ export function intermediateLeaves(previous,target,budget,priority=()=>0){
   if(!keys.every(k=>original.has(k)&&leaves.has(k)))continue;
   const p=makeTile(candidate.face,candidate.level,candidate.x,candidate.y);
   if([0,1,2,3].some(e=>neighbors(leaves,p,e).some(n=>n.level>p.level+1)))continue;
-  for(const key of keys)leaves.delete(key);leaves.set(p.key,p);
+  for(const key of keys)deleteLeaf(leaves,key);setLeaf(leaves,p);
  }
  const limit=Math.max(6,Math.floor(budget),previous.length);
  // Merges can remove candidate children. Exclude them before sorting so the
@@ -226,7 +234,7 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
  const selection={eyeLength,inner,surfaceRadius:RADIUS_KM+camera.altitude-camera.clearance,horizon:eyeLength>inner?Math.acos(Math.min(1,inner/eyeLength))+Math.acos(inner/outer):0,horizonCutoffs:new Map(),frustumX:Math.hypot(1,camera.tanX),frustumY:Math.hypot(1,camera.tanY)};
  selection.faceRadial=FACE_BASES.map(basis=>{const denom=dot(camera.radial,basis.c);return {denom,u:denom>0?dot(camera.radial,basis.u)/denom:0,v:denom>0?dot(camera.radial,basis.v)/denom:0};});
  camera={...camera,selection,facing:directionToFace(camera.eye),focus:directionToFace(camera.focusDirection||camera.eye)};
- let leaves=new Map();for(let face=0;face<6;face++){const n=makeTile(face,0,0,0);leaves.set(n.key,n);}
+ let leaves=indexedLeaves();for(let face=0;face<6;face++){const n=makeTile(face,0,0,0);setLeaf(leaves,n);}
  // A node's projected priority cannot change during one selection: the camera,
  // previous splits and error estimates are fixed. Cache it instead of repeating
  // the expensive projection and horizon tests on every balancing iteration.
@@ -252,7 +260,7 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
  if(previousLeaves?.length){
   previousCoverUnchanged=previousLeaves.length===leaves.size&&previousLeaves.every(node=>leaves.has(node.key));
   if(!previousCoverUnchanged){
-   leaves=new Map(intermediateLeaves(previousLeaves,[...leaves.values()],budget,priority).map(p=>[p.key,p]));
+   leaves=indexedLeaves(intermediateLeaves(previousLeaves,[...leaves.values()],budget,priority).map(p=>[p.key,p]));
    previousCoverUnchanged=!!(includeHidden&&unchangedPatches?.length===leaves.size&&previousLeaves.length===leaves.size&&previousLeaves.every(node=>leaves.has(node.key)));
   }
  }
@@ -266,7 +274,7 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
  const all=[...leaves.values()];
  // The selected covering is immutable while its stitch graph is built.
  // Numeric keys avoid repeatedly allocating path strings for neighbor probes.
- const index=new Map(all.map(node=>[numericTileKey(node.face,node.level,node.x,node.y),node]));
+ const index=leaves.tileIndex;
  const visible=[];
  for(const node of all){
   if(!includeHidden&&!score(node,camera))continue;
