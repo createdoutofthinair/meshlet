@@ -5,6 +5,7 @@
 @group(0) @binding(6) var reflectedScene:texture_2d<f32>;
 @group(0) @binding(7) var sceneSampler:sampler;
 @group(0) @binding(8) var<storage,read> rocks:array<RiverRock>;
+@group(0) @binding(9) var<storage,read> fluid:array<vec4<f32>>;
 struct VertexOut {
  @builtin(position) position:vec4<f32>,
  @location(0) world:vec3<f32>,
@@ -60,14 +61,22 @@ fn riverRockWaves(p:vec2<f32>,distance:f32)->vec4<f32>{
  }
  return result;
 }
+// Sample the simulated height field on the same local coordinates as the river.
+fn fluidHeight(q:f32,z:f32)->f32{
+ let uv=clamp(vec2<f32>((q*.5+.5)*63.0,(z/REACH_LENGTH+.5)*127.0),vec2<f32>(0.0),vec2<f32>(63.0,127.0));
+ let base=vec2<u32>(floor(uv));let next=min(base+vec2<u32>(1u),vec2<u32>(63u,127u));let f=fract(uv);
+ let a=mix(fluid[base.y*64u+base.x].x,fluid[base.y*64u+next.x].x,f.x);
+ let b=mix(fluid[next.y*64u+base.x].x,fluid[next.y*64u+next.x].x,f.x);return mix(a,b,f.y);
+}
 @vertex fn waterVertex(@builtin(vertex_index) index:u32)->VertexOut{
  let item=geometry[index];let q=item.material.x;let z=item.position.z;let slope=riverCenterSlope(z);
  let speed=riverFlowSpeed(q,z)/sqrt(1.0+slope*slope);let across=q*riverHalfWidth();
  let edge=1.0-smoothstep(.67,.98,abs(q));let activity=.62+.38*riverRiffle(z);
  let waves=riverSurfaceWaves(across,z,motion[0].x,speed)*activity;let obstacle=riverRockWaves(item.position.xz,motion[0].x);
- let scale=edge*riverFrame.optics.y;let height=(waves.x+obstacle.x)*scale;
+ let scale=edge*riverFrame.optics.y;let sim=fluidHeight(q,z);let height=(waves.x+obstacle.x)*scale+sim;
  let flow=normalize(vec3<f32>(slope,0.0,1.0));let side=normalize(vec3<f32>(1.0,0.0,-slope));
- let normal=normalize(vec3<f32>(0.0,1.0,riverLevelSlope(z))-side*(waves.y+obstacle.y)*scale-flow*(waves.z+obstacle.z)*scale);
+ let simX=(fluidHeight(q+.01,z)-fluidHeight(q-.01,z))/max(.01,.02*riverHalfWidth());let simZ=(fluidHeight(q,z+1.0)-fluidHeight(q,z-1.0))*.5;
+ let normal=normalize(vec3<f32>(0.0,1.0,riverLevelSlope(z))-side*((waves.y+obstacle.y)*scale+simX)-flow*((waves.z+obstacle.z)*scale+simZ));
  let position=item.position+vec4<f32>(0.0,height,0.0,0.0);var out:VertexOut;
  out.position=riverFrame.viewProjection*position;out.world=position.xyz;out.normal=normal;out.material=vec4<f32>(item.material.xy,obstacle.w*edge,0.0);return out;
 }
@@ -209,14 +218,30 @@ fn stoneLighting(base:vec3<f32>,normal:vec3<f32>,view:vec3<f32>,roughness:f32)->
 }
 fn shadeRock(input:VertexOut)->vec4<f32>{
  let p=input.world;let geometric=normalize(cross(dpdx(p),dpdy(p)));let baseNormal=normalize(input.normal);
- let n=normalize(mix(baseNormal,select(-geometric,geometric,dot(geometric,baseNormal)>0.0),.65));
+ let surfaceNormal=normalize(mix(baseNormal,select(-geometric,geometric,dot(geometric,baseNormal)>0.0),.65));
  let footprint=max(length(dpdx(p)),length(dpdy(p)));let detail=1.0-smoothstep(.15,1.4,footprint);
  let broad=riverFbm(p.xz*.20+vec2<f32>(p.y*.12,input.material.x));let layers=riverNoise(vec2<f32>(p.y*.8+broad*1.8,p.x*.14+p.z*.11));
  let speckle=riverNoise(p.xz*1.1+vec2<f32>(p.y*.71,input.material.x));
  var stone=mix(vec3<f32>(.105,.125,.12),vec3<f32>(.34,.32,.28),clamp(broad*.68+layers*.32,0.0,1.0));
- stone*=mix(1.0,.75+.5*speckle,detail);let wet=1.0-smoothstep(.08,1.8,p.y-riverLevel(p.z));
+ // Fine relief is evaluated in world space and filtered by pixel footprint.
+ // Screen-space derivatives turn the procedural height into a surface normal.
+ let relief=detail*(riverNoise(p.xz*1.4+vec2<f32>(p.y*.9,input.material.x))*.11+
+                    riverNoise(p.xy*2.7+vec2<f32>(input.material.x,p.z*.5))*.035);
+ let px=dpdx(p);let py=dpdy(p);let tangentX=cross(py,surfaceNormal);let tangentY=cross(surfaceNormal,px);
+ let determinant=dot(px,tangentX);let reliefDx=dpdx(relief);let reliefDy=dpdy(relief);var n=surfaceNormal;
+ if(abs(determinant)>.00001){let gradient=(tangentX*reliefDx+tangentY*reliefDy)/determinant;n=normalize(surfaceNormal-gradient);}
+ stone*=mix(1.0,.75+.5*speckle,detail);
+ let height=p.y-riverLevel(p.z);let baseWet=1.0-smoothstep(.08,1.3,height);
+ // Flow-driven wash on upstream-facing surfaces: the small rivulets descend
+ // in world height while remaining attached laterally to the rock.
+ let facing=smoothstep(-.15,.65,-surfaceNormal.z);let flowAmount=smoothstep(.05,.8,riverFrame.sunSpeed.w);
+ let rivuletCoord=vec2<f32>(p.x*.48+p.z*.31+input.material.x*1.7,p.y*.6+motion[0].y*.55);
+ let rivulet=riverNoise(rivuletCoord);let streak=smoothstep(.56,.72,rivulet)*smoothstep(.05,.25,height)*(1.0-smoothstep(1.5,3.2,height));
+ let wet=clamp(baseWet+streak*facing*flowAmount*.65,0.0,1.0);
  stone*=mix(1.0,.65,wet);let view=normalize(riverFrame.cameraDelta.xyz-p);
  var color=stoneLighting(stone,n,view,mix(.83,.25,wet));
+ let wetReflection=skyColor(reflect(-view,n));let wetFresnel=.04+.96*pow(1.0-max(dot(n,view),0.0),5.0);
+ color+=wetReflection*wet*(.035+.18*wetFresnel);
  let dist=length(riverFrame.cameraDelta.xyz-p);color=mix(color,vec3<f32>(.50,.58,.57),(1.0-exp(-dist*.00035))*.45);
  return vec4<f32>(displayColor(color),1.0);
 }
@@ -286,9 +311,11 @@ fn riverBubblePattern(p:vec2<f32>,time:f32)->f32{
 // Procedural density in a genuinely three-dimensional waterfall volume.
 // This models aerated falling water; it is not a fluid solver.
 fn waterfallDensity(p:vec3<f32>,time:f32)->f32{
- let top=riverLevel(-8.0);let bottom=riverLevel(10.0);let height=max(1.0,top-bottom);
+ let nominalTop=riverLevel(-8.0);let nominalBottom=riverLevel(10.0);
+ let initial=clamp((nominalTop-p.y)/max(1.0,nominalTop-nominalBottom),0.0,1.0);
+ let center=riverCenter(mix(-8.0,10.0,initial));let across=p.x-center;let q=across/riverHalfWidth();
+ let top=nominalTop+fluidHeight(q,-8.0);let bottom=nominalBottom+fluidHeight(q,10.0);let height=max(1.0,top-bottom);
  let t=(top-p.y)/height;let v=clamp(t,0.0,1.0);
- let center=riverCenter(mix(-8.0,10.0,v));let across=p.x-center;let q=across/riverHalfWidth();
  let curtain=mix(-8.0,10.0,v)+sin(v*3.14159265)*(2.0+1.2*sin(across*.12+time*.65));
  let thickness=1.1+2.8*sin(v*3.14159265)+v*1.7;
  let strand=riverFbm(vec2<f32>(across*.085,p.y*.08+time*1.3));
@@ -373,7 +400,10 @@ fn viewDepth(depth:f32)->f32{return 5000.0/max(.001,10000.0-depth*9999.5);}
   foam=clamp(patches*turbulence*riverFrame.optics.z,0.0,.65);let bubbles=1.0-smoothstep(.12,.55,footprint);
   if(foam>.005 && bubbles>.01){foam*=mix(1.0,riverAdvectedBubbles(across,p.y,motion[0].x,speed),bubbles);}
  }
- let foamColor=vec3<f32>(.65,.69,.65)*(.58+.42*ndl);color=mix(color,foamColor,foam);
+ // Aerated water still carries some reflection and transmission through it.
+ let foamColor=vec3<f32>(.76,.83,.80)*(.64+.36*ndl);
+ let foamOptical=mix(foamColor,environment,clamp(.08+fresnel*.35,0.0,.48));
+ color=mix(color,foamOptical,foam*.62);
  // A multiscale cellular foam field follows the outflow from the impact.
  let splash=riverFrame.waterfall.x*smoothstep(9.0,16.0,p.y)*(1.0-smoothstep(45.0,110.0,p.y))*(1.0-smoothstep(.72,1.0,abs(q)));
  if(splash>.001 && riverFrame.optics.z>.001){
@@ -385,7 +415,8 @@ fn viewDepth(depth:f32)->f32{return 5000.0/max(.001,10000.0-depth*9999.5);}
   if(close>.01){let cellular=1.0-riverBubblePattern(uv*3.0,motion[0].y);breakup+=cellular*close*.08;}
   let impactFoam=splash*smoothstep(.35,.68,breakup)*min(1.0,riverFrame.optics.z*1.2);
   let foamLight=.55+.45*ndl;let foamShade=mix(vec3<f32>(.32,.42,.41),vec3<f32>(.88,.91,.85),clamp(breakup,0.0,1.0));
-  color=mix(color,foamShade*foamLight,impactFoam*.86);
+  let impactLayer=mix(foamShade*foamLight,environment,clamp(.10+fresnel*.35,0.0,.45));
+  color=mix(color,impactLayer,impactFoam*.65);
  }
  if(riverFrame.optics.w>.5){
   let along=riverFlowCoordinate(p.y,motion[0].x,speed);
