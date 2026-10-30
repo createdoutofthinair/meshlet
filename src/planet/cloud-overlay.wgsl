@@ -31,14 +31,18 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
  var sceneDistance=1e10;
  if(depth>0.0){sceneDistance=params.up.w*1000.0/(depth*max(.001,dot(worldRay,params.forward.xyz)));}
  var limit=sceneDistance;
- let ground=sphereInterval(origin.y,ray,0.0);
  // The sphere is only an occluder for the ocean. At sea level its near
  // intersection is exactly zero; include it to prevent far-side clouds.
- if(params.sun.w>0.5 && ground.y>0.0 && ground.x>=0.0){limit=min(limit,ground.x);}
+ if(params.sun.w>0.5){
+  let ground=sphereInterval(origin.y,ray,0.0);
+  if(ground.y>0.0 && ground.x>=0.0){limit=min(limit,ground.x);}
+ }
  if(params.sun.w>0.5 && origin.y<=0.5 && ray.y<0.0){limit=0.0;}
- let outer=sphereInterval(origin.y,ray,8000.0);let inner=sphereInterval(origin.y,ray,1500.0);
  var transmission=1.0;var light=vec3<f32>(0.0);
- if(params.sky.w>0.001 && params.cloud.x>0.001 && outer.y>0.0 && outer.y>outer.x){
+ if(params.sky.w>0.001 && params.cloud.x>0.001){
+ let outer=sphereInterval(origin.y,ray,8000.0);
+ if(outer.y>0.0 && outer.y>outer.x){
+  let inner=sphereInterval(origin.y,ray,1500.0);
   var start=max(0.0,outer.x);var end=min(outer.y,limit);
   if(inner.y>inner.x){if(inner.x>start){end=min(end,inner.x);}else if(inner.y>start){start=inner.y;}}
   if(end>start){
@@ -92,6 +96,7 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
    }
    if(farWeight>0.0){light=mix(light,distant.rgb,farWeight);transmission=mix(transmission,1.0-distant.a,farWeight);}
   }
+ }
  }
  // Preserve cloud coverage up to the visible horizon. The actual depth
  // and sphere intersections already stop the march at the surface.
