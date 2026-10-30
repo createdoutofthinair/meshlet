@@ -23,8 +23,9 @@ fn main(@builtin(workgroup_id) group:vec3<u32>,@builtin(local_invocation_index) 
  workgroupBarrier();
  let start=sampleRange.x;let count=sampleRange.y;
  for(var i=lane;i<count;i+=64u){
-  let grid=vec2<u32>(i%17u,i/17u);var q=vec2<f32>(stitchCoord(grid,p.slots.z));
+  var q:vec2<f32>;
   if(overlay){q=morphs.coordinates[start+i];}
+  else{q=vec2<f32>(stitchCoord(vec2<u32>(i%17u,i/17u),p.slots.z));}
   let child=parentSurface(p.slots.x,q,p.slots.z);
   let parent=parentSurface(p.slots.y,p.mapping.xy+q*p.mapping.z,p.slots.w);
   let worldDelta=child-parent;maxWorld=max(maxWorld,dot(worldDelta,worldDelta));

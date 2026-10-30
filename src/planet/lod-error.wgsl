@@ -12,9 +12,13 @@ fn position(slot:u32,x:u32,y:u32)->vec3<f32>{
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) group:vec3<u32>,@builtin(local_invocation_index) lane:u32){
  if(group.x>=frame.counts.y){return;}let slot=queue[group.x];var largest=0.0;
- for(var index=lane;index<INNER_COUNT;index+=64u){
-  let x=index%17u;let y=index/17u;let oddX=(x&1u)!=0u;let oddY=(y&1u)!=0u;
-  if(oddX || oddY){
+ // Only vertices absent from the twice-coarser grid can have a residual:
+ // 9 even rows with 8 odd columns, then 8 odd rows with all 17 columns.
+ for(var index=lane;index<208u;index+=64u){
+  var x=0u;var y=0u;
+  if(index<72u){x=(index%8u)*2u+1u;y=(index/8u)*2u;}
+  else{let i=index-72u;x=i%17u;y=(i/17u)*2u+1u;}
+  let oddX=(x&1u)!=0u;let oddY=(y&1u)!=0u;
    var a:vec3<f32>;var b:vec3<f32>;
    if(oddX && oddY){a=position(slot,x-1u,y+1u);b=position(slot,x+1u,y-1u);}
    else if(oddX){a=position(slot,x-1u,y);b=position(slot,x+1u,y);}
@@ -23,7 +27,6 @@ fn main(@builtin(workgroup_id) group:vec3<u32>,@builtin(local_invocation_index) 
    // Squared distances preserve the maximum; defer sqrt until the reduction
    // has selected the largest residual for the whole patch.
    largest=max(largest,dot(delta,delta));
-  }
  }
  residuals[lane]=largest;workgroupBarrier();
  for(var step=32u;step>0u;step>>=1u){
