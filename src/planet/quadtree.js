@@ -84,7 +84,7 @@ function addAncestors(keys,node){
 // Transactions include balancing dependencies; failed splits cannot leave a
 // partially modified tree. A reduced budget is approached by safe merges.
 export function intermediateLeaves(previous,target,budget,priority=()=>0){
- const original=new Map(previous.map(p=>[p.key,p])),desired=new Map(target.map(p=>[p.key,p]));
+ const original=new Map(previous.map(p=>[p.key,p])),desired=new Set(target.map(p=>p.key));
  let leaves=new Map(original);const wantsSplit=new Set();
  for(const node of target)addAncestors(wantsSplit,node);
  // Neighboring candidates share much of the same ancestor chain. Cache
@@ -108,8 +108,8 @@ export function intermediateLeaves(previous,target,budget,priority=()=>0){
   const level=n.level-1,x=Math.floor(n.x/2),y=Math.floor(n.y/2),key=`${n.face}/${level}/${x}/${y}`;
   if(!parents.has(key))parents.set(key,{face:n.face,level,x,y,key});
  }
- for(const candidate of [...parents.values()].sort((a,b)=>b.level-a.level)){
-  if(!coveredByTarget(candidate))continue;
+ // Only parents covered by a target leaf can merge; filter before sorting.
+ for(const candidate of [...parents.values()].filter(coveredByTarget).sort((a,b)=>b.level-a.level)){
   const keys=[0,1,2,3].map(i=>`${candidate.face}/${candidate.level+1}/${candidate.x*2+i%2}/${candidate.y*2+(i>>1)}`);
   if(!keys.every(k=>original.has(k)&&leaves.has(k)))continue;
   const p=makeTile(candidate.face,candidate.level,candidate.x,candidate.y);
