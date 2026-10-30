@@ -317,7 +317,14 @@ export class PlanetRenderer {
   if(!newNodes.length&&nodes.length===this.patches.length&&topologyChanges===0){
    this.stats={...this.stats,leaves:result.leaves.length,deepest:result.deepest,selectionMs,generated:0,normalUpdates:0,reusedNormalUpdates:0};return;
   }
-  const pairs=transitionPairs(this.patches,nodes).map(p=>({...p,refining:p.refining??slots.has(p.fine.key)}));
+  const oldNodes=new Map(this.patches.map(node=>[node.key,node])),newNodesByKey=new Map(nodes.map(node=>[node.key,node]));
+  const pairs=(computed?.relationships?computed.relationships.map(p=>({
+   fine:(p.fineOld?oldNodes:newNodesByKey).get(p.fineKey),coarse:(p.coarseOld?oldNodes:newNodesByKey).get(p.coarseKey),
+   originX:p.originX,originY:p.originY,scale:p.scale,refining:p.refining
+  })):transitionPairs(this.patches,nodes)).map(p=>{
+   if(!p.fine||!p.coarse)throw new Error('Stale terrain transition relationship');
+   return {...p,refining:p.refining??slots.has(p.fine.key)};
+  });
   if(pairs.length>CAPACITY){
    for(const node of newNodes)this.free.push(node.slot);
    this.needsSelection=true;this.transition={...this.transition,pending:pairs.length,waiting:true,capacityDeferred:true};return;

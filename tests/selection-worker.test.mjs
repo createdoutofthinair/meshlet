@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {planetCamera} from '../src/planet/camera.js';
 import {selectPatches} from '../src/planet/quadtree.js';
-import {transitionGroups} from '../src/planet/patch-transition.js';
+import {transitionGroups,transitionPairs} from '../src/planet/patch-transition.js';
 import {buildTransitionTopology} from '../src/planet/transition-topology.js';
 import {packTransitionTopology} from '../src/planet/transition-upload.js';
 
@@ -15,6 +15,8 @@ test('worker prepares stitched transition topology for the selected covering tre
   const camera=planetCamera({altitude:50,longitude:2.2,latitude:-.2},960,600);
   self.onmessage({data:{id:1,key:'test',camera,options:{...options,previousLeaves:first.leaves},previousPatches:first.visible}});
   const result=messages[0],records=[];let checked=0;
+  const old=new Set(first.visible);
+  assert.deepEqual(result.relationships,transitionPairs(first.visible,result.result.visible).map(p=>({fineKey:p.fine.key,coarseKey:p.coarse.key,fineOld:old.has(p.fine),coarseOld:old.has(p.coarse),originX:p.originX,originY:p.originY,scale:p.scale,refining:p.refining})));
   for(const group of transitionGroups(first.visible,result.result.visible))for(const pair of group.pairs){
    if(group.type!=='stitch'&&!pair.fine.stitch&&!pair.coarse.stitch)continue;
    records.push({slot:checked,coordinates:buildTransitionTopology({mask:pair.coarse.stitch,originX:pair.originX,originY:pair.originY,scale:pair.scale},{mask:pair.fine.stitch}).coordinates});assert.equal(result.packedTopology.keys[checked],pair.fine.key);checked++;

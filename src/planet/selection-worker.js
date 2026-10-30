@@ -1,5 +1,5 @@
 import {selectPatches} from './quadtree.js';
-import {transitionGroups} from './patch-transition.js';
+import {transitionGroups,transitionPairs} from './patch-transition.js';
 import {transitionCoordinates} from './transition-topology.js';
 import {packTransitionTopology} from './transition-upload.js';
 let cachedErrors=new Map();
@@ -13,7 +13,9 @@ self.onmessage=({data})=>{
  // Topology depends on patch identities and stitch masks, not GPU slot IDs.
  // Build it here before handing the selection back to the render thread.
  const topology=new Map();
- if(snapshot.previousPatches?.length)for(const group of transitionGroups(snapshot.previousPatches,result.visible))for(const pair of group.pairs){
+ const previous=snapshot.previousPatches||[],pairs=transitionPairs(previous,result.visible),oldNodes=new Set(previous);
+ const relationships=pairs.map(p=>({fineKey:p.fine.key,coarseKey:p.coarse.key,fineOld:oldNodes.has(p.fine),coarseOld:oldNodes.has(p.coarse),originX:p.originX,originY:p.originY,scale:p.scale,refining:p.refining}));
+ if(previous.length)for(const group of transitionGroups(previous,result.visible,pairs))for(const pair of group.pairs){
   if(group.type!=='stitch'&&!pair.fine.stitch&&!pair.coarse.stitch)continue;
   const coordinates=transitionCoordinates({mask:pair.coarse.stitch,originX:pair.originX,originY:pair.originY,scale:pair.scale},{mask:pair.fine.stitch});
   topology.set(pair.fine.key,coordinates);
@@ -24,5 +26,5 @@ self.onmessage=({data})=>{
  try{if(keys.length)packed=packTransitionTopology(keys.map((key,slot)=>({slot,coordinates:topology.get(key)})));}
  catch(error){if(!error.message.includes('capacity exceeded'))throw error;}
  const transfers=packed?[packed.ranges.buffer,packed.coordinates.buffer]:[];
- self.postMessage({id:data.id,key:data.key,camera:data.camera,result,topology:packed?null:topology,packedTopology:packed?{keys,ranges:packed.ranges,coordinates:packed.coordinates,vertexCount:packed.vertexCount}:null,selectionMs:performance.now()-start},transfers);
+ self.postMessage({id:data.id,key:data.key,camera:data.camera,result,relationships,topology:packed?null:topology,packedTopology:packed?{keys,ranges:packed.ranges,coordinates:packed.coordinates,vertexCount:packed.vertexCount}:null,selectionMs:performance.now()-start},transfers);
 };

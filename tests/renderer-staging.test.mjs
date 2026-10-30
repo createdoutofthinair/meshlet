@@ -422,3 +422,16 @@ test('unchanged terrain selection retains its worker snapshot inputs',async()=>{
  const {planetCamera}=await import('../src/planet/camera.js');r.select(planetCamera(r.cameraState,960,600),1200);
  assert.equal(r.patches,patches);assert.equal(r.coveringLeaves,leaves);assert.equal(r.previousSplits,splits);assert.equal(r.stage,null);
 });
+
+test('worker transition relationships map to the renderer resident slots',async()=>{
+ const {r}=fakeRenderer();r.frame(1000);await flush();
+ const {planetCamera}=await import('../src/planet/camera.js');const {selectPatches}=await import('../src/planet/quadtree.js');
+ const {transitionPairs}=await import('../src/planet/patch-transition.js');
+ const camera=planetCamera({...r.cameraState,altitude:500},960,600),old=r.patches;
+ const result=selectPatches(camera,{budget:r.budget,maxDepth:r.maxDepth,pixelSize:r.pixelSize,includeHidden:true,previousLeaves:r.coveringLeaves});
+ const previous=new Set(old),raw=transitionPairs(old,result.visible);
+ const relationships=raw.map(p=>({fineKey:p.fine.key,coarseKey:p.coarse.key,fineOld:previous.has(p.fine),coarseOld:previous.has(p.coarse),originX:p.originX,originY:p.originY,scale:p.scale,refining:p.refining}));
+ r.select(camera,1200,{result,relationships,selectionMs:0});assert.ok(r.stage);
+ const expected=transitionPairs(old,r.stage.nodes).map(p=>({...p,refining:p.refining??r.stage.slots.has(p.fine.key)}));
+ assert.deepEqual(r.stage.pairs,expected);
+});
