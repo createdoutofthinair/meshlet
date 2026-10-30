@@ -115,8 +115,10 @@ function updateTelemetry(){
 let flightTime=0,flightProbe=false,flightGeneration=0;
 function advanceFlight(now){
  const camera=renderer?.cameraState;if(!camera||camera.mode!=='flight'){flightTime=0;flightGeneration++;return;}
- const dt=flightTime?Math.min(.05,(now-flightTime)/1000):0;flightTime=now;
  if(walkLanding||flightProbe)return;
+ // Retain time spent waiting for the asynchronous terrain readback; otherwise
+ // descent slows in proportion to GPU latency once probes begin below 12 km.
+ const dt=flightTime?Math.max(0,Math.min(.25,(now-flightTime)/1000)):0;flightTime=now;
  const input=inputForWalk(),vertical=Number(keys.has('KeyE')||touchFlight.has('up'))-Number(keys.has('KeyQ')||touchFlight.has('down'));
  if(!input.forward&&!input.strafe&&!vertical)return;
  // Speed adapts continuously to clearance, permitting both orbital travel and a controlled approach.
@@ -136,10 +138,13 @@ function advanceFlight(now){
    let rendered=null;if(absolute-floor<.08)rendered=await renderer.sampleRenderedSurface(next);
    if(epoch!==flightGeneration||camera.mode!=='flight'||generation!==renderer.generation)return;
    const safeFloor=rendered==null?floor:renderer.ocean?Math.max(0,rendered):rendered;
-   setCameraDirection(camera,next);camera.surfaceHeight=safeFloor;camera.altitude=Math.max(WALK_EYE_HEIGHT_KM,absolute-safeFloor);renderer.needsSelection=true;
+   setCameraDirection(camera,next);camera.surfaceHeight=safeFloor;camera.altitude=Math.max(WALK_EYE_HEIGHT_KM,absolute-safeFloor);renderer.needsSelection=true;updateFlightAltitude(camera);
    if(absolute-safeFloor<=WALK_EYE_HEIGHT_KM&&rendered!=null&&(!renderer.ocean||rendered>0))enterWalk({touchdown:true});
   }).catch(error=>fail(`Flight terrain probe: ${error.message}`)).finally(()=>{flightProbe=false;});
  }else{setCameraDirection(camera,next);camera.surfaceHeight=0;camera.altitude=Math.min(MAX_ALT,absolute);renderer.needsSelection=true;}
+ updateFlightAltitude(camera);
+}
+function updateFlightAltitude(camera){
  el.altitude.textContent=altitudeText(camera.altitude);el['altitude-overlay'].textContent=altitudeText(camera.altitude);el['altitude-range'].value=String(toSlider(Math.max(MIN_ALT,camera.altitude)));
 }
 function frame(now){

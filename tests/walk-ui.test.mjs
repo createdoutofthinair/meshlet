@@ -129,3 +129,20 @@ test('flight descent remains practical at intermediate altitudes',async()=>{
  const element=id=>doc.getElementById(id);element('orbit').click();element('fly').click();cameraState.surfaceHeight=0;cameraState.altitude=10;cameraState.pitch=1.48;await tick(80000);key('keydown','KeyW');
  for(let i=1;i<=100;i++)await tick(80000+i*50);key('keyup','KeyW');assert.ok(cameraState.altitude<3,`descent reached ${cameraState.altitude} km`);
 });
+
+
+test('descent advances by elapsed time when terrain readback spans several frames',async()=>{
+ const element=id=>doc.getElementById(id);element('orbit').click();element('fly').click();cameraState.altitude=10;cameraState.surfaceHeight=0;cameraState.pitch=1.48;
+ let release;renderer.sampleTerrain=()=>new Promise(resolve=>{release=()=>resolve(new Float32Array([1,0,0,1]));});
+ await tick(100000);key('keydown','KeyW');await tick(100050);const before=cameraState.altitude;
+ for(let i=2;i<=5;i++)await tick(100000+i*50);release();await flush();assert.ok(cameraState.altitude<before);
+ const prior=cameraState.altitude;await tick(100300);release();await flush();key('keyup','KeyW');assert.ok(prior-cameraState.altitude>.5,`only descended ${(prior-cameraState.altitude)*1000} m`);
+ assert.equal(element('altitude-overlay').textContent,`${cameraState.altitude.toFixed(1)} km`,'readout is refreshed after asynchronous probe');
+});
+
+test('continuous descent transitions to walking at dry rendered ground',async()=>{
+ const element=id=>doc.getElementById(id);element('orbit').click();element('fly').click();cameraState.altitude=.08;cameraState.surfaceHeight=1;cameraState.pitch=1.48;renderer.ocean=true;
+ renderer.sampleTerrain=async direction=>new Float32Array([...(direction||[1,0,0]),1]);renderer.sampleRenderedSurface=async()=>1;
+ await tick(110000);key('keydown','KeyW');for(let i=1;i<200&&cameraState.mode==='flight';i++)await tick(110000+i*50);key('keyup','KeyW');
+ assert.equal(cameraState.mode,'walk');assert.equal(cameraState.surfaceHeight,1);assert.equal(cameraState.altitude,.0017);
+});
