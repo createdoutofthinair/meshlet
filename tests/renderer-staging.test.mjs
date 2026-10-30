@@ -338,6 +338,18 @@ test('flight selection waits for meaningful camera movement but continues pendin
  r.reconcileSelection=false;r.pixelSize++;assert.equal(r.shouldSelect(camera,1200),true);
 });
 
+test('terrain selection combines GPU residuals with conservative transition errors',()=>{
+ const {r}=fakeRenderer();
+ r.lodErrors.set('a',2);r.lodErrors.set('b',4);r.lodErrorVersion++;
+ r.transitionErrors.set('a',3);r.transitionErrors.set('c',1);r.transitionErrorVersion++;
+ const first=r.selectionErrorEstimates();
+ assert.deepEqual([...first.values],[['a',3],['b',4],['c',1]]);
+ assert.equal(r.selectionErrorEstimates(),first);
+ r.lodErrors.set('b',5);r.lodErrorVersion++;
+ assert.equal(r.selectionErrorEstimates().values.get('b'),5);
+ r.resetPatchCache();assert.equal(r.selectionErrorEstimates().values.size,0);
+});
+
 test('worker-packed topology is remapped to resident GPU slots without repacking vertices',async()=>{
  const {r}=fakeRenderer();const {packTransitionTopology,MORPH_RANGE_OFFSET,MORPH_COORD_OFFSET}=await import('../src/planet/transition-upload.js');
  const records=[{key:'a',slot:7,coordinates:new Float32Array([0,0,1,0,0,1])},{key:'b',slot:23,coordinates:new Float32Array([8,8,9,8,8,9])}];
