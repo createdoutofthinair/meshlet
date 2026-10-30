@@ -34,10 +34,17 @@ fn roundedObjectField(p:vec3<f32>)->f32{
  // Seeded irregular boulder. A conservative step scale keeps ray marching stable.
  if(params.viewport.z>2.5){
   let seed=params.eye.w;let q=p-vec3<f32>(0.0,-.08,0.0);
-  let warp=.075*sin(q.x*3.9+seed*.13)*sin(q.y*4.2+seed*.17)*cos(q.z*3.6-seed*.11)
-          +.035*sin(q.x*8.0+q.z*3.2+seed*.07)*cos(q.y*6.7-q.z*4.4+seed*.19);
-  let shape=length(q/vec3<f32>(.86,.78,.73))-.95+warp;
-  return shape*.36;
+  let offset=vec2<f32>(seed*.013,seed*.021);
+  let broad=(noise(q.xy*2.8+offset)+noise(q.yz*2.8+offset*1.3)+noise(q.zx*2.8-offset*.7))/3.0;
+  let chips=(noise(q.xy*6.0+offset)+noise(q.yz*6.0-offset)+noise(q.zx*6.0+offset*.8))/3.0;
+  let ellipsoid=length(q/vec3<f32>(.90,.78,.75))-.99;
+  // Uneven clipping planes break up the outline into broad natural facets.
+  let planeA=dot(q,normalize(vec3<f32>(.70,.62,.35)))-(.70+.07*sin(seed*.13));
+  let planeB=dot(q,normalize(vec3<f32>(-.50,.65,-.57)))-(.68+.06*cos(seed*.17));
+  let planeC=dot(q,normalize(vec3<f32>(.30,-.40,-.87)))-.69;
+  let shape=max(ellipsoid,max(planeA,max(planeB,planeC)))+(broad-.5)*.32+(chips-.5)*.12;
+  // Slow enough for the displaced field; shared by intersections and contacts.
+  return shape*.27;
  }
  // Upright torus: its open center is visible above and below the waterline.
  if(params.viewport.z>1.5){return length(vec2<f32>(length(p.xy)-.62,p.z))-.24;}
@@ -137,7 +144,7 @@ fn cubeHit(origin:vec3<f32>,direction:vec3<f32>)->f32{
 fn roundedObjectHit(origin:vec3<f32>,direction:vec3<f32>)->f32{
  let center=vec3<f32>(0.0,-.05,0.0);let q=origin-center;let b=dot(q,direction);let disc=b*b-dot(q,q)+1.5*1.5;
  if(disc<0.0){return -1.0;}let far= -b+sqrt(disc);var t=max(.001,-b-sqrt(disc));
- for(var i=0u;i<96u;i++){if(t>far){break;}let d=roundedObjectField(origin+direction*t);if(d<.001){return t;}t+=max(.001,d*.8);}
+ for(var i=0u;i<128u;i++){if(t>far){break;}let d=roundedObjectField(origin+direction*t);if(d<.001){return t;}t+=max(.001,d*.8);}
  return -1.0;
 }
 // Ripples travel from each actual impact to the cube, then the wash fades.
@@ -190,17 +197,17 @@ fn foamBreakup(uv:vec2<f32>)->f32{
 }
 // Seamless world-space procedural height field, sampled directly at the
 // visible surface; the small-scale relief perturbs normals, not silhouette.
+fn offsetForRock(seed:f32,scale:f32)->vec2<f32>{return vec2<f32>(seed*.009*scale,seed*.015*scale+scale*2.3);}
 fn rockHeight(p:vec3<f32>)->f32{
  let seed=params.eye.w;let q=p+vec3<f32>(seed*.013,seed*.021,seed*.017);
  let broad=(noise(q.xy*6.0)+noise(q.yz*6.0+vec2<f32>(4.2,1.3))+noise(q.zx*6.0+vec2<f32>(2.7,9.1)))/3.0;
  let fine=(noise(q.xy*24.0)+noise(q.yz*24.0+vec2<f32>(7.3,2.9))+noise(q.zx*24.0+vec2<f32>(3.1,4.6)))/3.0;
  let grain=(noise(q.xy*68.0)+noise(q.yz*68.0+vec2<f32>(3.3,6.2))+noise(q.zx*68.0+vec2<f32>(8.2,1.7)))/3.0;
- // Warped, broken strata add the interlocking chipped ridges visible on
- // dark wet stone; all bands remain deterministic in object space.
- let strata=noise(vec2<f32>(q.x*11.0+q.z*4.0,q.y*30.0+q.z*7.0+broad*4.0));
- let cracks=abs(noise(vec2<f32>(q.x*15.0+q.z*6.0,q.y*13.0-q.z*9.0))-.5);
- let fissure=1.0-smoothstep(.012,.07,cracks);
- return broad*.085+fine*.030+grain*.006+strata*.022-fissure*.009;
+ // Irregular multi-directional breaks avoid parallel line patterns.
+ let fracture=(noise(q.xy*13.0+offsetForRock(seed,1.0))+noise(q.yz*13.0+offsetForRock(seed,2.0))+noise(q.zx*13.0+offsetForRock(seed,3.0)))/3.0;
+ let broken=abs(fracture-.48);
+ let fissure=(1.0-smoothstep(.008,.06,broken))*smoothstep(.35,.63,broad);
+ return broad*.10+fine*.038+grain*.008-fissure*.007;
 }
 fn rockMaterial(p:vec3<f32>,normal:vec3<f32>,light:vec3<f32>)->vec3<f32>{
  let e=.0018;let h=rockHeight(p);
