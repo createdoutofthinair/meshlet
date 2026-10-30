@@ -194,7 +194,7 @@ export class PlanetRenderer {
  }
  resetPatchCache(){
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
-  this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;
+  this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
   this.transitionErrors.clear();this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
   this.selectionResult=null;this.selectionRequest=null;this.reconcileSelection=false;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
@@ -598,10 +598,16 @@ export class PlanetRenderer {
   if(separateOcean){
    const view=new Float32Array(20);view.set([...camera.radial,camera.altitude],0);view.set([...camera.forward,camera.tanY],4);view.set([...camera.right,camera.tanX],8);view.set([...camera.up,camera.width],12);view[16]=camera.height;view[17]=camera.near;d.queue.writeBuffer(this.oceanView,0,view);
   }
-  if(drawPatches.length)d.queue.writeBuffer(this.activeBuffer,0,new Uint32Array(drawPatches.map(p=>p.slot)));
+  const activeChanged=!this.uploadedActiveSlots||this.uploadedActiveSlots.length!==drawPatches.length||drawPatches.some((p,i)=>p.slot!==this.uploadedActiveSlots[i]);
+  if(activeChanged){
+   this.uploadedActiveSlots=new Uint32Array(drawPatches.map(p=>p.slot));
+   if(drawPatches.length)d.queue.writeBuffer(this.activeBuffer,0,this.uploadedActiveSlots);
+  }
   if(this.pending.length)d.queue.writeBuffer(this.queueBuffer,0,new Uint32Array(this.pending));
   if(normals.length)d.queue.writeBuffer(this.normalQueueBuffer,0,new Uint32Array(normals));
-  if(compare&&stage.pairs.length)d.queue.writeBuffer(this.transitionPairsBuffer,0,encodeTransitionPairs(stage.pairs,this.topologySlots));
+  if(compare&&stage.pairs.length&&!stage.comparisonUploaded){
+   d.queue.writeBuffer(this.transitionPairsBuffer,0,encodeTransitionPairs(stage.pairs,this.topologySlots));stage.comparisonUploaded=true;
+  }
   d.queue.writeBuffer(this.indirect,0,new Uint32Array([this.morphVertexCount||96,0,0,0]));
   this.ensureHydrology();
   const generatedOnSample=this.pending.length;

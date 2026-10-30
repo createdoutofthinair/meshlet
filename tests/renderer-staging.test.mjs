@@ -349,3 +349,19 @@ test('worker-packed topology is remapped to resident GPU slots without repacking
  assert.deepEqual([...new Float32Array(r.morphBuffer.data,MORPH_COORD_OFFSET,packed.coordinates.length)],[...packed.coordinates]);
  assert.throws(()=>r.uploadTransitionTopology([{key:'missing',slot:7}],{keys:['a'],...packed}),/Invalid prepared topology/);
 });
+
+test('stable frames avoid redundant active-slot uploads and rebuild after reset',async()=>{
+ const {r}=fakeRenderer(),writes=[],write=r.device.queue.writeBuffer;
+ r.device.queue.writeBuffer=(target,offset,source)=>{if(target===r.activeBuffer)writes.push([...new Uint32Array(source.buffer,source.byteOffset,source.byteLength/4)]);write(target,offset,source);};
+ r.frame(1000);await flush();assert.equal(writes.length,1);
+ r.frame(1100);await flush();assert.equal(writes.length,1);
+ r.resetPatchCache();r.frame(1300);await flush();assert.equal(writes.length,2);
+ assert.deepEqual(writes[1],r.patches.map(p=>p.slot));
+});
+
+test('active transition reuses its immutable comparison pairs buffer',async()=>{
+ const {r,camera}=await preparedRefinement(),writes=[],write=r.device.queue.writeBuffer;
+ r.device.queue.writeBuffer=(target,offset,source)=>{if(target===r.transitionPairsBuffer)writes.push(source.byteLength);write(target,offset,source);};
+ r.beginTransition(camera);r.surfaceReads=1;r.frame(2000);await flush();r.frame(2300);await flush();
+ assert.equal(writes.length,1);assert.ok(r.stage.comparisonUploaded);
+});
