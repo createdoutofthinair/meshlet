@@ -76,6 +76,6 @@ test('an above-target merge cannot indefinitely prevent a requested refinement',
 test('GPU render timing covers the cloud pass and disabled clouds retain sky',async()=>{
  const {r,renderPasses}=fakeRenderer();r.timing=true;r.queries={};r.resolve=r.device.createBuffer({size:32});r.cloudPipe={};r.cloudBind={};r.cloudUniform=r.device.createBuffer({size:176});r.clouds=false;r.lastSample=0;
  r.frame(1000);await flush();assert.equal(renderPasses.length,3);
- assert.equal(renderPasses[0].timestampWrites.beginningOfPassWriteIndex,2);assert.equal(renderPasses[1].timestampWrites,undefined);assert.equal(renderPasses[2].timestampWrites.endOfPassWriteIndex,3);
+ assert.equal(renderPasses[0].timestampWrites.beginningOfPassWriteIndex,2);assert.equal(renderPasses[1].timestampWrites,undefined);assert.equal(renderPasses[2].timestampWrites.endOfPassWriteIndex,3);assert.equal(renderPasses[1].depthStencilAttachment.depthStoreOp,'store','final ocean depth is retained for atmospheric compositing');
  assert.equal(new Float32Array(r.cloudUniform.data)[7],0);
 });

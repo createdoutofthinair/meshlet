@@ -1,11 +1,13 @@
-@group(0) @binding(1) var terrainDepth:texture_2d<f32>;
+@group(0) @binding(1) var sceneDepth:texture_depth_2d;
 @fragment fn planetCloud(input:Screen)->@location(0) vec4<f32>{
  let uv=vec2<f32>(input.pos.x/params.view.x*2.0-1.0,1.0-input.pos.y/params.view.y*2.0);
  let worldRay=normalize(params.forward.xyz+params.right.xyz*uv.x*params.forward.w+params.up.xyz*uv.y*params.right.w);
  let ray=vec3<f32>(dot(worldRay,params.east.xyz),dot(worldRay,params.radial.xyz),dot(worldRay,params.north.xyz));
  let sun=vec3<f32>(dot(params.sun.xyz,params.east.xyz),dot(params.sun.xyz,params.radial.xyz),dot(params.sun.xyz,params.north.xyz));
  let origin=vec3<f32>(0.0,params.sky.z,0.0);
- let depth=abs(textureLoad(terrainDepth,vec2<i32>(input.pos.xy),0).r);
+ // The final depth includes terrain and any ocean pixel that survived its
+ // coast test. An analytic sea hit alone does not mean a pixel was drawn.
+ let depth=textureLoad(sceneDepth,vec2<i32>(input.pos.xy),0);
  var limit=1e10;
  if(depth>0.0){limit=params.up.w*1000.0/(depth*max(.001,dot(worldRay,params.forward.xyz)));}
  let ground=sphereInterval(origin.y,ray,0.0);
@@ -42,7 +44,7 @@
  }
  let alpha=1.0-transmission;
  let sky=atmosphereSky(ray,sun,vec3<f32>(0,1,0),origin.y);
- if(depth==0.0 && limit>1e9){
+ if(depth==0.0){
   let tangent=max(0.0,-(PLANET_RADIUS+origin.y)*ray.y);
   let height=max(0.0,planetAltitude(origin+ray*tangent));
   let halo=exp(-height/40000.0)*smoothstep(5000.0,60000.0,origin.y)*exp(-max(0.0,ray.y)*5.0);

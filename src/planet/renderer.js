@@ -199,13 +199,13 @@ export class PlanetRenderer {
   const w=Math.min(max,Math.max(1,Math.round(rect.width*ratio))),h=Math.min(max,Math.max(1,Math.round(rect.height*ratio)));
   if(this.canvas.width!==w||this.canvas.height!==h||!this.depth){
    this.canvas.width=w;this.canvas.height=h;this.depth?.destroy();this.waterDepth?.destroy();
-   this.depth=this.device.createTexture({label:'Planet reverse-Z depth',size:[w,h],format:'depth32float',usage:GPUTextureUsage.RENDER_ATTACHMENT});
+   this.depth=this.device.createTexture({label:'Planet reverse-Z depth',size:[w,h],format:'depth32float',usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.TEXTURE_BINDING});
    this.waterDepth=this.device.createTexture({label:'Terrain depth and lake coverage',size:[w,h],format:'r32float',usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.TEXTURE_BINDING});
    this.oceanBind=this.device.createBindGroup({layout:this.oceanLayout,entries:[
     ...[[0,this.uniform],[5,this.plates],[7,this.world],[8,this.worldDirections],[10,this.worldFaces],[11,this.oceanView]].map(([binding,buffer])=>({binding,resource:{buffer}})),
     {binding:12,resource:this.waterDepth.createView()}
    ]});
-   this.cloudBind=this.device.createBindGroup({layout:this.cloudPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.cloudUniform}},{binding:1,resource:this.waterDepth.createView()}]});
+   this.cloudBind=this.device.createBindGroup({layout:this.cloudPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.cloudUniform}},{binding:1,resource:this.depth.createView()}]});
    this.needsSelection=true;
   }
  }
@@ -453,11 +453,11 @@ export class PlanetRenderer {
   const descriptor={colorAttachments:[
    {view:colorView,clearValue:{r:.006,g:.009,b:.016,a:1},loadOp:'clear',storeOp:'store'},
    {view:this.waterDepth.createView(),clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}
-  ],depthStencilAttachment:{view:depthView,depthClearValue:0,depthLoadOp:'clear',depthStoreOp:separateOcean?'store':'discard'}};
+  ],depthStencilAttachment:{view:depthView,depthClearValue:0,depthLoadOp:'clear',depthStoreOp:separateOcean||cloudActive?'store':'discard'}};
   if(sample&&this.timing)descriptor.timestampWrites=separateOcean||cloudActive?{querySet:this.queries,beginningOfPassWriteIndex:2}:{querySet:this.queries,beginningOfPassWriteIndex:2,endOfPassWriteIndex:3};
   const pass=encoder.beginRenderPass(descriptor);pass.setPipeline(this.renderPipe);pass.setBindGroup(0,this.renderBind);pass.drawIndirect(this.indirect,0);pass.end();
   if(separateOcean){
-   const waterDescriptor={colorAttachments:[{view:colorView,loadOp:'load',storeOp:'store'}],depthStencilAttachment:{view:depthView,depthLoadOp:'load',depthStoreOp:'discard'}};
+   const waterDescriptor={colorAttachments:[{view:colorView,loadOp:'load',storeOp:'store'}],depthStencilAttachment:{view:depthView,depthLoadOp:'load',depthStoreOp:cloudActive?'store':'discard'}};
    if(sample&&this.timing&&!cloudActive)waterDescriptor.timestampWrites={querySet:this.queries,endOfPassWriteIndex:3};
    const waterPass=encoder.beginRenderPass(waterDescriptor);waterPass.setPipeline(this.oceanPipe);waterPass.setBindGroup(0,this.oceanBind);waterPass.draw(3);waterPass.end();
   }
