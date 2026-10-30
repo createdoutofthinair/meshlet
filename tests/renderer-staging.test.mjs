@@ -487,3 +487,21 @@ test('concurrent probes use separate readbacks and stale readbacks are destroyed
  r.resetPatchCache();resolve.forEach(done=>done());assert.equal(await a,null);assert.equal(await b,null);
  assert.ok(created.every(buffer=>buffer.destroyed));assert.equal(r.probeReadbacks.length,0);
 });
+
+test('point terrain sampling reuses only an identical valid GPU input',async()=>{
+ const {r}=fakeRenderer();r.probeInput=r.device.createBuffer({size:16});r.sampleBuffer=r.device.createBuffer({size:16});r.pointPipe={};r.pointBind={};r.hydrologySeed=r.seed>>>0;
+ let submissions=0;const submit=r.device.queue.submit;r.device.queue.submit=commands=>{submissions++;submit(commands);};
+ const first=await r.sampleTerrain([1,0,0]);first[3]=123;
+ const second=await r.sampleTerrain([1,0,0]);assert.equal(submissions,1);assert.notEqual(second[3],123);
+ await r.sampleTerrain([1,.0001,0]);assert.equal(submissions,2);
+ r.relief+=.1;await r.sampleTerrain([1,.0001,0]);assert.equal(submissions,3);
+ r.terrainFieldRevision++;await r.sampleTerrain([1,.0001,0]);assert.equal(submissions,4);
+ r.resetPatchCache();await r.sampleTerrain([1,.0001,0]);assert.equal(submissions,5);
+});
+
+test('regional changes invalidate in-flight point terrain results',async()=>{
+ const {r}=fakeRenderer();r.probeInput=r.device.createBuffer({size:16});r.sampleBuffer=r.device.createBuffer({size:16});r.pointPipe={};r.pointBind={};
+ let release;const ready=new Promise(resolve=>{release=resolve;});const create=r.device.createBuffer;
+ r.device.createBuffer=options=>{const b=create(options);b.mapAsync=()=>ready;return b;};
+ const pending=r.sampleTerrain([1,0,0]);r.terrainFieldRevision++;release();assert.equal(await pending,null);assert.equal(r.terrainPointCache,null);
+});

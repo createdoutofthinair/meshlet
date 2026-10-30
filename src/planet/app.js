@@ -47,7 +47,7 @@ async function enterWalk({touchdown=false}={}){
   for(;;){
    const generation=renderer.generation,data=await renderer.sampleTerrain(direction);
    if(epoch!==walkEpoch)return;
-   if(generation!==renderer.generation)continue;
+   if(!data||generation!==renderer.generation)continue;
    point={direction,height:data[3]};
    if(touchdown){
     const rendered=await renderer.sampleRenderedSurface(direction);if(epoch!==walkEpoch)return;
@@ -56,7 +56,7 @@ async function enterWalk({touchdown=false}={}){
    }
    if(!touchdown&&renderer.ocean&&point.height<=.03){
     const candidates=await renderer.sampleTerrain();if(epoch!==walkEpoch)return;
-    if(generation!==renderer.generation)continue;
+    if(!candidates||generation!==renderer.generation)continue;
     let best=-Infinity,index=-1;
     for(let i=0;i<candidates.length;i+=4){
      if(candidates[i+3]<=.05)continue;
@@ -136,7 +136,7 @@ function advanceFlight(now){
  if(absolute<12){
   flightProbe=true;const epoch=flightGeneration,generation=renderer.generation;
   renderer.sampleTerrain(next).then(async data=>{
-   if(epoch!==flightGeneration||camera.mode!=='flight'||generation!==renderer.generation)return;
+   if(!data||epoch!==flightGeneration||camera.mode!=='flight'||generation!==renderer.generation)return;
    const terrain=data[3],floor=renderer.ocean?Math.max(0,terrain):terrain;
    let rendered=null;if(absolute-floor<.08)rendered=await renderer.sampleRenderedSurface(next);
    if(epoch!==flightGeneration||camera.mode!=='flight'||generation!==renderer.generation)return;
