@@ -181,6 +181,9 @@ fn terrainShapeFromBaseDetail(base:TerrainBase,seed:u32,valleyStrength:f32,direc
  }
  let d=detailBase.direction;let warpDetail=detailBase.warp*.45;
  var ridges=0.0;var ridgeGradient=vec3<f32>(0.0);var amplitude=.56;var freq=14.0;
+ // Ridge, fold and fine-band contributions are multiplied by roughness.
+ // For exactly flat regions their noise cannot affect any output.
+ if(roughness>0.0){
  for(var i=0u;i<4u;i++){
   let p=d*freq+warpDetail;var n:f32;
   if(valleyEnabled){var sample:vec4<f32>;
@@ -196,10 +199,12 @@ fn terrainShapeFromBaseDetail(base:TerrainBase,seed:u32,valleyStrength:f32,direc
   let r=1.0-min(1.0,abs(n)*2.3);
   ridges+=r*r*amplitude;freq*=2.23;amplitude*=.50;
  }
+ }
  let mountains=roughness*pow(max(0.0,ridges),1.25)*7.5;
  // Small, bounded terrain-detail bands. These are erosion-inspired noise,
  // not a hydraulic simulation; the land mask prevents ocean-wide ridges.
  var fine=0.0;var fineWeight=1.0;var fineFrequency=640.0;var fineAmplitude=1.0;
+ if(roughness>0.0){
  for(var i=0u;i<6u;i++){
   var fineNoise:f32;
   if(preciseBands){let lattice=terrainPreciseLattice(d,detailOffset.direction,fineFrequency,warpDetail,detailOffset.warp*.45);fineNoise=cellNoise(lattice.cell,lattice.fraction,seed+151u+i*23u);}
@@ -210,14 +215,18 @@ fn terrainShapeFromBaseDetail(base:TerrainBase,seed:u32,valleyStrength:f32,direc
   // smallest octaves create taller-than-wide spikes as the camera approaches.
   fineWeight=clamp(r*1.6,.25,1.0);fineFrequency*=3.7;fineAmplitude*=.26;
  }
- var foldNoise:f32;
- if(preciseBands){foldNoise=terrainPreciseFold(detailBase,detailOffset,seed);}
- else{
-  let coords=vec3<f32>(dot(d,plates[0].xyz)*2100.0,dot(d,plates[1].xyz)*480.0,dot(d,plates[2].xyz)*125.0);
-  foldNoise=noise3(coords+warpDetail,seed+277u);
  }
- let fold=1.0-min(1.0,abs(foldNoise)*2.0);
- let directional=(fold*fold-.25)*.38*roughness;
+ var directional=0.0;
+ if(roughness>0.0){
+  var foldNoise:f32;
+  if(preciseBands){foldNoise=terrainPreciseFold(detailBase,detailOffset,seed);}
+  else{
+   let coords=vec3<f32>(dot(d,plates[0].xyz)*2100.0,dot(d,plates[1].xyz)*480.0,dot(d,plates[2].xyz)*125.0);
+   foldNoise=noise3(coords+warpDetail,seed+277u);
+  }
+  let fold=1.0-min(1.0,abs(foldNoise)*2.0);
+  directional=(fold*fold-.25)*.38*roughness;
+ }
  var plainsDetail:f32;
  if(preciseBands){
   let a=terrainPreciseLattice(d,detailOffset.direction,900.0,vec3<f32>(0.0),vec3<f32>(0.0));
