@@ -1,5 +1,5 @@
 import {selectPatches} from './quadtree.js';
-import {transitionGroups,transitionPairs,coordinateTransitions} from './patch-transition.js';
+import {transitionGroups,transitionPairs,coordinateTransitions,transitionSignatures} from './patch-transition.js';
 import {transitionCoordinates} from './transition-topology.js';
 import {packTransitionTopology} from './transition-upload.js';
 let cachedErrors=new Map();
@@ -29,5 +29,5 @@ self.onmessage=({data})=>{
  try{if(keys.length)packed=packTransitionTopology(keys.map((key,slot)=>({slot,coordinates:topology.get(key)})));}
  catch(error){if(!error.message.includes('capacity exceeded'))throw error;}
  const transfers=packed?[packed.ranges.buffer,packed.coordinates.buffer]:[];
- self.postMessage({id:data.id,key:data.key,camera:data.camera,result,relationships,groupPlan,componentPlan,topology:packed?null:topology,packedTopology:packed?{keys,ranges:packed.ranges,coordinates:packed.coordinates,vertexCount:packed.vertexCount}:null,selectionMs:performance.now()-start},transfers);
+ self.postMessage({id:data.id,key:data.key,camera:data.camera,result,relationships,groupPlan,componentPlan,signatures:transitionSignatures(result.visible),topology:packed?null:topology,packedTopology:packed?{keys,ranges:packed.ranges,coordinates:packed.coordinates,vertexCount:packed.vertexCount}:null,selectionMs:performance.now()-start},transfers);
 };

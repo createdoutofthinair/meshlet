@@ -106,3 +106,25 @@ export function coordinateTransitions(previous,next,groups=transitionGroups(prev
  });
  return [...components.values()].map(c=>({groups:c.groups,slots:[...c.slots],deferredReasons:[...c.reasons].sort()}));
 }
+
+export function transitionSignatures(nodes){
+ const wantedNodes=new Map(nodes.map(p=>[p.key,p]));
+  // A changed stitch graph may alter geometry even for a retained patch.
+ const signatureFor=node=>{
+   let hash=(2166136261^node.normalStitch)>>>0;
+   const mixKey=key=>{for(let i=0;i<key.length;i++)hash=Math.imul(hash^key.charCodeAt(i),16777619)>>>0;};
+   for(const key of node.edgeKeys){
+    const other=wantedNodes.get(key);if(!other){hash=Math.imul(hash^0xff,16777619)>>>0;continue;}
+    mixKey(key);hash=Math.imul(hash^other.normalStitch,16777619)>>>0;
+   }
+   for(const corner of node.cornerKeys){
+    const owners=new Set([node.key,...corner]);hash=Math.imul(hash^0x7f,16777619)>>>0;
+    for(const key of [...owners].sort()){
+     const other=wantedNodes.get(key);if(!other)continue;mixKey(key);hash=Math.imul(hash^other.normalStitch,16777619)>>>0;
+     for(const peer of other.edgeKeys)if(owners.has(peer)&&wantedNodes.has(peer))mixKey(peer);
+    }
+   }
+   return hash;
+  };
+ return new Map(nodes.map(node=>[node.key,signatureFor(node)]));
+}

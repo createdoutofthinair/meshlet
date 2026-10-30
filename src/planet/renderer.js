@@ -5,7 +5,7 @@ import {RADIUS_KM,PATCH_CELLS,FACE_BASES,faceCube,directionToFace,seedPlates,nor
 import {planetCloudSource} from './cloud-compose.js';
 import {planetCamera} from './camera.js';
 import {selectPatches} from './quadtree.js';
-import {transitionPairs,encodeTransitionPairs,transitionGroups,encodePatchMorphs,coordinateTransitions} from './patch-transition.js';
+import {transitionPairs,encodeTransitionPairs,transitionGroups,encodePatchMorphs,coordinateTransitions,transitionSignatures} from './patch-transition.js';
 import {buildWorldGrid} from './world-grid.js';
 import {regionsAround,REGION_CAPACITY,REGION_GRID,REGION_SAMPLES,REGION_LOOKUPS} from './regions.js';
 const BUFFER=globalThis.GPUBufferUsage;
@@ -269,24 +269,7 @@ export class PlanetRenderer {
   const start=performance.now();
   const maxDepth=this.cameraState.mode==='walk'?22:this.maxDepth;
   const result=computed?.result??selectPatches(camera,{budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.transitionErrors,previousLeaves:this.coveringLeaves});
-  const wantedNodes=new Map(result.visible.map(p=>[p.key,p]));
-  // A changed stitch graph may alter geometry even for a retained patch.
-  const signatureFor=node=>{
-   let hash=(2166136261^node.normalStitch)>>>0;
-   const mixKey=key=>{for(let i=0;i<key.length;i++)hash=Math.imul(hash^key.charCodeAt(i),16777619)>>>0;};
-   for(const key of node.edgeKeys){
-    const other=wantedNodes.get(key);if(!other){hash=Math.imul(hash^0xff,16777619)>>>0;continue;}
-    mixKey(key);hash=Math.imul(hash^other.normalStitch,16777619)>>>0;
-   }
-   for(const corner of node.cornerKeys){
-    const owners=new Set([node.key,...corner]);hash=Math.imul(hash^0x7f,16777619)>>>0;
-    for(const key of [...owners].sort()){
-     const other=wantedNodes.get(key);if(!other)continue;mixKey(key);hash=Math.imul(hash^other.normalStitch,16777619)>>>0;
-     for(const peer of other.edgeKeys)if(owners.has(peer)&&wantedNodes.has(peer))mixKey(peer);
-    }
-   }
-   return hash;
-  };
+  const wantedSignatures=computed?.signatures??transitionSignatures(result.visible);
   // Reserve the whole replacement set before touching the free list. Partial
   // allocation on exhaustion must never leak slots or remove visible coverage.
   const required=result.visible.reduce((count,node)=>count+Number(!this.slotByKey.has(node.key)),0);
@@ -297,7 +280,8 @@ export class PlanetRenderer {
   }
   const slots=new Map(),signatures=new Map(),newNodes=[],normalPending=[];let topologyChanges=0;
   const nodes=result.visible.map(node=>{
-   const signature=signatureFor(node);
+   const signature=wantedSignatures.get(node.key);
+   if(signature===undefined)throw new Error('Missing terrain stitch signature');
    let slot=this.slotByKey.get(node.key);
    if(slot===undefined){slot=this.free.pop();if(slot===undefined)throw new Error('Planet patch staging cache exhausted.');newNodes.push({...node,slot});normalPending.push(slot);}
    else if(this.stitchByKey.get(node.key)!==signature)topologyChanges++;

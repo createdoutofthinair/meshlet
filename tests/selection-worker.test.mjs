@@ -35,3 +35,14 @@ test('worker prepares stitched transition topology for the selected covering tre
   assert.deepEqual(messages[5].packedTopology,messages[4].packedTopology,'cached tree produces the same transition topology');
  }finally{delete globalThis.self;}
 });
+
+test('worker stitch signatures match the shared signature calculation',async()=>{
+ const messages=[];globalThis.self={postMessage:value=>messages.push(value)};
+ try{
+  await import('../src/planet/selection-worker.js?signature-test');
+  const {transitionSignatures}=await import('../src/planet/patch-transition.js');
+  const camera=planetCamera({altitude:50,longitude:2.2,latitude:-.2},960,600);
+  self.onmessage({data:{id:1,key:'test',camera,options:{budget:54,pixelSize:14,includeHidden:true}}});
+  assert.deepEqual(messages[0].signatures,transitionSignatures(messages[0].result.visible));
+ }finally{delete globalThis.self;}
+});
