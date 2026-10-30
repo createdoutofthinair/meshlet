@@ -22,3 +22,16 @@ test('endpoint-union bound contains interpolated positions across different patc
   }
  }
 });
+
+test('shared patch union encloses every meshlet endpoint, including overlay bounds',()=>{
+ const fine=Array.from({length:16},(_,i)=>[i*.13,Math.sin(i)*.2,Math.cos(i)*.1,.15]);
+ const parents=Array.from({length:16},(_,i)=>[i*.07,Math.cos(i)*.3,Math.sin(i)*.2,.2]);
+ const delta=[7,-3,.02];
+ for(const overlay of [false,true])for(const meshlet of fine){
+  const bound=enclosure(meshlet,[...parents,...(overlay?fine.map(v=>[v[0]-delta[0],v[1]-delta[1],v[2]-delta[2],v[3]]):[])],delta);
+  for(const sphere of [meshlet,...parents.map(p=>[p[0]+delta[0],p[1]+delta[1],p[2]+delta[2],p[3]]),...(overlay?fine:[])])for(let axis=0;axis<3;axis++)for(const sign of [-1,1]){
+   const p=sphere.slice(0,3);p[axis]+=sign*sphere[3];
+   assert.ok(Math.hypot(...p.map((v,k)=>v-bound.center[k]))<=bound.radius);
+  }
+ }
+});
