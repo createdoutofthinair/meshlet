@@ -688,11 +688,15 @@ export class PlanetRenderer {
   if(separateOcean){
    const view=this.oceanViewData;view.set([...camera.radial,camera.altitude],0);view.set([...camera.forward,camera.tanY],4);view.set([...camera.right,camera.tanX],8);view.set([...camera.up,camera.width],12);view[16]=camera.height;view[17]=camera.near;d.queue.writeBuffer(this.oceanView,0,view);
   }
-  const activeChanged=!this.uploadedActiveSlots||this.uploadedActiveSlots.length!==drawPatches.length||drawPatches.some((p,i)=>p.slot!==this.uploadedActiveSlots[i]);
+  // Draw lists and their slots are immutable once published. Avoid scanning
+  // every patch each frame while the same list remains active.
+  const activeChanged=!this.uploadedActiveSlots||(this.uploadedActiveList!==drawPatches&&
+   (this.uploadedActiveSlots.length!==drawPatches.length||drawPatches.some((p,i)=>p.slot!==this.uploadedActiveSlots[i])));
   if(activeChanged){
    this.uploadedActiveSlots=new Uint32Array(drawPatches.map(p=>p.slot));
    if(drawPatches.length)d.queue.writeBuffer(this.activeBuffer,0,this.uploadedActiveSlots);
   }
+  this.uploadedActiveList=drawPatches;
   if(this.pending.length)d.queue.writeBuffer(this.queueBuffer,0,new Uint32Array(this.pending));
   if(normals.length)d.queue.writeBuffer(this.normalQueueBuffer,0,new Uint32Array(normals));
   if(compare&&stage.pairs.length&&!stage.comparisonUploaded){
