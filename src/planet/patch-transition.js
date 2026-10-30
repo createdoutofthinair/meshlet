@@ -15,6 +15,7 @@ function pair(fine,coarse){
  return {fine,coarse,originX:(fine.x-coarse.x/scale)*16*scale,originY:(fine.y-coarse.y/scale)*16*scale,scale};
 }
 export function transitionPairs(previous,next){
+ if(!previous.length||!next.length)return [];
  const old=new Map(previous.map(n=>[n.key,n])),fresh=new Map(next.map(n=>[n.key,n])),pairs=[];
  for(const child of next){
   const previousPatch=old.get(child.key);
@@ -42,6 +43,7 @@ export function encodeTransitionPairs(pairs,topologySlots=null){
 // Group overlapping patches by the actual coarse surface. Stitch-only changes
 // use their own group because they require a topology change at the same LOD.
 export function transitionGroups(previous,next,pairs=transitionPairs(previous,next)){
+ if(!pairs.length)return [];
  const oldNodes=new Map(),newNodes=new Map();
  for(const p of previous)if(!oldNodes.has(p.key))oldNodes.set(p.key,p);
  for(const p of next)if(!newNodes.has(p.key))newNodes.set(p.key,p);
