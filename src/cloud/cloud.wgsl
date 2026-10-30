@@ -80,7 +80,8 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  let uv=vec2<f32>(input.pos.x/params.view.x*2.0-1.0,1.0-input.pos.y/params.view.y*2.0);let yaw=params.view.z;let pitch=params.view.w;
  let forward=vec3<f32>(sin(yaw)*cos(pitch),sin(pitch),cos(yaw)*cos(pitch));let right=vec3<f32>(cos(yaw),0.0,-sin(yaw));let up=normalize(cross(forward,right));
  let ray=normalize(forward+right*uv.x*(params.view.x/params.view.y)*.58+up*uv.y*.58);
- let sun=normalize(vec3<f32>(.32,sin(params.sky.y),cos(params.sky.y)*.95));let origin=vec3<f32>(0.0,params.sky.z,0.0);
+ let sun=vec3<f32>(sin(params.cloud.w)*cos(params.sky.y),sin(params.sky.y),cos(params.cloud.w)*cos(params.sky.y));let origin=vec3<f32>(0.0,params.sky.z,0.0);
+ let sunElevation=sun.y;let day=atmosphereDaylight(sunElevation);let twilight=atmosphereTwilight(sunElevation);
  var color=atmosphereSky(ray,sun,vec3<f32>(0,1,0),origin.y);
  // The horizon is the intersection of the actual planet sphere.
  let ground=sphereInterval(origin.y,ray,0.0);var groundDistance=1e9;
@@ -89,7 +90,7 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
   // A simple ocean-colored spherical ground supplies contrast through gaps.
   let horizonDistance=sqrt(max(1.0,origin.y*(2.0*PLANET_RADIUS+origin.y)));
   let haze=smoothstep(.20,1.0,groundDistance/horizonDistance);
-  color=mix(vec3<f32>(.045,.12,.19),vec3<f32>(.26,.49,.67),haze*.8);
+  color=mix(vec3<f32>(.045,.12,.19),vec3<f32>(.26,.49,.67),haze*.8)*mix(.06,1.0,day);
  }
  let outer=sphereInterval(origin.y,ray,8000.0);let inner=sphereInterval(origin.y,ray,1500.0);
  if(outer.y>0.0 && outer.y>outer.x){
@@ -108,14 +109,18 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
      let optical=density*stepSize*.0018;let alpha=1.0-exp(-optical);
      let shadow=exp(-cloudDensity(point+sun*420.0,weather,detailWeight)*1.15);let phase=.55+.45*pow(max(dot(ray,sun),0.0),6.0);
      let cloudHeight=clamp((planetAltitude(point)-1500.0)/6500.0,0.0,1.0);
-     let illumination=mix(vec3<f32>(.24,.31,.39),vec3<f32>(1.0,.92,.80),clamp(shadow*phase*(.70+.45*cloudHeight),0.0,1.0));
+     let cloudUp=normalize(vec3<f32>(point.x,PLANET_RADIUS+point.y,point.z));
+     let cloudSun=dot(cloudUp,sun);let cloudDay=atmosphereDaylight(cloudSun);let cloudTwilight=atmosphereTwilight(cloudSun);
+     let cool=mix(vec3<f32>(.018,.025,.05),vec3<f32>(.24,.31,.39),cloudDay);
+     let warm=mix(vec3<f32>(1.0,.92,.80),vec3<f32>(1.0,.32,.12),cloudTwilight*.85);
+     let illumination=mix(cool,warm*max(.035,cloudDay+cloudTwilight*.30),clamp(shadow*phase*(.70+.45*cloudHeight),0.0,1.0));
      lightAccum+=transmission*alpha*illumination;transmission*=1.0-alpha;
     }
    }
    // Cloud light travels through the atmosphere before reaching the eye.
    // Blend distant details toward the same blue haze as the planetary limb.
    let aerial=1.0-exp(-max(0.0,start-15000.0)/220000.0);
-   let haze=vec3<f32>(.25,.44,.62);
+   let haze=mix(vec3<f32>(.012,.02,.045),mix(vec3<f32>(.25,.44,.62),vec3<f32>(.60,.24,.12),twilight*.6),max(day,twilight*.35));
    lightAccum=mix(lightAccum,haze*(1.0-transmission),aerial*.82);
    color=color*transmission+lightAccum;
   }
@@ -132,7 +137,8 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
   let broad=exp(-tangentHeight/40000.0)*altitudeVisibility*upwardFade;
   let inner=exp(-tangentHeight/9000.0)*altitudeVisibility*upwardFade;
   let sunSide=.65+.35*max(dot(ray,sun),0.0);
-  color+=((vec3<f32>(.07,.25,.65)*broad)+(vec3<f32>(.22,.42,.65)*inner))*sunSide;
+  let limbTint=mix(vec3<f32>(.07,.25,.65),vec3<f32>(.60,.18,.06),twilight*pow(max(dot(ray,sun),0.0),2.0));
+  color+=(limbTint*broad+vec3<f32>(.22,.42,.65)*inner)*sunSide*max(.035,day+twilight*.22);
  }
  let mapped=max(color,vec3<f32>(0.0))/(1.0+max(color,vec3<f32>(0.0))*.22);return vec4<f32>(pow(mapped,vec3<f32>(1.0/2.2)),1.0);
 }
