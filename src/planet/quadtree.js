@@ -27,22 +27,38 @@ export function neighbors(leaves,node,edge,maxDepth=MAX_DEPTH) {
  }
  return [...found.values()];
 }
-function split(leaves,node){
+function split(leaves,node,onChild=null){
  leaves.delete(node.key);
  for(let y=0;y<2;y++)for(let x=0;x<2;x++){
-  const child=makeTile(node.face,node.level+1,node.x*2+x,node.y*2+y);leaves.set(child.key,child);
+  const child=makeTile(node.face,node.level+1,node.x*2+x,node.y*2+y);leaves.set(child.key,child);onChild?.(child);
  }
 }
-function splitBalanced(leaves,node,budget,maxDepth,seen=new Set()) {
+function splitBalanced(leaves,node,budget,maxDepth,seen=new Set(),onChild=null) {
  if(!leaves.has(node.key)||node.level>=maxDepth||seen.has(node.key))return false;
  seen.add(node.key);
  // Splitting a level-L node creates L+1 children. Split any adjacent L-1
  // leaf first, keeping adjacent levels within one, including cube-face seams.
  for(let edge=0;edge<4;edge++)for(const other of neighbors(leaves,node,edge,maxDepth)) {
-  if(other.level<node.level && !splitBalanced(leaves,other,budget,maxDepth,seen))return false;
+  if(other.level<node.level && !splitBalanced(leaves,other,budget,maxDepth,seen,onChild))return false;
  }
  if(leaves.size+3>budget)return false;
- split(leaves,node);return true;
+ split(leaves,node,onChild);return true;
+}
+// Maximum priority first; insertion order preserves the old Map-scan tie rule.
+class CandidateHeap {
+ constructor(){this.items=[];this.sequence=0;}
+ better(a,b){return a.score>b.score||(a.score===b.score&&a.order<b.order);}
+ push(node,score){
+  const item={node,score,order:this.sequence++},a=this.items;let i=a.length;a.push(item);
+  while(i>0){const p=(i-1)>>1;if(!this.better(item,a[p]))break;a[i]=a[p];i=p;}a[i]=item;
+ }
+ pop(){
+  const a=this.items;if(!a.length)return null;const top=a[0],last=a.pop();
+  if(a.length){let i=0;while(true){let child=i*2+1;if(child>=a.length)break;
+   if(child+1<a.length&&this.better(a[child+1],a[child]))child++;
+   if(!this.better(a[child],last))break;a[i]=a[child];i=child;}a[i]=last;}
+  return top;
+ }
 }
 // Reconcile complete covering trees by at most one generation per region.
 // Transactions include balancing dependencies; failed splits cannot leave a
@@ -159,10 +175,12 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
  // Rebuild the covering tree on every selection, but give already-split nodes
  // a small priority margin. This reduces churn at refinement thresholds without
  // time-based fading, stale coverage, or exceeding the patch budget.
+ const candidates=new CandidateHeap();
+ const addCandidate=node=>{if(node.level<maxDepth){const value=priority(node);if(value>pixelSize)candidates.push(node,value);}};
+ for(const node of leaves.values())addCandidate(node);
  for(let iteration=0;iteration<budget;iteration++){
-  let best=null,bestScore=pixelSize;
-  for(const node of leaves.values())if(node.level<maxDepth){const s=priority(node);if(s>bestScore){best=node;bestScore=s;}}
-  if(!best || leaves.size+3>budget || !splitBalanced(leaves,best,budget,maxDepth))break;
+  let candidate;do{candidate=candidates.pop();}while(candidate&&leaves.get(candidate.node.key)!==candidate.node);
+  if(!candidate || leaves.size+3>budget || !splitBalanced(leaves,candidate.node,budget,maxDepth,new Set(),addCandidate))break;
  }
  // A stable target needs no balancing or split/merge transactions. This is
  // common during steady flight and avoids cloning the covering tree repeatedly.
