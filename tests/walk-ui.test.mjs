@@ -90,3 +90,13 @@ test('inspector opens, controls real renderer overlays and can pause its graph',
  element('inspect-close').dispatchEvent(new Event('click'));assert.equal(element('planet-inspector').hidden,true);assert.equal(element('inspect-open').attributes['aria-expanded'],'false');
  assert.equal(renderer.meshletColors,true,'closing the window leaves the chosen overlay visible');
 });
+
+test('tabs expose their panels and atmosphere and cloud sliders update the renderer',()=>{
+ const element=id=>doc.getElementById(id);
+ element('tab-atmosphere').click();assert.equal(element('panel-atmosphere').hidden,false);assert.equal(element('panel-world').hidden,true);assert.equal(element('tab-atmosphere').attributes['aria-selected'],'true');
+ element('sun-elevation').value='-8';element('sun-elevation').dispatchEvent(new Event('input'));assert.equal(renderer.sunElevation,-8);assert.equal(renderer.followSun,false);assert.equal(element('sun-elevation-value').textContent,'-8°');
+ element('mie-strength').value='175';element('mie-strength').dispatchEvent(new Event('input'));assert.equal(renderer.mieStrength,1.75);
+ element('tab-clouds').click();element('cloud-coverage').value='36';element('cloud-coverage').dispatchEvent(new Event('input'));assert.equal(renderer.cloudCoverage,.36);
+ element('cloud-density').value='135';element('cloud-density').dispatchEvent(new Event('input'));assert.equal(renderer.cloudDensity,1.35);
+ element('cloud-enabled').checked=false;element('cloud-enabled').dispatchEvent(new Event('change'));assert.equal(renderer.clouds,false);
+});

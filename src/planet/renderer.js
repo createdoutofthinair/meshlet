@@ -68,7 +68,7 @@ export class PlanetRenderer {
   this.oceanPipe=await d.createRenderPipelineAsync({layout:d.createPipelineLayout({bindGroupLayouts:[this.oceanLayout]}),vertex:{module:modules[7],entryPoint:'oceanVertex'},fragment:{module:modules[7],entryPoint:'oceanFragment',targets:[{format:this.format}]},primitive:{topology:'triangle-list'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'always'}});
   const cloudModule=await shader(d,planetCloudSource(await fetchText('../atmosphere/atmosphere.wgsl'),await fetchText('../cloud/cloud.wgsl'),await fetchText('./cloud-overlay.wgsl')),'Planet clouds');
   this.cloudPipe=await d.createRenderPipelineAsync({layout:'auto',vertex:{module:cloudModule,entryPoint:'vertex'},fragment:{module:cloudModule,entryPoint:'planetCloud',targets:[{format:this.format,blend:{color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}]},primitive:{topology:'triangle-list'}});
-  this.cloudUniform=d.createBuffer({size:160,usage:BUFFER.UNIFORM|BUFFER.COPY_DST});this.clouds=true;
+  this.cloudUniform=d.createBuffer({size:176,usage:BUFFER.UNIFORM|BUFFER.COPY_DST});this.clouds=true;this.cloudCoverage=.72;this.cloudDensity=1;this.cloudSpeed=8;this.skyStrength=1;this.mieStrength=1;this.haloStrength=1;this.sunAzimuth=45;this.sunElevation=30;
   const make=(label,size,usage)=>d.createBuffer({label,size,usage});
   this.uniform=make('Planet frame',224,BUFFER.UNIFORM|BUFFER.COPY_DST);
   this.oceanView=make('Camera for analytic ocean',80,BUFFER.UNIFORM|BUFFER.COPY_DST);
@@ -402,6 +402,11 @@ export class PlanetRenderer {
    const low=this.cameraState.mode==='flyover'||this.cameraState.mode==='walk';
    sun=normalize(add(add(scale(camera.radial,low ? .32 : .72),scale(camera.right,low ? .9 : .55)),scale(camera.up,low ? .22 : .25)));
   }
+  else if(this.sunAzimuth!=null){
+   const east=normalize([camera.radial[2],0,-camera.radial[0]]),north=normalize([camera.radial[1]*east[2],camera.radial[2]*east[0]-camera.radial[0]*east[2],-camera.radial[1]*east[0]]);
+   const az=this.sunAzimuth*Math.PI/180,alt=this.sunElevation*Math.PI/180;
+   sun=normalize(add(add(scale(north,Math.cos(az)*Math.cos(alt)),scale(east,Math.sin(az)*Math.cos(alt))),scale(camera.radial,Math.sin(alt))));
+  }
   f.set([...sun,0],36);f.set([RADIUS_KM,this.relief,this.ocean?1:0,this.valleys],40);
   const separateOcean=this.ocean&&!this.lodColors&&!this.patchColors&&!this.meshletColors&&!this.wireframe&&!this.patchLines&&!this.meshletLines;
   const flags=(this.culling?1:0)|(this.lodColors?2:0)|(this.wireframe?4:0)|(this.patchLines?8:0)|(this.biomes?16:0)|(separateOcean?32:0)|(this.patchColors?64:0)|(this.meshletColors?128:0)|(this.meshletLines?256:0);
@@ -410,7 +415,8 @@ export class PlanetRenderer {
   f.set([this.erosion,this.rivers?1:0,this.regional?1:0,this.debugOpacity],52);
   const d=this.device;
   const east=normalize([camera.radial[2],0,-camera.radial[0]]),north=normalize([camera.radial[1]*east[2],camera.radial[2]*east[0]-camera.radial[0]*east[2],-camera.radial[1]*east[0]]);
-  const cloudData=new Float32Array(40);cloudData.set([camera.width,camera.height,0,0,now*.001,0,camera.altitude*1000,.72,1,8,this.seed%10000,0],0);cloudData.set([...camera.radial,0,...east,0,...north,0,...camera.forward,camera.tanX,...camera.right,camera.tanY,...camera.up,camera.near,...sun,separateOcean?1:0],12);if(this.cloudUniform)d.queue.writeBuffer(this.cloudUniform,0,cloudData);
+  this.cloudWindDistance=(this.cloudWindDistance??0)+Math.max(0,Math.min(.25,(now-(this.cloudLastTime??now))*.001))*(this.cloudSpeed??8);this.cloudLastTime=now;
+  const cloudData=new Float32Array(44);cloudData.set([camera.width,camera.height,0,0,this.cloudWindDistance,0,camera.altitude*1000,this.clouds===false?0:(this.cloudCoverage??.72),this.cloudDensity??1,1,this.seed%10000,0],0);cloudData.set([...camera.radial,0,...east,0,...north,0,...camera.forward,camera.tanX,...camera.right,camera.tanY,...camera.up,camera.near,...sun,separateOcean?1:0],12);cloudData.set([this.skyStrength??1,this.mieStrength??1,this.haloStrength??1,0],40);if(this.cloudUniform)d.queue.writeBuffer(this.cloudUniform,0,cloudData);
   d.queue.writeBuffer(this.uniform,0,raw);d.queue.writeBuffer(this.patchBuffer,0,this.patchBytes);
   if(separateOcean){
    const view=new Float32Array(20);view.set([...camera.radial,camera.altitude],0);view.set([...camera.forward,camera.tanY],4);view.set([...camera.right,camera.tanX],8);view.set([...camera.up,camera.width],12);view[16]=camera.height;view[17]=camera.near;d.queue.writeBuffer(this.oceanView,0,view);
@@ -454,7 +460,7 @@ export class PlanetRenderer {
    if(sample&&this.timing)waterDescriptor.timestampWrites={querySet:this.queries,endOfPassWriteIndex:3};
    const waterPass=encoder.beginRenderPass(waterDescriptor);waterPass.setPipeline(this.oceanPipe);waterPass.setBindGroup(0,this.oceanBind);waterPass.draw(3);waterPass.end();
   }
-  if(this.clouds&&!this.lodColors&&!this.patchColors&&!this.meshletColors&&!this.wireframe&&!this.patchLines&&!this.meshletLines){const clouds=encoder.beginRenderPass({colorAttachments:[{view:colorView,loadOp:'load',storeOp:'store'}]});clouds.setPipeline(this.cloudPipe);clouds.setBindGroup(0,this.cloudBind);clouds.draw(3);clouds.end();}
+  if(this.cloudPipe&&!this.lodColors&&!this.patchColors&&!this.meshletColors&&!this.wireframe&&!this.patchLines&&!this.meshletLines){const clouds=encoder.beginRenderPass({colorAttachments:[{view:colorView,loadOp:'load',storeOp:'store'}]});clouds.setPipeline(this.cloudPipe);clouds.setBindGroup(0,this.cloudBind);clouds.draw(3);clouds.end();}
   const measured=sample?this.patches.map(({key,slot})=>({key,slot})):null;
   let readback;if(sample){readback=d.createBuffer({size:48+CAPACITY*4,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});encoder.copyBufferToBuffer(this.indirect,0,readback,0,16);encoder.copyBufferToBuffer(this.lodErrorBuffer,0,readback,48,CAPACITY*4);if(this.timing){encoder.resolveQuerySet(this.queries,0,4,this.resolve,0);encoder.copyBufferToBuffer(this.resolve,0,readback,16,32);}}
   let transitionRead;if(compare&&stage.pairs.length){

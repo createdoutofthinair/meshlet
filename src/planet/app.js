@@ -209,6 +209,24 @@ el['sun-follow'].addEventListener('change',()=>{if(renderer)renderer.followSun=e
 el.quality.addEventListener('change',()=>{if(renderer){renderer.budget=Number(el.quality.value);renderer.needsSelection=true;}});
 el['render-scale'].addEventListener('change',()=>{if(renderer){renderer.resolution=Number(el['render-scale'].value);renderer.needsSelection=true;}});
 el.culling.addEventListener('change',()=>{if(renderer)renderer.culling=el.culling.checked;});
+// Tab panels stay mounted so live settings and keyboard focus are preserved.
+const tabNames=['world','atmosphere','clouds','performance'];
+function activateTab(name,focus=false){
+ for(const item of tabNames){const selected=item===name,tab=$(`tab-${item}`);tab.setAttribute('aria-selected',String(selected));tab.tabIndex=selected?0:-1;$(`panel-${item}`).hidden=!selected;if(selected&&focus)tab.focus();}
+}
+for(const [index,name] of tabNames.entries()){
+ const tab=$(`tab-${name}`);tab.addEventListener('click',()=>activateTab(name));
+ tab.addEventListener('keydown',event=>{let next;if(event.key==='ArrowRight')next=(index+1)%tabNames.length;else if(event.key==='ArrowLeft')next=(index+tabNames.length-1)%tabNames.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=tabNames.length-1;else return;event.preventDefault();activateTab(tabNames[next],true);});
+}
+const controls=[
+ ['sun-azimuth','sunAzimuth',1,value=>`${value}°`,true],['sun-elevation','sunElevation',1,value=>`${value}°`,true],
+ ['sky-strength','skyStrength',.01,value=>`${value.toFixed(2)}×`],['mie-strength','mieStrength',.01,value=>`${value.toFixed(2)}×`],['halo-strength','haloStrength',.01,value=>`${value.toFixed(2)}×`],
+ ['cloud-coverage','cloudCoverage',.01,value=>`${Math.round(value*100)}%`],['cloud-density','cloudDensity',.01,value=>`${value.toFixed(2)}×`],['cloud-speed','cloudSpeed',1,value=>`${value} m/s`]
+];
+for(const [id,property,factor,format,manualSun] of controls){
+ $(id).addEventListener('input',()=>{const value=Number($(id).value)*factor;$(`${id}-value`).textContent=format(value);if(!renderer)return;renderer[property]=value;if(manualSun){renderer.followSun=false;el['sun-follow'].checked=false;}});
+}
+$('cloud-enabled').addEventListener('change',()=>{if(renderer)renderer.clouds=$('cloud-enabled').checked;});
 let drag=null;
 function look(dx,dy){
  const camera=renderer.cameraState;camera.heading-=dx*.004;camera.pitch=Math.max(-1.35,Math.min(1.35,camera.pitch+dy*.004));renderer.needsSelection=true;

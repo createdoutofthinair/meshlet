@@ -55,6 +55,10 @@
   </section>
   <aside class="panel planet-panel">
    <div class="panel-head"><div><span class="kicker">PROCEDURAL PLANET</span><h2>World controls</h2></div><span class="live"><span></span> LIVE</span></div>
+   <div class="planet-tabs" role="tablist" aria-label="Planet controls">
+    <button type="button" role="tab" id="tab-world" aria-controls="panel-world" aria-selected="true">WORLD</button><button type="button" role="tab" id="tab-atmosphere" aria-controls="panel-atmosphere" aria-selected="false" tabindex="-1">ATMOSPHERE</button><button type="button" role="tab" id="tab-clouds" aria-controls="panel-clouds" aria-selected="false" tabindex="-1">CLOUDS</button><button type="button" role="tab" id="tab-performance" aria-controls="panel-performance" aria-selected="false" tabindex="-1">PERFORMANCE</button>
+   </div>
+   <div id="panel-world" role="tabpanel" aria-labelledby="tab-world">
    <div class="section-title"><span>WORLD SEED</span><span>01 / 04</span></div>
    <form id="seed-form" class="seed-form"><label class="sr-only" for="seed">World seed</label><input id="seed" value="918273" maxlength="64" autocomplete="off"><button type="submit">GENERATE</button><button type="button" id="random" title="Generate a random seed" aria-label="Generate a random seed">⟳</button></form>
    <p class="metric-note">The same seed recreates the same terrain. No terrain textures are used.</p>
@@ -66,7 +70,29 @@
    <label class="planet-slider"><span>RELIEF <strong id="relief-value">1.00×</strong></span><input id="relief" type="range" min="50" max="160" value="100"></label>
    <label class="planet-slider"><span>VALLEY DETAIL <strong id="valleys-value">1.00×</strong></span><input id="valleys" type="range" min="0" max="160" value="100"></label>
    <label class="planet-slider"><span>EROSION <strong id="erosion-value">1.00×</strong></span><input id="erosion" type="range" min="0" max="160" value="100"></label>
-   <div class="debug-toggles planet-toggles"><label><input id="ocean" type="checkbox" checked><span>Flat ocean surface</span></label><label><input id="rivers" type="checkbox" checked><span>Rivers &amp; lakes</span></label><label><input id="regional" type="checkbox" checked><span>Regional drainage detail</span></label><label><input id="biomes" type="checkbox" checked><span>Climate colors</span></label><label><input id="sun-follow" type="checkbox" checked><span>Sun follows the view</span></label></div>
+   <div class="debug-toggles planet-toggles"><label><input id="ocean" type="checkbox" checked><span>Flat ocean surface</span></label><label><input id="rivers" type="checkbox" checked><span>Rivers &amp; lakes</span></label><label><input id="regional" type="checkbox" checked><span>Regional drainage detail</span></label><label><input id="biomes" type="checkbox" checked><span>Climate colors</span></label></div>
+   </div>
+   <div id="panel-atmosphere" role="tabpanel" aria-labelledby="tab-atmosphere" hidden>
+    <div class="section-title"><span>SUN POSITION</span><span>LIGHTING</span></div>
+    <div class="debug-toggles planet-toggles"><label><input id="sun-follow" type="checkbox" checked><span>Sun follows the view</span></label></div>
+    <label class="planet-slider"><span>SUN AZIMUTH <strong id="sun-azimuth-value">45°</strong></span><input id="sun-azimuth" type="range" min="-180" max="180" value="45"></label>
+    <label class="planet-slider"><span>SUN ELEVATION <strong id="sun-elevation-value">30°</strong></span><input id="sun-elevation" type="range" min="-30" max="90" value="30"></label>
+    <p class="metric-note">Changing either angle sets the sun relative to your current location and turns off follow view. Negative elevation creates twilight and night.</p>
+    <div class="section-title"><span>ATMOSPHERIC SCATTERING</span><span>APPROXIMATE</span></div>
+    <label class="planet-slider"><span>SKY INTENSITY <strong id="sky-strength-value">1.00×</strong></span><input id="sky-strength" type="range" min="0" max="200" value="100"></label>
+    <label class="planet-slider"><span>MIE / SUN HAZE <strong id="mie-strength-value">1.00×</strong></span><input id="mie-strength" type="range" min="0" max="300" value="100"></label>
+    <label class="planet-slider"><span>PLANET HALO <strong id="halo-strength-value">1.00×</strong></span><input id="halo-strength" type="range" min="0" max="300" value="100"></label>
+    <p class="metric-note">These are artistic controls over the current lightweight scattering approximation.</p>
+   </div>
+   <div id="panel-clouds" role="tabpanel" aria-labelledby="tab-clouds" hidden>
+    <div class="section-title"><span>CLOUD LAYER</span><span>VOLUMETRIC</span></div>
+    <div class="debug-toggles planet-toggles"><label><input id="cloud-enabled" type="checkbox" checked><span>Show clouds</span></label></div>
+    <label class="planet-slider"><span>CLOUD COVERAGE <strong id="cloud-coverage-value">72%</strong></span><input id="cloud-coverage" type="range" min="0" max="100" value="72"></label>
+    <label class="planet-slider"><span>CLOUD DENSITY <strong id="cloud-density-value">1.00×</strong></span><input id="cloud-density" type="range" min="0" max="200" value="100"></label>
+    <label class="planet-slider"><span>WIND SPEED <strong id="cloud-speed-value">8 m/s</strong></span><input id="cloud-speed" type="range" min="0" max="50" value="8"></label>
+    <p class="metric-note">Clouds use the same seeded spherical weather and volume as Atmosphere Lab. Coverage and density are independent.</p>
+   </div>
+   <div id="panel-performance" role="tabpanel" aria-labelledby="tab-performance" hidden>
    <div class="section-title"><span>DETAIL &amp; DEBUG</span><span>03 / 04</span></div>
    <label class="planet-field"><span>PATCH BUDGET</span><select id="quality"><option value="120">Fast · 120 patches</option><option value="240">Balanced · 240 patches</option><option value="384" selected>High · 384 patches</option><option value="512">Extreme · 512 patches</option></select></label>
    <label class="planet-field"><span>RENDER SCALE</span><select id="render-scale"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></label>
@@ -78,6 +104,7 @@
    <div class="stat-row"><span>Visible patches</span><strong id="patches">—</strong></div><div class="stat-row"><span>Quadtree levels</span><strong id="depth">—</strong></div><div class="stat-row"><span>Visible meshlets</span><strong id="meshlets">—</strong></div><div class="stat-row"><span>Submitted triangles</span><strong id="triangles">—</strong></div><div class="stat-row"><span>CPU patch selection</span><strong id="selection-ms">—</strong></div><div class="stat-row"><span id="compute-label">GPU visibility</span><strong id="compute-ms">—</strong></div><div class="stat-row"><span>GPU rendering</span><strong id="render-ms">—</strong></div>
    <div class="stat-row"><span>Last LOD difference</span><strong id="transition-error">—</strong></div><div class="stat-row"><span>LOD preparation</span><strong id="transition-status">—</strong></div>
    <p class="metric-note" id="timing-note">Checking GPU timestamp support…</p>
+   </div>
   </aside>
  </main>
  <footer><span>SEEDED LANDFORMS <b>→</b> GPU TERRAIN <b>→</b> CULLED MESHLETS</span><span id="generation-status">PREPARING PLANET</span></footer>
