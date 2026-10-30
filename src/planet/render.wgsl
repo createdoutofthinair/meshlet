@@ -55,8 +55,11 @@ fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->
   let attributeMask=select(stitch,morphs.patches[slot].slots.z&15u,overlay);
   vert=displayedAttributes(slot,q,attributeMask);
  }
- var relative=displayedPosition(slot,coord,stitch);
+ // Overlay geometry samples its fractional coordinates; evaluating the
+ // regular-grid position first would perform an unused parent lookup.
+ var relative:vec3<f32>;
  if(overlay){relative=displayedSample(slot,q);}
+ else{relative=displayedPosition(slot,coord,stitch);}
  let local=vert.position.xyz+(relative-(tile.relative.xyz+vert.position.xyz));
  var mask=0u;
  if((frame.counts.w & 8u)!=0u){if(onPatchEdge(b,c)){mask|=1u;}if(onPatchEdge(c,a)){mask|=2u;}if(onPatchEdge(a,b)){mask|=4u;}}
