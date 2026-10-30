@@ -7,14 +7,21 @@ struct TransitionPair {slots:vec4<u32>,mapping:vec4<f32>};
 @group(0) @binding(5) var<storage,read> morphs:MorphStorage;
 var<workgroup> pixelErrors:array<f32,64>;
 var<workgroup> worldErrors:array<f32,64>;
+var<workgroup> sampleRange:vec2<u32>;
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) group:vec3<u32>,@builtin(local_invocation_index) lane:u32){
  let p=pairs[group.x];var maxPixel=0.0;var maxWorld=0.0;
- let overlay=p.mapping.w>.5;var count=INNER_COUNT;var start=0u;
- if(overlay){
-  start=morphs.ranges[p.slots.x*16u].x;count=0u;
-  for(var meshlet=0u;meshlet<16u;meshlet++){count+=morphs.ranges[p.slots.x*16u+meshlet].y;}
+ let overlay=p.mapping.w>.5;
+ if(lane==0u){
+  var count=INNER_COUNT;var start=0u;
+  if(overlay){
+   start=morphs.ranges[p.slots.x*16u].x;count=0u;
+   for(var meshlet=0u;meshlet<16u;meshlet++){count+=morphs.ranges[p.slots.x*16u+meshlet].y;}
+  }
+  sampleRange=vec2<u32>(start,count);
  }
+ workgroupBarrier();
+ let start=sampleRange.x;let count=sampleRange.y;
  for(var i=lane;i<count;i+=64u){
   let grid=vec2<u32>(i%17u,i/17u);var q=vec2<f32>(stitchCoord(grid,p.slots.z));
   if(overlay){q=morphs.coordinates[start+i];}
