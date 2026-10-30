@@ -160,14 +160,14 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
   const half=node.span/2;
   const u=Math.max(node.u-half,Math.min(node.u+half,radial.u));
   const v=Math.max(node.v-half,Math.min(node.v+half,radial.v));
-  const nearest=faceDirection(node.face,u,v).map(x=>x*(RADIUS_KM+camera.altitude-camera.clearance));
+  const nearest=faceDirection(node.face,u,v).map(x=>x*camera.selection.surfaceRadius);
   distance=Math.min(distance,length(sub(nearest,camera.eye)));
  }
  else if(facing.face===node.face){
   const half=node.span/2;
   const u=Math.max(node.u-half,Math.min(node.u+half,facing.u));
   const v=Math.max(node.v-half,Math.min(node.v+half,facing.v));
-  const nearest=faceDirection(node.face,u,v).map(x=>x*(RADIUS_KM+camera.altitude-camera.clearance));
+  const nearest=faceDirection(node.face,u,v).map(x=>x*camera.selection.surfaceRadius);
   distance=Math.min(distance,length(sub(nearest,camera.eye)));
  }
  if(facing.face===node.face && Math.abs(facing.u-node.u)<=node.span/2 && Math.abs(facing.v-node.v)<=node.span/2 && camera.clearance<50)distance=Math.min(distance,Math.max(.001,camera.clearance));
@@ -183,8 +183,10 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
  // detail. Use a tighter estimated footprint only as a priority, never a cull.
  let viewPriority=1;
  if(camera.clearance<10){
-  const estimate=node.direction.map(x=>x*(RADIUS_KM+camera.altitude-camera.clearance));
-  const r=sub(estimate,camera.eye),z0=dot(r,camera.forward),x0=dot(r,camera.right),y0=dot(r,camera.up);
+  const r0=node.direction[0]*camera.selection.surfaceRadius-camera.eye[0],r1=node.direction[1]*camera.selection.surfaceRadius-camera.eye[1],r2=node.direction[2]*camera.selection.surfaceRadius-camera.eye[2];
+  const z0=r0*camera.forward[0]+r1*camera.forward[1]+r2*camera.forward[2];
+  const x0=r0*camera.right[0]+r1*camera.right[1]+r2*camera.right[2];
+  const y0=r0*camera.up[0]+r1*camera.up[1]+r2*camera.up[2];
   const tightRadius=RADIUS_KM*node.span*.35;
   const outside=Math.max(0,-z0-tightRadius,Math.abs(x0)-z0*camera.tanX-tightRadius,Math.abs(y0)-z0*camera.tanY-tightRadius);
   viewPriority=1/(1+outside/Math.max(.001,camera.clearance)*32);
@@ -199,7 +201,7 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
 export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10,previousSplits=null,hysteresis=.1,errorEstimates=null,previousLeaves=null,includeHidden=false,unchangedPatches=null}={}) {
  budget=Math.max(6,Math.floor(budget));maxDepth=Math.min(MAX_DEPTH,Math.max(0,maxDepth));
  const eyeLength=length(camera.eye),inner=RADIUS_KM-HEIGHT_LIMIT_KM,outer=RADIUS_KM+HEIGHT_LIMIT_KM;
- const selection={eyeLength,inner,horizon:eyeLength>inner?Math.acos(Math.min(1,inner/eyeLength))+Math.acos(inner/outer):0,horizonCutoffs:new Map(),frustumX:Math.hypot(1,camera.tanX),frustumY:Math.hypot(1,camera.tanY)};
+ const selection={eyeLength,inner,surfaceRadius:RADIUS_KM+camera.altitude-camera.clearance,horizon:eyeLength>inner?Math.acos(Math.min(1,inner/eyeLength))+Math.acos(inner/outer):0,horizonCutoffs:new Map(),frustumX:Math.hypot(1,camera.tanX),frustumY:Math.hypot(1,camera.tanY)};
  selection.faceRadial=FACE_BASES.map(basis=>{const denom=dot(camera.radial,basis.c);return {denom,u:denom>0?dot(camera.radial,basis.u)/denom:0,v:denom>0?dot(camera.radial,basis.v)/denom:0};});
  camera={...camera,selection,facing:directionToFace(camera.eye),focus:directionToFace(camera.focusDirection||camera.eye)};
  let leaves=new Map();for(let face=0;face<6;face++){const n=makeTile(face,0,0,0);leaves.set(n.key,n);}
