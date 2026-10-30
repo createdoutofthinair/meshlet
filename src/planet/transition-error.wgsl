@@ -15,8 +15,8 @@ fn main(@builtin(workgroup_id) group:vec3<u32>,@builtin(local_invocation_index) 
  if(lane==0u){
   var count=INNER_COUNT;var start=0u;
   if(overlay){
-   start=morphs.ranges[p.slots.x*16u].x;count=0u;
-   for(var meshlet=0u;meshlet<16u;meshlet++){count+=morphs.ranges[p.slots.x*16u+meshlet].y;}
+   start=morphs.ranges[p.slots.x*16u].x;
+   let last=morphs.ranges[p.slots.x*16u+15u];count=last.x+last.y-start;
   }
   sampleRange=vec2<u32>(start,count);
  }

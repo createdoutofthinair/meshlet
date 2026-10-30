@@ -27,3 +27,18 @@ test('capacity and invalid topology are rejected before upload',()=>{
  assert.throws(()=>packTransitionTopology([{slot:0,coordinates:new Float32Array([0,0])}]),/triangle/);
  assert.throws(()=>packTransitionTopology([{slot:0,coordinates:new Float32Array([0,0,NaN,0,0,1])}]),/coordinates/);
 });
+
+test('first and last meshlet ranges delimit each contiguous overlay',()=>{
+ const records=[
+  {slot:11,coordinates:new Float32Array()},
+  {slot:7,coordinates:buildTransitionTopology({mask:1},{mask:2}).coordinates},
+  {slot:93,coordinates:new Float32Array([0,0,1,0,0,1,15,15,16,15,15,16])},
+  {slot:5,coordinates:buildTransitionTopology({mask:15,originX:8,originY:0,scale:.5},{mask:3}).coordinates}
+ ];
+ const packed=packTransitionTopology(records);
+ for(const record of records){
+  const base=record.slot*32,first=packed.ranges[base],lastOffset=packed.ranges[base+30],lastCount=packed.ranges[base+31];let cursor=first;
+  for(let i=0;i<16;i++){assert.equal(packed.ranges[base+i*2],cursor);cursor+=packed.ranges[base+i*2+1];}
+  assert.equal(cursor,lastOffset+lastCount);assert.equal(cursor-first,record.coordinates.length/2);
+ }
+});

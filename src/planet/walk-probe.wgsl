@@ -26,8 +26,8 @@ fn main(@builtin(local_invocation_index) lane:u32){
  if(overlay){
   // Packed meshlet ranges are contiguous. Distribute complete triangles
   // across the workgroup, retaining the highest valid intersection.
-  let first=morphs.ranges[slot*16u].x;var count=0u;
-  for(var meshlet=0u;meshlet<16u;meshlet++){count+=morphs.ranges[slot*16u+meshlet].y;}
+  let first=morphs.ranges[slot*16u].x;let last=morphs.ranges[slot*16u+15u];
+  let count=last.x+last.y-first;
   for(var i=lane*3u;i<count;i+=192u){
    let a=displayedSample(slot,morphs.coordinates[first+i]);
    let b=displayedSample(slot,morphs.coordinates[first+i+1u]);
