@@ -41,12 +41,13 @@ const modules={
  'planet-river-detail':[common,curve,field,await planet('river-detail')],
  'planet-walk-probe':[common,await planet('walk-probe')]
 };
+const atmosphere=await read('src/atmosphere/atmosphere.wgsl');
 const riverShared=await read('src/river/shared.wgsl');
-for(const name of ['select','geometry','animate','simulation','render'])modules[`river-${name}`]=[common,name==='select'?riverShared.replace('var<storage,read> reach:','var<storage,read_write> reach:'):riverShared,await read(`src/river/${name}.wgsl`)];
-modules['river-flow-smoke']=[common,riverShared,await read('src/river/render.wgsl'),await read('tests/river-flow-smoke.wgsl')];
+for(const name of ['select','geometry','animate','simulation','render'])modules[`river-${name}`]=[common,name==='select'?riverShared.replace('var<storage,read> reach:','var<storage,read_write> reach:'):riverShared,...(name==='render'?[atmosphere]:[]),await read(`src/river/${name}.wgsl`)];
+modules['river-flow-smoke']=[common,riverShared,atmosphere,await read('src/river/render.wgsl'),await read('tests/river-flow-smoke.wgsl')];
 modules['fluid-lab']=[await read('src/fluid/fluid.wgsl')];
 modules['fluid-surface']=[await read('src/fluid/surface.wgsl')];
-modules['fluid-ocean']=[await read('src/fluid/ocean.wgsl')];
+modules['fluid-ocean']=[atmosphere,await read('src/fluid/ocean.wgsl')];
 const meshletCommon=await read('src/gpu/common.wgsl');
 for(const name of ['cull','render','projection'])modules[`meshlet-${name}`]=[meshletCommon,await read(`src/gpu/${name}.wgsl`)];
 // The browser smoke tests append their own WGSL to the same source modules.

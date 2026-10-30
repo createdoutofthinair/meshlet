@@ -177,9 +177,9 @@ fn waveNormal(p:vec2<f32>,time:f32,dist:f32)->vec3<f32>{
 }
 fn sky(ray:vec3<f32>)->vec3<f32>{
  let y=max(ray.y,0.0);let sun=normalize(vec3<f32>(-.35,.65,.55));
- let base=mix(vec3<f32>(.69,.77,.78),vec3<f32>(.16,.34,.55),pow(y,.55));
+ let base=atmosphereSky(ray,sun,vec3<f32>(0.0,1.0,0.0),0.0);
  let cloud=noise(ray.xz/max(.13,ray.y)*2.0+vec2<f32>(3.2,8.1));let clouds=smoothstep(.53,.72,cloud)*smoothstep(.02,.2,ray.y);
- return mix(base,vec3<f32>(.86,.88,.85),clouds*.55)+vec3<f32>(1.0,.84,.60)*pow(max(dot(ray,sun),0.0),350.0)*2.0;
+ return mix(base,vec3<f32>(.86,.88,.85),clouds*.55);
 }
 fn ground(p:vec2<f32>)->vec3<f32>{let n=noise(p*.48);let grain=noise(p*5.0);return mix(vec3<f32>(.19,.23,.19),vec3<f32>(.51,.48,.34),n)*(.85+.3*grain);}
 fn fresnel(cosine:f32)->f32{
@@ -494,6 +494,7 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
   color=foamOptics(color,reflection,normal,foam,f);
  }
  }
- let horizon=overlayCrown(mix(color,sky(ray),smoothstep(90.0,200.0,t)),crown,t);
+ let atmospheric=atmosphereAerial(color,ray,t*20.0,normalize(vec3<f32>(-.35,.65,.55)),vec3<f32>(0.0,1.0,0.0),0.0);
+ let horizon=overlayCrown(mix(atmospheric,sky(ray),smoothstep(150.0,200.0,t)),crown,t);
  return vec4<f32>(pow(max(horizon,vec3<f32>(0.0)),vec3<f32>(1.0/2.2)),1.0);
 }

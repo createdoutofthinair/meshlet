@@ -151,12 +151,11 @@ struct SkyVertex {@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32
  let p=array<vec2<f32>,3>(vec2<f32>(-1.0,-1.0),vec2<f32>(3.0,-1.0),vec2<f32>(-1.0,3.0));return SkyVertex(vec4<f32>(p[index],0.0,1.0),p[index]);
 }
 fn skyColor(direction:vec3<f32>)->vec3<f32>{
- let up=clamp(direction.y,0.0,1.0);let horizon=vec3<f32>(.53,.63,.68);let high=vec3<f32>(.16,.29,.46);
- var sky=mix(horizon,high,pow(up,.65));let cloudPos=direction.xz/max(.12,direction.y)*1.4+vec2<f32>(21.4,7.9);
+ var sky=atmosphereSky(direction,normalize(riverFrame.sunSpeed.xyz),vec3<f32>(0.0,1.0,0.0),0.0);let cloudPos=direction.xz/max(.12,direction.y)*1.4+vec2<f32>(21.4,7.9);
  let clouds=riverNoise(cloudPos)*.68+riverNoise(cloudPos*2.03+vec2<f32>(5.0,8.0))*.32;
  let cloudCover=smoothstep(.56,.73,clouds)*smoothstep(.04,.20,direction.y)*.50;
  sky=mix(sky,vec3<f32>(.80,.82,.81),cloudCover);
- let sun=max(dot(direction,normalize(riverFrame.sunSpeed.xyz)),0.0);sky+=vec3<f32>(1.0,.88,.70)*pow(sun,96.0)*.20;
+
  return mix(vec3<f32>(.16,.19,.16),sky,smoothstep(-.05,.06,direction.y));
 }
 fn displayColor(color:vec3<f32>)->vec3<f32>{let mapped=max(color,vec3<f32>(0.0))/(vec3<f32>(1.0)+max(color,vec3<f32>(0.0))*.25);return pow(mapped,vec3<f32>(1.0/2.2));}
@@ -198,7 +197,7 @@ fn shadeGround(input:VertexOut)->vec4<f32>{
  let rockBand=riverNoise(vec2<f32>(p.x*.045+input.world.y*.018,input.world.y*.13+riverNoise(p*.035)*2.0));
  base=mix(base,mix(vec3<f32>(.15,.17,.16),vec3<f32>(.32,.31,.27),rockBand),cliff*.82);
  let light=normalize(riverFrame.sunSpeed.xyz);let diffuse=.32+.78*max(dot(n,light),0.0);
- var color=base*diffuse;let dist=length(riverFrame.cameraDelta.xyz-input.world);let fog=1.0-exp(-dist*.00035);color=mix(color,vec3<f32>(.50,.58,.57),fog*.45);
+ var color=base*diffuse;let delta=input.world-riverFrame.cameraDelta.xyz;let dist=length(delta);color=atmosphereAerial(color,normalize(delta),dist,normalize(riverFrame.sunSpeed.xyz),vec3<f32>(0.0,1.0,0.0),0.0);
  return vec4<f32>(displayColor(color),1.0);
 }
 @fragment fn groundFragment(input:VertexOut)->@location(0) vec4<f32>{return shadeGround(input);}
@@ -242,7 +241,7 @@ fn shadeRock(input:VertexOut)->vec4<f32>{
  var color=stoneLighting(stone,n,view,mix(.83,.25,wet));
  let wetReflection=skyColor(reflect(-view,n));let wetFresnel=.04+.96*pow(1.0-max(dot(n,view),0.0),5.0);
  color+=wetReflection*wet*(.035+.18*wetFresnel);
- let dist=length(riverFrame.cameraDelta.xyz-p);color=mix(color,vec3<f32>(.50,.58,.57),(1.0-exp(-dist*.00035))*.45);
+ let delta=p-riverFrame.cameraDelta.xyz;let dist=length(delta);color=atmosphereAerial(color,normalize(delta),dist,normalize(riverFrame.sunSpeed.xyz),vec3<f32>(0.0,1.0,0.0),0.0);
  return vec4<f32>(displayColor(color),1.0);
 }
 @fragment fn rockFragment(input:VertexOut)->@location(0) vec4<f32>{return shadeRock(input);}
@@ -440,7 +439,7 @@ fn viewDepth(depth:f32)->f32{return 5000.0/max(.001,10000.0-depth*9999.5);}
   let head=select(0.0,1.0,gy>=.04 && gy<.31 && gx<(0.31-gy)*.8);
   color=mix(color,vec3<f32>(.35,1.0,.74),max(shaft,head)*.90);
  }
- let dist=length(riverFrame.cameraDelta.xyz-input.world);let fog=1.0-exp(-dist*.00035);color=mix(color,vec3<f32>(.50,.58,.57),fog*.38);
+ let delta=input.world-riverFrame.cameraDelta.xyz;let dist=length(delta);color=atmosphereAerial(color,normalize(delta),dist,normalize(riverFrame.sunSpeed.xyz),vec3<f32>(0.0,1.0,0.0),0.0);
  if(riverFrame.waterfall.x>.5 && p.y> -8.0 && p.y<10.0){discard;}
  return vec4<f32>(displayColor(color),1.0);
 }

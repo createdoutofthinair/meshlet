@@ -18,7 +18,7 @@ try{
  if(!(alignment>0))throw Error(`Flow tangent points upstream: ${alignment}`);
  if(Math.abs(f[36])>.01||Math.abs(f[38])>.01||f[37]>=-.5||Math.abs(f[40])>.01||Math.abs(f[41])>.01)throw Error(`Bed and water did not meet at the river center: ${[...f.slice(36,44)]}`);
  // Exercise the actual material functions, including reset continuity and flow direction.
- const source=await Promise.all(['../src/planet/common.wgsl','../src/river/shared.wgsl','../src/river/render.wgsl','./river-flow-smoke.wgsl'].map(async path=>{const response=await fetch(path);if(!response.ok)throw Error(`Could not load ${path}`);return response.text();}));
+ const source=await Promise.all(['../src/planet/common.wgsl','../src/river/shared.wgsl','../src/atmosphere/atmosphere.wgsl','../src/river/render.wgsl','./river-flow-smoke.wgsl'].map(async path=>{const response=await fetch(path);if(!response.ok)throw Error(`Could not load ${path}`);return response.text();}));
  const module=device.createShaderModule({code:source.join('\n')}),pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'probeRiverFlow'}});
  const probe=device.createBuffer({size:192,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC}),probeRead=device.createBuffer({size:192,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
  const group0=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:renderer.frameBuffer}},{binding:8,resource:{buffer:renderer.rocks}}]}),group1=device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[{binding:0,resource:{buffer:probe}}]});

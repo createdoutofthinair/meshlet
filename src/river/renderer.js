@@ -34,14 +34,14 @@ export class RiverRenderer {
   const d=this.device,U=GPUBufferUsage;d.addEventListener('uncapturederror',e=>this.onError?.(`WebGPU: ${e.error.message}`));
   d.lost.then(info=>this.onError?.(`WebGPU device lost: ${info.message||info.reason}`));this.context.configure({device:d,format:this.format,alphaMode:'opaque'});
   this.world=await RiverWorld.create(d);
-  const [common,shared,selection,geometry,animation,render,simulation]=await Promise.all(['../planet/common.wgsl','./shared.wgsl','./select.wgsl','./geometry.wgsl','./animate.wgsl','./render.wgsl','./simulation.wgsl'].map(readShader));
+  const [common,shared,selection,geometry,animation,render,simulation,atmosphere]=await Promise.all(['../planet/common.wgsl','./shared.wgsl','./select.wgsl','./geometry.wgsl','./animate.wgsl','./render.wgsl','./simulation.wgsl','../atmosphere/atmosphere.wgsl'].map(readShader));
   if(!/\bfn\s+makeRocks\s*\(/.test(geometry))throw new Error('The river geometry shader is out of date. Reload this page to download matching files.');
   const writable=shared.replace('var<storage,read> reach:','var<storage,read_write> reach:');
   const modules=await Promise.all([
    checkedShader(d,[common,writable,selection].join('\n'),'River selection'),
    checkedShader(d,[common,shared,geometry].join('\n'),'River geometry'),
    checkedShader(d,[common,shared,animation].join('\n'),'River flow'),
-   checkedShader(d,[common,shared,render].join('\n'),'River rendering'),
+   checkedShader(d,[common,shared,atmosphere,render].join('\n'),'River rendering'),
    checkedShader(d,[common,shared,simulation].join('\n'),'River shallow-water simulation')
   ]);
   const selectLayout=d.createBindGroupLayout({entries:[
