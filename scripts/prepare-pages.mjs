@@ -3,7 +3,7 @@ import {execFileSync,spawnSync} from 'node:child_process';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const pages=['index.html','planet.html','river.html','fluid.html'];
+const pages=['index.html','planet.html','river.html','fluid.html','atmosphere.html'];
 const isSha=value=>/^[a-f0-9]{40}$/.test(value);
 
 // Every HTML page, module, worker, WASM file and WGSL shader for a release

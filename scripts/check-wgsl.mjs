@@ -48,6 +48,7 @@ modules['river-flow-smoke']=[common,riverShared,atmosphere,await read('src/river
 modules['fluid-lab']=[await read('src/fluid/fluid.wgsl')];
 modules['fluid-surface']=[await read('src/fluid/surface.wgsl')];
 modules['fluid-ocean']=[atmosphere,await read('src/fluid/ocean.wgsl')];
+modules['cloud-lab']=[atmosphere,await read('src/cloud/cloud.wgsl')];
 const meshletCommon=await read('src/gpu/common.wgsl');
 for(const name of ['cull','render','projection'])modules[`meshlet-${name}`]=[meshletCommon,await read(`src/gpu/${name}.wgsl`)];
 // The browser smoke tests append their own WGSL to the same source modules.
