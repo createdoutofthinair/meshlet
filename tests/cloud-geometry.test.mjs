@@ -9,3 +9,8 @@ test('planet and cloud shell intersections work from ground, clouds and orbit',(
  assert.equal(interval(100000,1,0)[1]<0,true,'ground is behind an upward ray');
  assert.equal(interval(100000,0,3300),null,'horizontal orbit ray misses the cloud shell');
 });
+test('stable near root retains sub-metre detail at planetary radius',()=>{
+ const f=Math.fround,r=f(6371000),alt=f(100.125),height=f(1500),b=f(r+alt),c=f(f(alt-height)*f(f(2*r)+f(alt+height)));
+ const root=f(Math.sqrt(f(f(b*b)-c)));const far=f(-b-root);const near=f(c/far);
+ assert.ok(Math.abs(near-1399.875)<.05,`near cloud shell was ${near}`);
+});
