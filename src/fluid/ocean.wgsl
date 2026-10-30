@@ -31,6 +31,8 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
 // Smooth union of overlapping ellipsoidal lobes forms an irregular rounded
 // test object. The same distance field drives rendering and ball contacts.
 fn roundedObjectField(p:vec3<f32>)->f32{
+ // Upright torus: its open center is visible above and below the waterline.
+ if(params.viewport.z>1.5){return length(vec2<f32>(length(p.xy)-.62,p.z))-.24;}
  let a=length((p-vec3<f32>(-.20,-.10,0.0))/vec3<f32>(.78,.90,.62))-.90;
  let b=length((p-vec3<f32>(.38,.03,.07))/vec3<f32>(.55,.70,.58))-.78;
  let c=length((p-vec3<f32>(-.08,.32,-.30))/vec3<f32>(.58,.55,.51))-.72;
