@@ -26,5 +26,10 @@ test('worker prepares stitched transition topology for the selected covering tre
   assert.deepEqual(messages[2].result,messages[1].result,'omitted errors reuse the worker snapshot');
   const empty=new Map();self.onmessage({data:{id:4,key:'test',camera,options,errorEstimates:empty}});
   assert.deepEqual(messages[3].result,selectPatches(camera,{...options,errorEstimates:empty}));
+  const snapshotOptions={...options,previousLeaves:first.leaves,previousSplits:first.splits};
+  self.onmessage({data:{id:5,key:'test',camera,options:snapshotOptions,previousPatches:first.visible,errorEstimates:empty,snapshotPresent:true}});
+  self.onmessage({data:{id:6,key:'test',camera,options,errorEstimates:null,snapshotPresent:false}});
+  assert.deepEqual(messages[5].result,messages[4].result,'cached tree produces the same selection');
+  assert.deepEqual(messages[5].packedTopology,messages[4].packedTopology,'cached tree produces the same transition topology');
  }finally{delete globalThis.self;}
 });

@@ -416,3 +416,9 @@ test('selection worker receives error estimates only when they change or reset',
   r.resetPatchCache();r.frame(1600);await flush();assert.ok(worker.message.errorEstimates instanceof Map);
  }finally{if(old===undefined)delete globalThis.Worker;else globalThis.Worker=old;}
 });
+
+test('unchanged terrain selection retains its worker snapshot inputs',async()=>{
+ const {r}=fakeRenderer();r.frame(1000);await flush();const patches=r.patches,leaves=r.coveringLeaves,splits=r.previousSplits;
+ const {planetCamera}=await import('../src/planet/camera.js');r.select(planetCamera(r.cameraState,960,600),1200);
+ assert.equal(r.patches,patches);assert.equal(r.coveringLeaves,leaves);assert.equal(r.previousSplits,splits);assert.equal(r.stage,null);
+});

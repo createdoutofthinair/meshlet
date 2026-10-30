@@ -209,7 +209,7 @@ export class PlanetRenderer {
   this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;this.patchMetadataCache=new WeakMap();this.uploadedPatchEye=null;
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
   this.transitionErrors.clear();this.transitionErrorVersion++;this.workerErrorVersion=null;this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
-  this.selectionResult=null;this.selectionRequest=null;this.reconcileSelection=false;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
+  this.selectionResult=null;this.selectionRequest=null;this.workerSelectionSnapshot=null;this.reconcileSelection=false;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
   this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
  }
  handleDeviceLoss(info){
@@ -315,7 +315,7 @@ export class PlanetRenderer {
    return;
   }
   if(!newNodes.length&&nodes.length===this.patches.length&&topologyChanges===0){
-   this.patches=nodes;this.previousSplits=result.splits;this.coveringLeaves=result.leaves;this.stats={...this.stats,leaves:result.leaves.length,deepest:result.deepest,selectionMs,generated:0,normalUpdates:0,reusedNormalUpdates:0};return;
+   this.stats={...this.stats,leaves:result.leaves.length,deepest:result.deepest,selectionMs,generated:0,normalUpdates:0,reusedNormalUpdates:0};return;
   }
   const pairs=transitionPairs(this.patches,nodes).map(p=>({...p,refining:p.refining??slots.has(p.fine.key)}));
   if(pairs.length>CAPACITY){
@@ -559,10 +559,13 @@ export class PlanetRenderer {
    if(!this.selectionWorker)this.select(camera,now);
    else{
     const id=(this.selectionSerial=(this.selectionSerial||0)+1),key=[this.generation,this.cameraState.mode,this.budget,this.maxDepth,this.pixelSize,camera.width,camera.height].join('/');
-    const options={budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth:this.cameraState.mode==='walk'?22:this.maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,previousLeaves:this.coveringLeaves};
+    const cached=this.workerSelectionSnapshot;
+    const snapshotPresent=!cached||cached.patches!==this.patches||cached.leaves!==this.coveringLeaves||cached.splits!==this.previousSplits;
+    const options={budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth:this.cameraState.mode==='walk'?22:this.maxDepth,pixelSize:this.pixelSize};
+    if(snapshotPresent){options.previousSplits=this.previousSplits;options.previousLeaves=this.coveringLeaves;this.workerSelectionSnapshot={patches:this.patches,leaves:this.coveringLeaves,splits:this.previousSplits};}
     const errorEstimates=this.workerErrorVersion===this.transitionErrorVersion?null:this.transitionErrors;
     this.workerErrorVersion=this.transitionErrorVersion;
-    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,errorEstimates,previousPatches:this.patches});
+    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,errorEstimates,snapshotPresent,previousPatches:snapshotPresent?this.patches:null});
    }
   }
   const stage=this.stage;
