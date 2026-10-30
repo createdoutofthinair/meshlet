@@ -98,11 +98,15 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
   // A ray can cross the inner sphere: retain the near cloud-shell segment.
   if(inner.y>inner.x){if(inner.x>start){end=min(end,inner.x);}else if(inner.y>start){start=inner.y;}}
   if(end>start){
-   let steps=48u;let stepSize=(end-start)/f32(steps);var transmission=1.0;var lightAccum=vec3<f32>(0.0);
+   // Long, shallow views cross more of the cloud volume and need more
+   // samples; otherwise repeated sampling planes appear as stripes.
+   let steps=u32(mix(48.0,96.0,smoothstep(12000.0,100000.0,end-start)));let stepSize=(end-start)/f32(steps);var transmission=1.0;var lightAccum=vec3<f32>(0.0);
    let midpoint=origin+ray*((start+end)*.5);let weather=weatherField(midpoint);
    let footprint=max(stepSize,(start+end)*.58/params.view.y);
    let detailWeight=1.0-smoothstep(650.0,3400.0,footprint);
-   let jitter=.5+(cloudHash(vec3<f32>(floor(input.pos.xy),1.0))-.5)*.35;
+   // A per-pixel offset breaks up aligned ray-march slices without
+   // time-varying noise or flicker when the camera is stationary.
+   let jitter=cloudHash(vec3<f32>(floor(input.pos.xy),1.0));
    for(var i=0u;i<steps;i++){
     if(transmission<.02){break;}let distance=start+(f32(i)+jitter)*stepSize;let point=origin+ray*distance;let density=cloudDensity(point,weather,detailWeight);
     if(density>.001){
@@ -140,5 +144,8 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
   let limbTint=mix(vec3<f32>(.07,.25,.65),vec3<f32>(.60,.18,.06),twilight*pow(max(dot(ray,sun),0.0),2.0));
   color+=(limbTint*broad+vec3<f32>(.12,.25,.40)*inner)*sunSide*max(.035,day+twilight*.22)*.72;
  }
- let mapped=max(color,vec3<f32>(0.0))/(1.0+max(color,vec3<f32>(0.0))*.22);return vec4<f32>(pow(mapped,vec3<f32>(1.0/2.2)),1.0);
+ let mapped=max(color,vec3<f32>(0.0))/(1.0+max(color,vec3<f32>(0.0))*.22);let display=pow(mapped,vec3<f32>(1.0/2.2));
+ // Sub-LSB dither reduces visible color steps in smooth sunset gradients.
+ let dither=(cloudHash(vec3<f32>(floor(input.pos.xy),31.0))-.5)/255.0;
+ return vec4<f32>(clamp(display+vec3<f32>(dither),vec3<f32>(0.0),vec3<f32>(1.0)),1.0);
 }
