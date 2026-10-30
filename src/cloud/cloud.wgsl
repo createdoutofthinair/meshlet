@@ -57,6 +57,10 @@ fn weatherField(point:vec3<f32>)->vec2<f32>{
 }
 fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  let height=(planetAltitude(p)-1500.0)/6500.0;
+ return cloudDensityAtHeight(p,weather,detailWeight,height);
+}
+// A caller that also shades a sample can reuse its radial height.
+fn cloudDensityAtHeight(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32,height:f32)->f32{
  // Low sheet clouds and taller cumulus coexist, with smooth regional changes.
  let low=smoothstep(0.0,.055,height)*(1.0-smoothstep(.18,.40,height));
  let tall=smoothstep(0.0,.08,height)*(1.0-smoothstep(.55,1.0,height));

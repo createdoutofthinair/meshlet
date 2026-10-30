@@ -66,7 +66,9 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,weather:vec
    var shadowFrom=1.0;var shadowTo=1.0;var shadowReady=false;var shadowStep=0u;
    for(var i=0u;i<steps;i++){
     if(transmission<.02){break;}
-    let point=origin+ray*(start+(f32(i)+jitter)*stepSize);let density=cloudDensity(point,weather,detail);
+    let point=origin+ray*(start+(f32(i)+jitter)*stepSize);
+    let height=(planetAltitude(point)-1500.0)/6500.0;
+    let density=cloudDensityAtHeight(point,weather,detail,height);
     if(density>.001){
      let alpha=1.0-exp(-density*extinction);
      // Sample lighting less often, but interpolate rather than holding the
@@ -82,7 +84,7 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,weather:vec
      let day=atmosphereDaylight(elevation);let twilight=atmosphereTwilight(elevation);
      let cool=mix(vec3<f32>(.018,.025,.05),vec3<f32>(.24,.31,.39),day);
      let warm=mix(vec3<f32>(1.0,.92,.80),vec3<f32>(1.0,.32,.12),twilight*.85);
-     let illumination=mix(cool,warm*max(.035,day+twilight*.30),clamp(shadow*phase*(.7+.45*clamp((planetAltitude(point)-1500.0)/6500.0,0.0,1.0)),0.0,1.0));
+     let illumination=mix(cool,warm*max(.035,day+twilight*.30),clamp(shadow*phase*(.7+.45*clamp(height,0.0,1.0)),0.0,1.0));
      light+=transmission*alpha*illumination;transmission*=1.0-alpha;
     }
    }
