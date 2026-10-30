@@ -96,7 +96,14 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  if(ground.y>0.0 && ground.x>=0.0){groundDistance=ground.x;}
  if(origin.y<=.5 && ray.y<0.0){groundDistance=0.0;}
  let haze=smoothstep(.48,1.0,min(groundDistance,horizonDistance)/horizonDistance);
- let groundColor=mix(vec3<f32>(.045,.12,.19),vec3<f32>(.26,.49,.67),haze*.62)*mix(.06,1.0,day);
+ // The surface is an analytic smooth sphere, shaded using the actual
+ // spherical normal at the ray hit rather than a flat horizon fill.
+ let hitPoint=origin+ray*max(0.0,groundDistance);
+ let surfaceNormal=normalize(vec3<f32>(hitPoint.x,PLANET_RADIUS+hitPoint.y,hitPoint.z));
+ let direct=max(dot(surfaceNormal,sun),0.0);
+ let surfaceLight=.025+.9*direct;
+ let groundBase=vec3<f32>(.10,.23,.32)*surfaceLight;
+ let groundColor=mix(groundBase,vec3<f32>(.26,.49,.67)*max(.03,day),haze*.52);
  color=mix(color,groundColor,groundCoverage);
  // Limb glow is evaluated from tangent altitude above the spherical ground.
  // This inexpensive single-scattering approximation is visible from orbit.
@@ -111,7 +118,7 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
   let inner=exp(-tangentHeight/9000.0)*altitudeVisibility*upwardFade;
   let sunSide=.65+.35*max(dot(ray,sun),0.0);
   let limbTint=mix(vec3<f32>(.07,.25,.65),vec3<f32>(.60,.18,.06),twilight*pow(max(dot(ray,sun),0.0),2.0));
-  color+=(limbTint*broad+vec3<f32>(.12,.25,.40)*inner)*sunSide*max(.035,day+twilight*.22)*.72*(1.0-groundCoverage*.65);
+  color+=(limbTint*broad+vec3<f32>(.12,.25,.40)*inner)*sunSide*max(.035,day+twilight*.22)*.72*max(0.0,params.shape.y)*(1.0-groundCoverage*.65);
  }
  // Feather the outer cloud-shell silhouette over the pixel footprint.
  // For cameras inside the shell, no limb masking is needed.
