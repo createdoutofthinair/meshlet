@@ -8,7 +8,8 @@ export function planetCloudSource(atmosphere,cloud,fragment){
   // Preserve mid-scale structure and broaden the density transition as its
   // high-frequency detail approaches a pixel.
   .replace('coarse=cloudNoise(q*.16+vec3<f32>(8.0,14.0,3.0));','coarse=cloudNoise(q*.45+vec3<f32>(8.0,14.0,3.0))*.7+cloudNoise(q*.78+vec3<f32>(3.0,9.0,17.0))*.3;')
-  .replace('smoothstep(threshold,threshold+.23,base+erosion)','smoothstep(threshold-.04*(1.0-detailWeight),threshold+.23+.16*(1.0-detailWeight),base+erosion)');
+  .replace('let lower=threshold;','let lower=threshold-.04*(1.0-detailWeight);')
+  .replace('smoothstep(lower,threshold+.23,base+erosion)','smoothstep(lower,threshold+.23+.16*(1.0-detailWeight),base+erosion)');
  const tuned=atmosphere.replace('let warm=vec3<f32>(1.0,.30,.075)*(twilight*.28+day*.035)*min(2.0,atmosphereMiePhase(mu))*density;', 'let warm=vec3<f32>(1.0,.30,.075)*(twilight*.28+day*.035)*min(2.0,atmosphereMiePhase(mu))*density*params.atmosphere.y;').replace('return skyLight*density+warm+sun;', 'return skyLight*density*params.atmosphere.x+warm+sun;');
  return tuned+'\n'+prefix+'\n'+fragment;
 }

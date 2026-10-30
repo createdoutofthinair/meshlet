@@ -88,15 +88,20 @@ fn cloudDensityWithTerms(p:vec3<f32>,detailWeight:f32,height:f32,terms:CloudWeat
  // Filter the base shape as well as erosion when it becomes subpixel.
  // When the detail weight is exactly zero, its noise and erosion cannot
  // affect the output. Orbital samples always use this filtered path.
- var base=coarse;var erosion=0.0;
+ var base=coarse;
  if(detailWeight>0.0){
   let baseShape=cloudNoise(q)*.68+cloudNoise(q*2.03+vec3<f32>(12.0,3.0,6.0))*.32;
   base=mix(coarse,baseShape,detailWeight);
-  erosion=(cloudNoise(q*4.1+vec3<f32>(2.0,7.0,4.0))-.5)*.16*detailWeight;
  }
  // Regional humidity gates broad clear areas and dense weather systems.
  let threshold=terms.threshold;
- return smoothstep(threshold,threshold+.23,base+erosion)*profile*params.cloud.x*terms.coverageFactor;
+ let lower=threshold;
+ // Noise is in [0,1], so erosion can increase density by at most .08 times
+ // the detail weight. Samples below that bound cannot produce cloud density.
+ if(base+.080001*detailWeight<=lower){return 0.0;}
+ var erosion=0.0;
+ if(detailWeight>0.0){erosion=(cloudNoise(q*4.1+vec3<f32>(2.0,7.0,4.0))-.5)*.16*detailWeight;}
+ return smoothstep(lower,threshold+.23,base+erosion)*profile*params.cloud.x*terms.coverageFactor;
 }
 @fragment fn fragment(input:Screen)->@location(0) vec4<f32>{
  let uv=vec2<f32>(input.pos.x/params.view.x*2.0-1.0,1.0-input.pos.y/params.view.y*2.0);let yaw=params.view.z;let pitch=params.view.w;
