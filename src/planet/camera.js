@@ -8,7 +8,7 @@ export function planetCamera({longitude=0,latitude=.25,altitude=12000,surfaceHei
  const clearance=altitude;altitude+=surfaceHeight;
  const eye=scale(radial,RADIUS_KM+altitude);
  let forward,up;
- if(mode==='flyover'||mode==='walk'){
+ if(mode==='flyover'||mode==='walk'||mode==='flight'){
   const tangent=add(scale(north,Math.cos(heading)),scale(east,Math.sin(heading)));
   forward=normalize(add(scale(tangent,Math.cos(pitch)),scale(radial,-Math.sin(pitch))));
   const right=normalize(cross(forward,radial));up=normalize(cross(right,forward));

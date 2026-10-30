@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {WASI} from 'node:wasi';
+import {planetCloudSource} from '../src/planet/cloud-compose.js';
 import {checkBitwiseArithmetic} from './check-wgsl-bitwise.mjs';
 
 // Naga runs only as a development-time validator, inside a WASI sandbox with
@@ -18,7 +19,7 @@ const read=async path=>readFile(join(root,path),'utf8');
 const planet=async name=>read(`src/planet/${name}.wgsl`);
 const [common,core,curve,field,surface]=await Promise.all(['common','terrain-core','river-curve','world-field','terrain-surface'].map(planet));
 const covered={
- 'src/planet':new Set(['common','terrain-core','river-curve','world-field','terrain-surface','generate','normal','bounds','cull','render','ocean','lod-error','transition-error','hydrology','regional-hydrology','river-detail','walk-probe']),
+ 'src/planet':new Set(['common','terrain-core','river-curve','world-field','terrain-surface','generate','normal','bounds','cull','render','ocean','lod-error','transition-error','hydrology','regional-hydrology','river-detail','walk-probe','cloud-overlay']),
  'src/river':new Set(['shared','select','geometry','animate','simulation','render']),
  'src/gpu':new Set(['common','cull','render','projection'])
 };
@@ -49,6 +50,7 @@ modules['fluid-lab']=[await read('src/fluid/fluid.wgsl')];
 modules['fluid-surface']=[await read('src/fluid/surface.wgsl')];
 modules['fluid-ocean']=[atmosphere,await read('src/fluid/ocean.wgsl')];
 modules['cloud-lab']=[atmosphere,await read('src/cloud/cloud.wgsl')];
+modules['planet-cloud']=[planetCloudSource(atmosphere,await read('src/cloud/cloud.wgsl'),await planet('cloud-overlay'))];
 const meshletCommon=await read('src/gpu/common.wgsl');
 for(const name of ['cull','render','projection'])modules[`meshlet-${name}`]=[meshletCommon,await read(`src/gpu/${name}.wgsl`)];
 // The browser smoke tests append their own WGSL to the same source modules.

@@ -1,5 +1,5 @@
 import {PlanetRenderer} from './renderer.js';
-import {SurfaceWalker,WALK_EYE_HEIGHT_KM,directionFromCamera,setCameraDirection} from './walk.js';
+import {SurfaceWalker,WALK_EYE_HEIGHT_KM,directionFromCamera,setCameraDirection,walkStep} from './walk.js';
 import {PlanetInspector} from './inspector.js';
 const $=id=>document.getElementById(id);
 const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','walk','walk-help','generation-status','seed-form','seed','river-link','random','orbit','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','transition-error','transition-status','timing-note'];
@@ -33,7 +33,7 @@ function leaveWalk(){
  el.view.parentElement.classList.remove('walking');el['walk-controls'].hidden=true;el['walk-help'].hidden=true;el.walk.disabled=false;el.walk.textContent='WALK ON SURFACE';
  el['altitude-range'].disabled=false;el['clearance-label'].textContent='CAMERA CLEARANCE';el['clearance-note'].textContent='above sampled surface near ground';el['planet-hint'].innerHTML=orbitHint;
 }
-async function enterWalk(){
+async function enterWalk({touchdown=false}={}){
  if(!renderer||walkLanding||renderer.cameraState.mode==='walk')return;
  leaveWalk();const epoch=++walkEpoch;walkLanding=true;el.mode.value='walk';el.walk.disabled=true;el.walk.textContent='FINDING GROUND…';
  el['walk-help'].hidden=false;el['walk-help'].textContent='Finding a landing place and preparing surface detail…';
@@ -46,7 +46,12 @@ async function enterWalk(){
    if(epoch!==walkEpoch)return;
    if(generation!==renderer.generation)continue;
    point={direction,height:data[3]};
-   if(renderer.ocean&&point.height<=.03){
+   if(touchdown){
+    const rendered=await renderer.sampleRenderedSurface(direction);if(epoch!==walkEpoch)return;
+    if(rendered==null||(renderer.ocean&&rendered<=0)){el.mode.value=camera.mode;el['walk-help'].textContent='Waiting for walkable terrain at this location.';return;}
+    point.height=rendered;
+   }
+   if(!touchdown&&renderer.ocean&&point.height<=.03){
     const candidates=await renderer.sampleTerrain();if(epoch!==walkEpoch)return;
     if(generation!==renderer.generation)continue;
     let best=-Infinity,index=-1;
@@ -61,7 +66,7 @@ async function enterWalk(){
    break;
   }
   setCameraDirection(camera,point.direction);camera.surfaceHeight=point.height;camera.altitude=WALK_EYE_HEIGHT_KM;
-  if(camera.mode!=='flyover')camera.pitch=.08;
+  if(camera.mode!=='flyover'&&camera.mode!=='flight')camera.pitch=.08;
   camera.pitch=Math.max(-1.35,Math.min(1.35,camera.pitch));camera.mode='walk';renderer.lastProbeKey='';renderer.lastSelection=-Infinity;renderer.needsSelection=true;
   walker.start();el.view.parentElement.classList.add('walking');el['walk-controls'].hidden=false;
   el['altitude-range'].disabled=true;el.altitude.textContent='1.7 m';el['altitude-overlay'].textContent='1.7 m';
@@ -78,6 +83,7 @@ function setMode(mode){
  renderer.cameraState.mode=mode;el.mode.value=mode;
  if(renderer.cameraState.altitude<MIN_ALT)setAltitude(MIN_ALT);
  if(mode==='flyover'&&renderer.cameraState.altitude>40)setAltitude(15);
+ if(mode==='flight'){el['planet-hint'].textContent='W/S FLY FORWARD / BACK · A/D STRAFE · Q/E DESCEND / ASCEND · SHIFT BOOST · DRAG TO LOOK';el['walk-help'].hidden=false;el['walk-help'].textContent='Fly toward the surface to land automatically. Drag to look; Q and E move down and up.';}
  renderer.needsSelection=true;
 }
 function rebuildTerrain(title){
@@ -104,10 +110,37 @@ function updateTelemetry(){
  el['generation-status'].textContent=`${fmt(s.leaves)} QUADTREE LEAVES · ${fmt(s.generated)} PATCHES LAST GENERATED`;
  if(frames.length){const avg=frames.reduce((a,b)=>a+b,0)/frames.length;el.fps.textContent=(1000/avg).toFixed(1);el['frame-ms'].textContent=avg.toFixed(1);}
 }
+let flightTime=0,flightProbe=false,flightGeneration=0;
+function advanceFlight(now){
+ const camera=renderer?.cameraState;if(!camera||camera.mode!=='flight'){flightTime=0;flightGeneration++;return;}
+ const dt=flightTime?Math.min(.05,(now-flightTime)/1000):0;flightTime=now;
+ if(walkLanding||flightProbe)return;
+ const input=inputForWalk(),vertical=Number(keys.has('KeyE'))-Number(keys.has('KeyQ'));
+ if(!input.forward&&!input.strafe&&!vertical)return;
+ // Speed adapts continuously to clearance, permitting both orbital travel and a controlled approach.
+ const speed=Math.max(.004,Math.min(1800,Math.max(camera.altitude,.01)*.45))*(input.fast?3:1);
+ const travel=speed*dt,dir=directionFromCamera(camera);
+ const next=walkStep(dir,camera.heading,input.forward*Math.cos(camera.pitch),input.strafe,travel);
+ const absolute=camera.altitude+camera.surfaceHeight+travel*(vertical-input.forward*Math.sin(camera.pitch));
+ // Near the surface, wait for the GPU's rendered mesh before committing motion.
+ if(absolute<12){
+  flightProbe=true;const epoch=flightGeneration,generation=renderer.generation;
+  renderer.sampleTerrain(next).then(async data=>{
+   if(epoch!==flightGeneration||camera.mode!=='flight'||generation!==renderer.generation)return;
+   const terrain=data[3],floor=renderer.ocean?Math.max(0,terrain):terrain;
+   let rendered=null;if(absolute-floor<.08)rendered=await renderer.sampleRenderedSurface(next);
+   if(epoch!==flightGeneration||camera.mode!=='flight'||generation!==renderer.generation)return;
+   const safeFloor=rendered==null?floor:renderer.ocean?Math.max(0,rendered):rendered;
+   setCameraDirection(camera,next);camera.surfaceHeight=safeFloor;camera.altitude=Math.max(WALK_EYE_HEIGHT_KM,absolute-safeFloor);renderer.needsSelection=true;
+   if(absolute-safeFloor<=WALK_EYE_HEIGHT_KM&&rendered!=null&&(!renderer.ocean||rendered>0))enterWalk({touchdown:true});
+  }).catch(error=>fail(`Flight terrain probe: ${error.message}`)).finally(()=>{flightProbe=false;});
+ }else{setCameraDirection(camera,next);camera.surfaceHeight=0;camera.altitude=Math.min(MAX_ALT,absolute);renderer.needsSelection=true;}
+ el.altitude.textContent=altitudeText(camera.altitude);el['altitude-overlay'].textContent=altitudeText(camera.altitude);el['altitude-range'].value=String(toSlider(Math.max(MIN_ALT,camera.altitude)));
+}
 function frame(now){
  requestAnimationFrame(frame);if(!renderer||!el.error.hidden||document.hidden){previous=0;return;}
  try{
-  walker?.advance(now);
+  advanceFlight(now);walker?.advance(now);
   const cpu=renderer.frame(now);
   if(cpu!=null)walker?.afterFrame();
   if(cpu!=null){const delta=previous?now-previous:0;previous=now;if(delta>0&&delta<5000){frames.push(delta);if(frames.length>60)frames.shift();}cpuFrames.push(cpu);if(cpuFrames.length>60)cpuFrames.shift();inspector.record(now,delta,cpu);}
@@ -188,7 +221,7 @@ el.view.addEventListener('pointerdown',event=>{
 });
 el.view.addEventListener('pointermove',event=>{
  if(!drag||!renderer)return;const dx=event.clientX-drag.x,dy=event.clientY-drag.y,cam=renderer.cameraState;
- if(cam.mode==='walk'){if(document.pointerLockElement!==el.view)look(dx,dy);}
+ if(cam.mode==='walk'||cam.mode==='flight'){if(document.pointerLockElement!==el.view)look(dx,dy);}
  else if(drag.look&&cam.mode==='flyover'){cam.heading-=dx*.006;cam.pitch=Math.max(.01,Math.min(1.3,cam.pitch+dy*.005));}
  else {const scale=Math.max(.002,Math.min(1,Math.sqrt((cam.altitude+Math.max(0,cam.surfaceHeight))/6371)));cam.longitude-=dx*.005*scale;cam.latitude=Math.max(-1.5,Math.min(1.5,cam.latitude+dy*.005*scale));}
  renderer.needsSelection=true;drag={x:event.clientX,y:event.clientY,look:drag.look};
@@ -196,9 +229,9 @@ el.view.addEventListener('pointermove',event=>{
 el.view.addEventListener('pointerup',()=>{drag=null;});el.view.addEventListener('pointercancel',()=>{drag=null;});
 document.addEventListener('mousemove',event=>{if(renderer?.cameraState.mode==='walk'&&document.pointerLockElement===el.view)look(event.movementX,event.movementY);});
 el.view.addEventListener('wheel',event=>{if(!renderer)return;event.preventDefault();if(renderer.cameraState.mode!=='walk')setAltitude(renderer.cameraState.altitude*Math.exp(event.deltaY*.001));},{passive:false});
-const walkKeys=new Set(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','ShiftLeft','ShiftRight']);
+const walkKeys=new Set(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','ShiftLeft','ShiftRight','KeyQ','KeyE']);
 document.addEventListener('keydown',event=>{
- if(renderer?.cameraState.mode!=='walk'||!walkKeys.has(event.code)||event.ctrlKey||event.metaKey||event.altKey)return;
+ if(!['walk','flight'].includes(renderer?.cameraState.mode)||!walkKeys.has(event.code)||event.ctrlKey||event.metaKey||event.altKey)return;
  if(event.target instanceof Element&&event.target.closest('input,select,textarea,button,[contenteditable="true"]'))return;
  event.preventDefault();keys.add(event.code);
 });
