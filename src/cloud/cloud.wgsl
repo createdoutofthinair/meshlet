@@ -65,7 +65,9 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  let seed=params.cloud.z;let angle=params.sky.x*params.cloud.y/PLANET_RADIUS;let global=vec3<f32>(p.x,PLANET_RADIUS+p.y,p.z);
  let rotated=vec3<f32>(global.x*cos(angle)+global.z*sin(angle),global.y,-global.x*sin(angle)+global.z*cos(angle));
  let q=rotated*(.00028/max(.5,params.shape.x))+vec3<f32>(seed*.071,seed*.039,seed*.053);
- let coarse=cloudNoise(q*.16+vec3<f32>(8.0,14.0,3.0));
+ // At full detail the coarse field has zero contribution to the mix.
+ var coarse=0.0;
+ if(detailWeight<1.0){coarse=cloudNoise(q*.16+vec3<f32>(8.0,14.0,3.0));}
  // Filter the base shape as well as erosion when it becomes subpixel.
  // When the detail weight is exactly zero, its noise and erosion cannot
  // affect the output. Orbital samples always use this filtered path.
