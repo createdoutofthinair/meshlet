@@ -95,6 +95,27 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  let haze=smoothstep(.48,1.0,min(groundDistance,horizonDistance)/horizonDistance);
  let groundColor=mix(vec3<f32>(.045,.12,.19),vec3<f32>(.26,.49,.67),haze*.62)*mix(.06,1.0,day);
  color=mix(color,groundColor,groundCoverage);
+ // Limb glow is evaluated from tangent altitude above the spherical ground.
+ // This inexpensive single-scattering approximation is visible from orbit.
+ let tangentDistance=max(0.0,-(PLANET_RADIUS+origin.y)*ray.y);
+ {
+  let tangentHeight=max(0.0,planetAltitude(origin+ray*tangentDistance));
+  let altitudeVisibility=smoothstep(5000.0,60000.0,origin.y);
+  // Upward rays have their closest point at the camera. Fade their short
+  // atmospheric path smoothly instead of abruptly dropping the halo at y=0.
+  let upwardFade=exp(-max(0.0,ray.y)*5.0);
+  let broad=exp(-tangentHeight/40000.0)*altitudeVisibility*upwardFade;
+  let inner=exp(-tangentHeight/9000.0)*altitudeVisibility*upwardFade;
+  let sunSide=.65+.35*max(dot(ray,sun),0.0);
+  let limbTint=mix(vec3<f32>(.07,.25,.65),vec3<f32>(.60,.18,.06),twilight*pow(max(dot(ray,sun),0.0),2.0));
+  color+=(limbTint*broad+vec3<f32>(.12,.25,.40)*inner)*sunSide*max(.035,day+twilight*.22)*.72*(1.0-groundCoverage*.65);
+ }
+ // Feather the outer cloud-shell silhouette over the pixel footprint.
+ // For cameras inside the shell, no limb masking is needed.
+ let shellAlt=max(0.0,origin.y-8000.0);
+ let shellHorizon= -sqrt(shellAlt*(2.0*PLANET_RADIUS+origin.y+8000.0))/(PLANET_RADIUS+origin.y);
+ let shellEdge=max(.000001,fwidth(ray.y)*2.0);
+ let shellCoverage=select(1.0,1.0-smoothstep(shellHorizon-shellEdge,shellHorizon+shellEdge,ray.y),origin.y>8000.0);
  let outer=sphereInterval(origin.y,ray,8000.0);let inner=sphereInterval(origin.y,ray,1500.0);
  if(outer.y>0.0 && outer.y>outer.x){
   var start=max(0.0,outer.x);var end=min(outer.y,groundDistance);
@@ -129,23 +150,10 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
    let aerial=1.0-exp(-max(0.0,start-90000.0)/480000.0);
    let haze=mix(vec3<f32>(.012,.02,.045),mix(vec3<f32>(.25,.44,.62),vec3<f32>(.60,.24,.12),twilight*.6),max(day,twilight*.35));
    lightAccum=mix(lightAccum,haze*(1.0-transmission),aerial*.65);
-   color=color*transmission+lightAccum;
+   let tangentFade=mix(1.0,smoothstep(0.0,16000.0,end-start),smoothstep(8000.0,12000.0,origin.y));
+   let cloudColor=color*transmission+lightAccum;
+   color=mix(color,cloudColor,shellCoverage*tangentFade);
   }
- }
- // Limb glow is evaluated from tangent altitude above the spherical ground.
- // This inexpensive single-scattering approximation is visible from orbit.
- let tangentDistance=max(0.0,-(PLANET_RADIUS+origin.y)*ray.y);
- {
-  let tangentHeight=max(0.0,planetAltitude(origin+ray*tangentDistance));
-  let altitudeVisibility=smoothstep(5000.0,60000.0,origin.y);
-  // Upward rays have their closest point at the camera. Fade their short
-  // atmospheric path smoothly instead of abruptly dropping the halo at y=0.
-  let upwardFade=exp(-max(0.0,ray.y)*5.0);
-  let broad=exp(-tangentHeight/40000.0)*altitudeVisibility*upwardFade;
-  let inner=exp(-tangentHeight/9000.0)*altitudeVisibility*upwardFade;
-  let sunSide=.65+.35*max(dot(ray,sun),0.0);
-  let limbTint=mix(vec3<f32>(.07,.25,.65),vec3<f32>(.60,.18,.06),twilight*pow(max(dot(ray,sun),0.0),2.0));
-  color+=(limbTint*broad+vec3<f32>(.12,.25,.40)*inner)*sunSide*max(.035,day+twilight*.22)*.72*(1.0-groundCoverage*.65);
  }
  let mapped=max(color,vec3<f32>(0.0))/(1.0+max(color,vec3<f32>(0.0))*.22);let display=pow(mapped,vec3<f32>(1.0/2.2));
  // Sub-LSB dither reduces visible color steps in smooth sunset gradients.
