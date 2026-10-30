@@ -36,7 +36,7 @@ export class PlanetRenderer {
   this.needsSelection=true;this.lastSelection=0;this.previousSplits=null;this.lodErrors=new Map();this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
   this.transitionErrors=new Map();this.transitionCommitId=0;this.lastTransitionCommit=null;this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
   this.transitionTargetPixels=TRANSITION_TARGET_PIXELS;
-  this.lastSample=0;this.pendingRead=false;this.generation=0;this.inFlight=0;this.probePending=false;this.lastProbeKey='';this.lastProbeTime=0;this.stats={leaves:0,visiblePatches:0,deepest:0,selectionMs:0,generated:0};
+  this.lastSample=0;this.pendingRead=false;this.generation=0;this.surfaceRevision=0;this.inFlight=0;this.probePending=false;this.lastProbeKey='';this.lastProbeTime=0;this.stats={leaves:0,visiblePatches:0,deepest:0,selectionMs:0,generated:0};
   this.hydrologySeed=null;
   this.regionSeed=null;this.regions=new Map();this.regionFree=Array.from({length:REGION_CAPACITY},(_,i)=>REGION_CAPACITY-1-i);
   this.simulateRegionsForAnalysis=false;
@@ -161,7 +161,7 @@ export class PlanetRenderer {
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
   this.lodErrors.clear();
   this.transitionErrors.clear();this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
-  this.needsSelection=true;this.generation++;this.lastProbeKey='';
+  this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';
   this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
  }
  resetRegions(){
@@ -231,6 +231,14 @@ export class PlanetRenderer {
    }
    return hash;
   };
+  // Reserve the whole replacement set before touching the free list. Partial
+  // allocation on exhaustion must never leak slots or remove visible coverage.
+  const required=result.visible.reduce((count,node)=>count+Number(!this.slotByKey.has(node.key)),0);
+  if(required>this.free.length){
+   this.lastSelection=now;this.needsSelection=true;
+   this.transition={...this.transition,pending:required,waiting:true,capacityDeferred:true};
+   return;
+  }
   const slots=new Map(),signatures=new Map(),newNodes=[],normalPending=[];let topologyChanges=0;
   const nodes=result.visible.map(node=>{
    const signature=signatureFor(node);
@@ -273,7 +281,7 @@ export class PlanetRenderer {
   // on which neighboring LOD is currently selected.
   this.normalPending=[];
   this.stats={leaves:stage.result.leaves.length,visiblePatches:stage.nodes.length,deepest:stage.result.deepest,selectionMs:stage.selectionMs,generated:stage.newNodes.length,normalUpdates:stage.normalPending.length,reusedNormalUpdates:0};
-  this.stage=null;this.lastSelection=now;this.transition={...this.transition,pending:0,waiting:false};
+  this.stage=null;this.surfaceRevision++;this.lastSelection=now;this.transition={...this.transition,pending:0,waiting:false,capacityDeferred:false};
  }
  shouldSelect(camera,now){
   if(this.stage)return false;
@@ -322,6 +330,7 @@ export class PlanetRenderer {
  }
  async sampleRenderedSurface(direction){
   if(!this.lastFrameEye||!this.patches.length)return null;
+  const revision=this.surfaceRevision,generation=this.generation;
   const face=directionToFace(direction),epsilon=1e-12;
   const patch=this.patches.filter(p=>p.face===face.face&&Math.abs(face.u-p.u)<=p.span/2+epsilon&&Math.abs(face.v-p.v)<=p.span/2+epsilon).sort((a,b)=>b.level-a.level)[0];
   if(!patch)return null;
@@ -336,7 +345,7 @@ export class PlanetRenderer {
   const readback=d.createBuffer({size:16,usage:BUFFER.COPY_DST|BUFFER.MAP_READ}),encoder=d.createCommandEncoder({label:'Walkable terrain probe'});
   const pass=encoder.beginComputePass();pass.setPipeline(this.walkProbePipe);pass.setBindGroup(0,this.walkProbeBind);pass.dispatchWorkgroups(1);pass.end();
   encoder.copyBufferToBuffer(this.walkProbeResult,0,readback,0,16);d.queue.submit([encoder.finish()]);
-  try{await readback.mapAsync(GPUMapMode.READ);const values=new Float32Array(readback.getMappedRange().slice(0));readback.unmap();return values[1]>.5?values[0]:null;}
+  try{await readback.mapAsync(GPUMapMode.READ);const values=new Float32Array(readback.getMappedRange().slice(0));readback.unmap();return generation===this.generation&&revision===this.surfaceRevision&&values[1]>.5?values[0]:null;}
   finally{readback.destroy();}
  }
  requestSurface(camera,now){

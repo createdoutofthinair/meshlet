@@ -79,3 +79,17 @@ test('GPU render timing covers the cloud pass and disabled clouds retain sky',as
  assert.equal(renderPasses[0].timestampWrites.beginningOfPassWriteIndex,2);assert.equal(renderPasses[0].timestampWrites.endOfPassWriteIndex,3);assert.equal(renderPasses[1].timestampWrites.beginningOfPassWriteIndex,4);assert.equal(renderPasses[2].timestampWrites.endOfPassWriteIndex,7);assert.equal(renderPasses[1].depthStencilAttachment.depthStoreOp,'store','final ocean depth is retained for atmospheric compositing');
  assert.equal(new Float32Array(r.cloudUniform.data)[7],0);
 });
+
+test('surface readback is discarded when displayed patch selection changes',async()=>{
+ const {r}=fakeRenderer();r.frame(1000);await flush();
+ const patch=r.patches[0];const direction=patch.direction;
+ r.walkProbeInput=r.device.createBuffer({size:48});r.walkProbeResult=r.device.createBuffer({size:16});r.walkProbePipe={};r.walkProbeBind={};
+ let release;const ready=new Promise(resolve=>{release=resolve;});
+ const create=r.device.createBuffer;
+ r.device.createBuffer=options=>{const b=create(options);b.mapAsync=()=>ready;new Float32Array(b.data).set([4,1,0,0]);return b;};
+ // Avoid overwriting the fake readback contents during the copy.
+ const encoder=r.device.createCommandEncoder;
+ r.device.createCommandEncoder=()=>{const e=encoder();e.copyBufferToBuffer=()=>{};return e;};
+ const pending=r.sampleRenderedSurface(direction);r.surfaceRevision++;release();
+ assert.equal(await pending,null);
+});

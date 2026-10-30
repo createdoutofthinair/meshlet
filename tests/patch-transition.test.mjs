@@ -48,3 +48,16 @@ test('visible patches stay resident while replacements are staged or cancelled',
  r.select(b,500);assert.ok(r.stage);const wanted=r.stage.nodes.map(n=>n.key);r.commitStage(600);
  assert.deepEqual(r.patches.map(n=>n.key),wanted);assert.equal(r.stage,null);assert.equal(r.free.length,1024-r.patches.length);assert.equal(new Set(r.free).size,r.free.length);
 });
+
+test('slot pressure defers the whole replacement without losing visible coverage',()=>{
+ const r=Object.create(PlanetRenderer.prototype);
+ Object.assign(r,{budget:120,maxDepth:20,pixelSize:14,cameraState:{mode:'orbit'},generation:1,
+  slotByKey:new Map(),stitchByKey:new Map(),free:Array.from({length:1024},(_,i)=>1023-i),patches:[],pending:[],normalPending:[],previousSplits:null,transitionErrors:new Map(),transition:{pixels:null,pending:0,overTarget:false,waiting:false},stats:{},stage:null});
+ const a=planetCamera({mode:'orbit',altitude:14000,longitude:.8,latitude:.4},960,600);
+ const b=planetCamera({mode:'orbit',altitude:500,longitude:.8,latitude:.4},960,600);
+ r.select(a,100);const oldPatches=r.patches,oldSlots=new Map(r.slotByKey);
+ r.free=[];r.pending=[];r.normalPending=[];r.select(b,300);
+ assert.equal(r.patches,oldPatches);assert.deepEqual(r.slotByKey,oldSlots);
+ assert.deepEqual(r.free,[]);assert.equal(r.stage,null);assert.equal(r.needsSelection,true);
+ assert.equal(r.transition.capacityDeferred,true);assert.ok(r.transition.pending>0);
+});
