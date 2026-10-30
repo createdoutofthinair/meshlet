@@ -10,6 +10,8 @@ struct Indirect { vertexCount:u32,instanceCount:atomic<u32>,firstVertex:u32,firs
 // of each patch instead of reading the same parent bounds 16 times.
 var<workgroup> unionLo:array<vec3<f32>,4>;
 var<workgroup> unionHi:array<vec3<f32>,4>;
+var<workgroup> visibleCount:atomic<u32>;
+var<workgroup> visibleBase:u32;
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid:vec3<u32>,@builtin(local_invocation_index) lane:u32,@builtin(workgroup_id) group:vec3<u32>) {
  let index=gid.x;
@@ -32,26 +34,33 @@ fn main(@builtin(global_invocation_id) gid:vec3<u32>,@builtin(local_invocation_i
   }
  }
  workgroupBarrier();
- if(index>=frame.counts.x*MESHLETS_PER_PATCH){return;}
- let slot=activeSlots[index/MESHLETS_PER_PATCH];let meshlet=index%MESHLETS_PER_PATCH;
- // With frustum culling disabled no bounds or morph union is needed. Keep
- // the same indirect draw entries without touching the bounds buffers.
- if((frame.counts.w & 1u)==0u){
-  let dest=atomicAdd(&indirect.instanceCount,1u);visible[dest]=(slot<<4u)|meshlet;return;
+ // Compact visible entries locally, then reserve a contiguous range with one
+ // global atomic per workgroup instead of one per visible meshlet.
+ if(lane==0u){atomicStore(&visibleCount,0u);}
+ workgroupBarrier();
+ var keep=false;var encoded=0u;
+ if(index<frame.counts.x*MESHLETS_PER_PATCH){
+  let slot=activeSlots[index/MESHLETS_PER_PATCH];let meshlet=index%MESHLETS_PER_PATCH;
+  encoded=(slot<<4u)|meshlet;keep=true;
+  if((frame.counts.w & 1u)!=0u){
+   var bound=bounds[slot*MESHLETS_PER_PATCH+meshlet].sphere;
+   let morph=morphs.patches[slot];
+   if(morph.slots.w!=0u && (morph.mapping.w<1.0 || (morph.slots.z&16u)!=0u)){
+    let sharedIndex=lane/MESHLETS_PER_PATCH;
+    let lo=min(bound.xyz-vec3<f32>(bound.w),unionLo[sharedIndex]);
+    let hi=max(bound.xyz+vec3<f32>(bound.w),unionHi[sharedIndex]);
+    bound=vec4<f32>((lo+hi)*.5,length((hi-lo)*.5)*1.0001+.00001);
+   }
+   let center=bound.xyz+patches[slot].relative.xyz;
+   for(var p=0u;p<5u;p++){
+    let plane=frame.planes[p];if(dot(plane.xyz,center)+plane.w < -bound.w){keep=false;break;}
+   }
+  }
  }
- var bound=bounds[slot*MESHLETS_PER_PATCH+meshlet].sphere;
- let morph=morphs.patches[slot];
- if(morph.slots.w!=0u && (morph.mapping.w<1.0 || (morph.slots.z&16u)!=0u)){
-  // Parent samples are convex combinations of its rendered vertices. The
-  // union of all parent meshlet spheres contains every possible endpoint,
-  // including stitched and skipped-level mappings. This broad bound is
-  // intentionally conservative until per-child endpoint bounds are cached.
-  let sharedIndex=lane/MESHLETS_PER_PATCH;
-  let lo=min(bound.xyz-vec3<f32>(bound.w),unionLo[sharedIndex]);
-  let hi=max(bound.xyz+vec3<f32>(bound.w),unionHi[sharedIndex]);
-  bound=vec4<f32>((lo+hi)*.5,length((hi-lo)*.5)*1.0001+.00001);
- }
- let center=bound.xyz+patches[slot].relative.xyz;
- for(var p=0u;p<5u;p++){let plane=frame.planes[p];if(dot(plane.xyz,center)+plane.w < -bound.w){return;}}
- let dest=atomicAdd(&indirect.instanceCount,1u);visible[dest]=(slot<<4u)|meshlet;
+ var localIndex=0u;
+ if(keep){localIndex=atomicAdd(&visibleCount,1u);}
+ workgroupBarrier();
+ if(lane==0u){let count=atomicLoad(&visibleCount);visibleBase=atomicAdd(&indirect.instanceCount,count);}
+ workgroupBarrier();
+ if(keep){visible[visibleBase+localIndex]=encoded;}
 }
