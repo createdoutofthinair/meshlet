@@ -82,17 +82,20 @@ export function intermediateLeaves(previous,target,budget,priority=()=>0){
   for(const key of keys)leaves.delete(key);leaves.set(p.key,p);
  }
  const limit=Math.max(6,Math.floor(budget),previous.length);
- const splitStep=(tree,node,seen=new Set())=>{
-  if(!tree.has(node.key))return true;
-  if(!original.has(node.key)||seen.has(node.key))return false;
-  seen.add(node.key);
-  for(let e=0;e<4;e++)for(const n of neighbors(tree,node,e))if(n.level<node.level&&!splitStep(tree,n,seen))return false;
-  if(tree.size+3>limit)return false;
-  split(tree,node);return true;
- };
  for(const node of [...previous].filter(n=>wantsSplit.has(n.key)).sort((a,b)=>priority(b)-priority(a))){
   if(!leaves.has(node.key))continue;
-  const trial=new Map(leaves);if(splitStep(trial,node))leaves=trial;
+  // Plan every coarser balancing dependency before modifying the tree. This
+  // retains atomic failure without copying the entire leaf map per candidate.
+  const planned=[],done=new Set(),visiting=new Set();
+  const plan=n=>{
+   if(!leaves.has(n.key)||done.has(n.key))return true;
+   if(!original.has(n.key)||visiting.has(n.key))return false;
+   visiting.add(n.key);
+   for(let e=0;e<4;e++)for(const neighbor of neighbors(leaves,n,e))if(neighbor.level<n.level&&!plan(neighbor))return false;
+   visiting.delete(n.key);done.add(n.key);planned.push(n);
+   return leaves.size+planned.length*3<=limit;
+  };
+  if(plan(node))for(const n of planned)split(leaves,n);
  }
  return [...leaves.values()];
 }
