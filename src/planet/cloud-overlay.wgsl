@@ -96,8 +96,8 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,weather:vec
  // and sphere intersections already stop the march at the surface.
  let altitude=max(origin.y,0.0);
  let alpha=1.0-transmission;
- let sky=atmosphereSky(ray,sun,vec3<f32>(0,1,0),origin.y);
  if(depth==0.0){
+  let sky=atmosphereSky(ray,sun,vec3<f32>(0,1,0),origin.y);
   let tangent=max(0.0,-(PLANET_RADIUS+origin.y)*ray.y);
   let height=max(0.0,planetAltitude(origin+ray*tangent));
   let halo=exp(-height/40000.0)*smoothstep(5000.0,60000.0,origin.y)*exp(-max(0.0,ray.y)*5.0);
@@ -108,7 +108,11 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,weather:vec
  // to low altitudes so the orbital view retains its terrain contrast.
  let aerial=(1.0-exp(-max(0.0,sceneDistance-4000.0)/70000.0))*exp(-altitude/18000.0)*.72*params.atmosphere.x;
  let hazeAlpha=clamp(aerial,0.0,.85)*(1.0-alpha);
- let hazeDisplay=pow(max(sky,vec3<f32>(0.0))/(1.0+max(sky,vec3<f32>(0.0))*.22),vec3<f32>(1.0/2.2));
+ var hazeDisplay=vec3<f32>(0.0);
+ if(hazeAlpha>0.0){
+  let sky=atmosphereSky(ray,sun,vec3<f32>(0,1,0),origin.y);
+  hazeDisplay=pow(max(sky,vec3<f32>(0.0))/(1.0+max(sky,vec3<f32>(0.0))*.22),vec3<f32>(1.0/2.2));
+ }
  var cloudDisplay=vec3<f32>(0.0);
  if(alpha>.001){let color=light/alpha;cloudDisplay=pow(max(color,vec3<f32>(0.0))/(1.0+max(color,vec3<f32>(0.0))*.22),vec3<f32>(1.0/2.2));}
  return vec4<f32>(cloudDisplay*alpha+hazeDisplay*hazeAlpha,alpha+hazeAlpha);
