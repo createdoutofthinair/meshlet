@@ -59,11 +59,12 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  let height=(planetAltitude(p)-1500.0)/6500.0;
  return cloudDensityAtHeight(p,weather,detailWeight,height);
 }
-struct CloudWeatherTerms {typeBlend:f32,threshold:f32,coverageFactor:f32};
+struct CloudWeatherTerms {typeBlend:f32,threshold:f32,coverageFactor:f32,windCos:f32,windSin:f32,scale:f32,seedOffset:vec3<f32>};
 fn cloudWeatherTerms(weather:vec2<f32>)->CloudWeatherTerms{
  let humidity=smoothstep(.31,.67,weather.x);
  let coverage=clamp(params.sky.w*.45+humidity*.72-.18,0.0,1.0);
- return CloudWeatherTerms(smoothstep(.32,.68,weather.y),mix(.86,.30,coverage),smoothstep(0.0,.08,params.sky.w));
+ let angle=params.sky.x*params.cloud.y/PLANET_RADIUS;let seed=params.cloud.z;
+ return CloudWeatherTerms(smoothstep(.32,.68,weather.y),mix(.86,.30,coverage),smoothstep(0.0,.08,params.sky.w),cos(angle),sin(angle),.00028/max(.5,params.shape.x),vec3<f32>(seed*.071,seed*.039,seed*.053));
 }
 fn cloudDensityPrepared(p:vec3<f32>,detailWeight:f32,terms:CloudWeatherTerms)->f32{
  return cloudDensityWithTerms(p,detailWeight,(planetAltitude(p)-1500.0)/6500.0,terms);
@@ -78,9 +79,9 @@ fn cloudDensityWithTerms(p:vec3<f32>,detailWeight:f32,height:f32,terms:CloudWeat
  let tall=smoothstep(0.0,.08,height)*(1.0-smoothstep(.55,1.0,height));
  let profile=mix(low,tall,terms.typeBlend);
  if(profile<=0.0 || params.sky.w<=0.0){return 0.0;}
- let seed=params.cloud.z;let angle=params.sky.x*params.cloud.y/PLANET_RADIUS;let global=vec3<f32>(p.x,PLANET_RADIUS+p.y,p.z);
- let rotated=vec3<f32>(global.x*cos(angle)+global.z*sin(angle),global.y,-global.x*sin(angle)+global.z*cos(angle));
- let q=rotated*(.00028/max(.5,params.shape.x))+vec3<f32>(seed*.071,seed*.039,seed*.053);
+ let global=vec3<f32>(p.x,PLANET_RADIUS+p.y,p.z);
+ let rotated=vec3<f32>(global.x*terms.windCos+global.z*terms.windSin,global.y,-global.x*terms.windSin+global.z*terms.windCos);
+ let q=rotated*terms.scale+terms.seedOffset;
  // At full detail the coarse field has zero contribution to the mix.
  var coarse=0.0;
  if(detailWeight<1.0){coarse=cloudNoise(q*.16+vec3<f32>(8.0,14.0,3.0));}
