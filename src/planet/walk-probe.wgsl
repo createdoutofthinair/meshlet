@@ -42,14 +42,16 @@ fn main(){
  for(var cy=start.y;cy<=end.y;cy++){for(var cx=start.x;cx<=end.x;cx++){
   if(cx<0 || cy<0 || cx>=i32(CELLS) || cy>=i32(CELLS)){continue;}
   let cell=vec2<u32>(u32(cx),u32(cy));
-  let offsets=array<vec2<u32>,6>(vec2<u32>(0u,0u),vec2<u32>(1u,0u),vec2<u32>(0u,1u),vec2<u32>(1u,0u),vec2<u32>(1u,1u),vec2<u32>(0u,1u));
-  for(var tri=0u;tri<2u;tri++){
-   let a=displayedPosition(slot,cell+offsets[tri*3u],tile.details.z);
-   let b=displayedPosition(slot,cell+offsets[tri*3u+1u],tile.details.z);
-   let c=displayedPosition(slot,cell+offsets[tri*3u+2u],tile.details.z);
-   let hit=probeTriangle(a,b,c,origin,ray);
-   if(hit.y>.5 && (!found || hit.x>height)){height=hit.x;found=true;}
-  }
+  // The two grid triangles share two vertices. Evaluate each corner once,
+  // retaining the exact rendered winding and intersection order.
+  let a=displayedPosition(slot,cell,tile.details.z);
+  let b=displayedPosition(slot,cell+vec2<u32>(1u,0u),tile.details.z);
+  let c=displayedPosition(slot,cell+vec2<u32>(0u,1u),tile.details.z);
+  let d=displayedPosition(slot,cell+vec2<u32>(1u,1u),tile.details.z);
+  let first=probeTriangle(a,b,c,origin,ray);
+  if(first.y>.5 && (!found || first.x>height)){height=first.x;found=true;}
+  let second=probeTriangle(b,d,c,origin,ray);
+  if(second.y>.5 && (!found || second.x>height)){height=second.x;found=true;}
  }}
  result[0]=vec4<f32>(height+probe.origin.w,select(0.0,1.0,found),0.0,0.0);
 }
