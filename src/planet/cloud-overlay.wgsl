@@ -8,8 +8,9 @@
  // The final depth includes terrain and any ocean pixel that survived its
  // coast test. An analytic sea hit alone does not mean a pixel was drawn.
  let depth=textureLoad(sceneDepth,vec2<i32>(input.pos.xy),0);
- var limit=1e10;
- if(depth>0.0){limit=params.up.w*1000.0/(depth*max(.001,dot(worldRay,params.forward.xyz)));}
+ var sceneDistance=1e10;
+ if(depth>0.0){sceneDistance=params.up.w*1000.0/(depth*max(.001,dot(worldRay,params.forward.xyz)));}
+ var limit=sceneDistance;
  let ground=sphereInterval(origin.y,ray,0.0);
  if(params.sun.w>0.5 && ground.x>0.0){limit=min(limit,ground.x);}
  let outer=sphereInterval(origin.y,ray,8000.0);let inner=sphereInterval(origin.y,ray,1500.0);
@@ -42,6 +43,13 @@
    }
   }
  }
+ // At low altitude, the cloud shell meets the planetary horizon at a very
+ // shallow angle. Filter its coverage there to avoid a sharp marching cutoff.
+ let altitude=max(origin.y,0.0);
+ let horizon= -sqrt(altitude*(2.0*PLANET_RADIUS+altitude))/(PLANET_RADIUS+altitude);
+ let lowView=1.0-smoothstep(1200.0,2200.0,altitude);
+ let horizonFilter=mix(1.0,smoothstep(horizon-.002,horizon+.035,ray.y),lowView);
+ light*=horizonFilter;transmission=1.0-(1.0-transmission)*horizonFilter;
  let alpha=1.0-transmission;
  let sky=atmosphereSky(ray,sun,vec3<f32>(0,1,0),origin.y);
  if(depth==0.0){
@@ -51,7 +59,12 @@
   let color=sky*transmission+light+vec3<f32>(.06,.18,.42)*halo*atmosphereDaylight(sun.y)*.5*params.atmosphere.z;
   return vec4<f32>(pow(max(color,vec3<f32>(0.0))/(1.0+max(color,vec3<f32>(0.0))*.22),vec3<f32>(1.0/2.2)),1.0);
  }
- if(alpha<.001){return vec4<f32>(0.0);}
- let color=light/alpha;
- return vec4<f32>(pow(max(color,vec3<f32>(0.0))/(1.0+max(color,vec3<f32>(0.0))*.22),vec3<f32>(1.0/2.2))*alpha,alpha);
+ // Distance haze uses the same sky and sun as the background. Restrict it
+ // to low altitudes so the orbital view retains its terrain contrast.
+ let aerial=(1.0-exp(-max(0.0,sceneDistance-4000.0)/70000.0))*exp(-altitude/18000.0)*.72*params.atmosphere.x;
+ let hazeAlpha=clamp(aerial,0.0,.85)*(1.0-alpha);
+ let hazeDisplay=pow(max(sky,vec3<f32>(0.0))/(1.0+max(sky,vec3<f32>(0.0))*.22),vec3<f32>(1.0/2.2));
+ var cloudDisplay=vec3<f32>(0.0);
+ if(alpha>.001){let color=light/alpha;cloudDisplay=pow(max(color,vec3<f32>(0.0))/(1.0+max(color,vec3<f32>(0.0))*.22),vec3<f32>(1.0/2.2));}
+ return vec4<f32>(cloudDisplay*alpha+hazeDisplay*hazeAlpha,alpha+hazeAlpha);
 }
