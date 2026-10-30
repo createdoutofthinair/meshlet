@@ -212,6 +212,7 @@ export class PlanetRenderer {
  resetPatchCache(){
   for(const buffer of this.probeReadbacks||[])buffer.destroy();this.probeReadbacks=[];
   this.telemetryReadback?.destroy();this.telemetryReadback=null;
+  this.transitionReadback?.destroy();this.transitionReadback=null;
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
   this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;this.patchMetadataCache=new WeakMap();this.uploadedPatchEye=null;this.preparedPatchState=null;
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
@@ -746,12 +747,15 @@ export class PlanetRenderer {
   let transitionRead;if(compare&&stage.pairs.length){
    if(!morphMeasurement)stage.state='measuring';
    stage.measurementPending=true;stage.nextMeasure=now+200;
-   transitionRead=d.createBuffer({size:stage.pairs.length*8,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});
+   const readSize=stage.pairs.length*8;
+   if(this.transitionReadback&&this.transitionReadback.size<readSize){this.transitionReadback.destroy();this.transitionReadback=null;}
+   transitionRead=this.transitionReadback||d.createBuffer({size:readSize,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});this.transitionReadback=null;
    encoder.copyBufferToBuffer(this.transitionErrorBuffer,0,transitionRead,0,stage.pairs.length*8);
   }else if(compare){stage.maxMerge=0;stage.state='ready';this.transition={...this.transition,pixels:0,pending:0,overTarget:false};}
   d.queue.submit([encoder.finish()]);this.lastFrameEye=camera.eye;this.displayedPatches=drawPatches;this.pending=[];this.normalPending=[];this.regionPending=[];this.inFlight++;
   if(stage)this.transition={...this.transition,pending:stage.todo.length};
   d.queue.onSubmittedWorkDone().then(()=>{this.inFlight--;}).catch(()=>{this.inFlight--;});
+  let transitionReusable=false;
   if(transitionRead)transitionRead.mapAsync(GPUMapMode.READ).then(()=>{
    const values=new Float32Array(transitionRead.getMappedRange());let maxPixel=0,maxMerge=0,maxRefine=0;
    if(this.stage===stage&&stage.generation===this.generation){
@@ -772,8 +776,8 @@ export class PlanetRenderer {
     }else stage.state='ready';
     this.transition={...this.transition,pixels:maxPixel,pending:0,overTarget:maxPixel>this.transitionTargetPixels,waiting:false};
    }
-   transitionRead.unmap();
-  }).catch(e=>{if(this.stage===stage){if(!morphMeasurement){this.cancelStage();this.needsSelection=true;}this.onError?.(`Terrain transition: ${e.message}`);}}).finally(()=>{stage.measurementPending=false;transitionRead.destroy();});
+   transitionRead.unmap();transitionReusable=true;
+  }).catch(e=>{if(this.stage===stage){if(!morphMeasurement){this.cancelStage();this.needsSelection=true;}this.onError?.(`Terrain transition: ${e.message}`);}}).finally(()=>{stage.measurementPending=false;if(transitionReusable&&stage.generation===this.generation&&!this.deviceLost&&!this.transitionReadback)this.transitionReadback=transitionRead;else transitionRead.destroy();});
   if(readback){const generation=this.generation;let reusable=false;readback.mapAsync(GPUMapMode.READ).then(()=>{
    const data=readback.getMappedRange(),visibleMeshlets=new Uint32Array(data,0,4)[1];let gpuComputeMs=null,gpuRenderMs=null,gpuTerrainMs=null,gpuOceanMs=null,gpuCloudMs=null;
    if(this.timing){const t=new BigUint64Array(data,16,8);const elapsed=(a,b)=>t[b]>=t[a]?Number(t[b]-t[a])/1e6:null;gpuComputeMs=elapsed(0,1);gpuTerrainMs=elapsed(2,3);gpuOceanMs=separateOcean?elapsed(4,5):null;gpuCloudMs=cloudActive?elapsed(6,7):null;gpuRenderMs=gpuTerrainMs==null?null:gpuTerrainMs+(gpuOceanMs??0)+(gpuCloudMs??0);}
