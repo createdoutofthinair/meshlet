@@ -5,7 +5,9 @@ import {RADIUS_KM,HEIGHT_LIMIT_KM,PATCH_CELLS,MAX_DEPTH,FACE_BASES,faceCube,face
 function tileAt(leaves,face,u,v,maxDepth) {
  const uu=Math.min(1-Number.EPSILON,Math.max(0,(u+1)/2));
  const vv=Math.min(1-Number.EPSILON,Math.max(0,(v+1)/2));
- for(let level=maxDepth;level>=0;level--){
+ // A covering quadtree has no overlapping ancestor leaves. Searching from
+ // the root finds the same unique leaf without probing unused deep levels.
+ for(let level=0;level<=maxDepth;level++){
   const n=2**level,x=Math.floor(uu*n),y=Math.floor(vv*n);
   const node=leaves.get(`${face}/${level}/${x}/${y}`);if(node)return node;
  }
