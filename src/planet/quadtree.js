@@ -23,9 +23,13 @@ export function neighbors(leaves,node,edge,maxDepth=MAX_DEPTH) {
   if(edge===3){v+=half+eps;u+=fraction*node.span;}
   // Interior samples remain on the same cube face. Only crossings need the
   // cube-to-face remapping, including its exact tie-breaking at boundaries.
+  let face=node.face;
+  if(Math.abs(u)>=1||Math.abs(v)>=1){const f=directionToFace(faceCube(node.face,u,v));face=f.face;u=f.u;v=f.v;}
+  // Adjacent samples often land in the same covering leaf. Reuse it only
+  // strictly inside its face-space bounds; boundary ties still use tileAt.
   let other;
-  if(Math.abs(u)<1&&Math.abs(v)<1)other=tileAt(leaves,node.face,u,v,maxDepth);
-  else{const f=directionToFace(faceCube(node.face,u,v));other=tileAt(leaves,f.face,f.u,f.v,maxDepth);}
+  for(const known of found.values())if(known.face===face&&Math.abs(u-known.u)<known.span/2&&Math.abs(v-known.v)<known.span/2){other=known;break;}
+  if(!other)other=tileAt(leaves,face,u,v,maxDepth);
   if(other && other.key!==node.key)found.set(other.key,other);
  }
  return [...found.values()];
