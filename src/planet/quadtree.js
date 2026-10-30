@@ -109,7 +109,9 @@ export function intermediateLeaves(previous,target,budget,priority=()=>0){
  // Merges can remove candidate children. Exclude them before sorting so the
  // priority calculation is only performed for leaves that can still split.
  if(leaves.size+3>limit)return [...leaves.values()];
- for(const node of previous.filter(n=>wantsSplit.has(n.key)&&leaves.has(n.key)).sort((a,b)=>priority(b)-priority(a))){
+ const splitCandidates=previous.filter(n=>wantsSplit.has(n.key)&&leaves.has(n.key))
+  .map(node=>({node,score:priority(node)})).sort((a,b)=>b.score-a.score);
+ for(const {node} of splitCandidates){
   // Every successful split adds three leaves. Once even one split cannot
   // fit, scanning and balancing the remaining candidates cannot make progress.
   if(leaves.size+3>limit)break;
