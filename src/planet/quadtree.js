@@ -130,8 +130,15 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
  if(z+radius<camera.near || Math.abs(x)>z*camera.tanX+radius*camera.selection.frustumX || Math.abs(y)>z*camera.tanY+radius*camera.selection.frustumY)return 0;
  const {eyeLength,inner,horizon}=camera.selection;
  if(eyeLength>inner){
-  const angle=Math.acos(Math.max(-1,Math.min(1,dot(node.direction,camera.eye)/eyeLength)));
-  if(angle>horizon+Math.min(Math.PI,node.span*1.5))return 0;
+  // The angular cutoff is identical for every tile at a level. Compare its
+  // cosine directly instead of computing an inverse cosine for every tile.
+  let cutoff=camera.selection.horizonCutoffs.get(node.level);
+  if(cutoff===undefined){
+   const angle=horizon+Math.min(Math.PI,node.span*1.5);
+   cutoff=angle>=Math.PI?-Infinity:Math.cos(angle)-1e-12;
+   camera.selection.horizonCutoffs.set(node.level,cutoff);
+  }
+  if(dot(node.direction,camera.eye)/eyeLength<cutoff)return 0;
  }
  // Projected cell size remains a coverage floor, especially while a patch has
  // not yet been measured by the GPU. A measured residual can add priority for
@@ -185,7 +192,7 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
 export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10,previousSplits=null,hysteresis=.1,errorEstimates=null,previousLeaves=null,includeHidden=false,unchangedPatches=null}={}) {
  budget=Math.max(6,Math.floor(budget));maxDepth=Math.min(MAX_DEPTH,Math.max(0,maxDepth));
  const eyeLength=length(camera.eye),inner=RADIUS_KM-HEIGHT_LIMIT_KM,outer=RADIUS_KM+HEIGHT_LIMIT_KM;
- const selection={eyeLength,inner,horizon:eyeLength>inner?Math.acos(Math.min(1,inner/eyeLength))+Math.acos(inner/outer):0,frustumX:Math.hypot(1,camera.tanX),frustumY:Math.hypot(1,camera.tanY)};
+ const selection={eyeLength,inner,horizon:eyeLength>inner?Math.acos(Math.min(1,inner/eyeLength))+Math.acos(inner/outer):0,horizonCutoffs:new Map(),frustumX:Math.hypot(1,camera.tanX),frustumY:Math.hypot(1,camera.tanY)};
  camera={...camera,selection,facing:directionToFace(camera.eye),focus:directionToFace(camera.focusDirection||camera.eye)};
  let leaves=new Map();for(let face=0;face<6;face++){const n=makeTile(face,0,0,0);leaves.set(n.key,n);}
  // A node's projected priority cannot change during one selection: the camera,
