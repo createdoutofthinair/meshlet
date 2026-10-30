@@ -10,10 +10,13 @@ const RIVER_GRID_COUNT:u32=1681u;
 fn main(@builtin(global_invocation_id) gid:vec3<u32>){
  let index=gid.x;if(index>=frame.counts.y*RIVER_GRID_COUNT){return;}
  let slot=queue[index/RIVER_GRID_COUNT];let sample=index%RIVER_GRID_COUNT;
- let x=sample%RIVER_GRID;let y=sample/RIVER_GRID;let tile=patches[slot];
- // Two terrain cells of apron on each side, sampled at half-cell spacing.
- let u=((f32(x)-4.0)/32.0-.5)*tile.cube.w;let v=((f32(y)-4.0)/32.0-.5)*tile.cube.w;
- let direction=normalize(tile.cube.xyz+tile.axisU.xyz*u+tile.axisV.xyz*v);
- var water=vec2<f32>(0.0);if(frame.hydrology.x>0.0){let s=worldSample(direction);if(hasRivers(s)){let result=riverAt(direction,s);water=vec2<f32>(result.mask,result.discharge);}}
+ var water=vec2<f32>(0.0);
+ if(frame.hydrology.x>0.0){
+  let x=sample%RIVER_GRID;let y=sample/RIVER_GRID;let tile=patches[slot];
+  // Two terrain cells of apron on each side, sampled at half-cell spacing.
+  let u=((f32(x)-4.0)/32.0-.5)*tile.cube.w;let v=((f32(y)-4.0)/32.0-.5)*tile.cube.w;
+  let direction=normalize(tile.cube.xyz+tile.axisU.xyz*u+tile.axisV.xyz*v);
+  let s=worldSample(direction);if(hasRivers(s)){let result=riverAt(direction,s);water=vec2<f32>(result.mask,result.discharge);}
+ }
  riverMasks[slot*RIVER_GRID_COUNT+sample]=water;
 }

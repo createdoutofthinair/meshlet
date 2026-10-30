@@ -1,7 +1,7 @@
 @group(0) @binding(1) var sceneDepth:texture_depth_2d;
 // A filtered far-field approximation: resolve large weather systems and
 // fractional coverage without evaluating subpixel cloud erosion in orbit.
-fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:CloudWeatherTerms)->vec4<f32>{
+fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:CloudWeatherTerms,phase:f32)->vec4<f32>{
  // The same density field and weather drive both representations. Four
  // stratified volume samples approximate its integrated coverage in orbit.
  var density=0.0;
@@ -15,7 +15,6 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
  let day=atmosphereDaylight(elevation);let twilight=atmosphereTwilight(elevation);
  let cool=mix(vec3<f32>(.018,.025,.05),vec3<f32>(.24,.31,.39),day);
  let warm=mix(vec3<f32>(1.0,.92,.80),vec3<f32>(1.0,.32,.12),twilight*.85)*max(.035,day+twilight*.30);
- let phase=.55+.45*pow(max(dot(ray,sun),0.0),6.0);
  let color=mix(cool,warm,clamp((.48+.34*shape)*phase,0.0,1.0));
  return vec4<f32>(color*opacity,opacity);
 }
@@ -54,8 +53,9 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
    let farWeight=smoothstep(50000.0,900000.0,origin.y);
    let weather=weatherField(origin+ray*((start+end)*.5));
    let terms=cloudWeatherTerms(weather);
+   let cosine=max(dot(ray,sun),0.0);let cosine2=cosine*cosine;let phase=.55+.45*cosine2*cosine2*cosine2;
    var distant=vec4<f32>(0.0);
-   if(farWeight>0.0){distant=orbitalCloud(origin+ray*((start+end)*.5),span,ray,sun,terms);}
+   if(farWeight>0.0){distant=orbitalCloud(origin+ray*((start+end)*.5),span,ray,sun,terms,phase);}
    if(farWeight<.999){
    // Long, grazing rays need smaller steps than short vertical views.
    let targetSteps=max(mix(32.0,64.0,smoothstep(12000.0,100000.0,span)),span/2700.0);
@@ -64,7 +64,6 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
    let footprint=max(stepSize,(start+end)*.58/params.view.y);
    let detail=1.0-smoothstep(900.0,7000.0,footprint);
    let orbital=smoothstep(80000.0,600000.0,origin.y);
-   let phase=.55+.45*pow(max(dot(ray,sun),0.0),6.0);
    let extinction=stepSize*mix(.0018,.0009,orbital);
    let shadowOffset=sun*mix(420.0,1600.0,orbital);
    let shadowStrength=mix(1.15,2.0,orbital);
