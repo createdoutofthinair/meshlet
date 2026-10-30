@@ -195,21 +195,28 @@ fn rockHeight(p:vec3<f32>)->f32{
  let broad=(noise(q.xy*6.0)+noise(q.yz*6.0+vec2<f32>(4.2,1.3))+noise(q.zx*6.0+vec2<f32>(2.7,9.1)))/3.0;
  let fine=(noise(q.xy*24.0)+noise(q.yz*24.0+vec2<f32>(7.3,2.9))+noise(q.zx*24.0+vec2<f32>(3.1,4.6)))/3.0;
  let grain=(noise(q.xy*68.0)+noise(q.yz*68.0+vec2<f32>(3.3,6.2))+noise(q.zx*68.0+vec2<f32>(8.2,1.7)))/3.0;
- return broad*.045+fine*.014+grain*.003;
+ // Warped, broken strata add the interlocking chipped ridges visible on
+ // dark wet stone; all bands remain deterministic in object space.
+ let strata=noise(vec2<f32>(q.x*11.0+q.z*4.0,q.y*30.0+q.z*7.0+broad*4.0));
+ let cracks=abs(noise(vec2<f32>(q.x*15.0+q.z*6.0,q.y*13.0-q.z*9.0))-.5);
+ let fissure=1.0-smoothstep(.012,.07,cracks);
+ return broad*.085+fine*.030+grain*.006+strata*.022-fissure*.009;
 }
 fn rockMaterial(p:vec3<f32>,normal:vec3<f32>,light:vec3<f32>)->vec3<f32>{
- let e=.003;let h=rockHeight(p);
+ let e=.0018;let h=rockHeight(p);
  let grad=vec3<f32>(rockHeight(p+vec3<f32>(e,0,0))-h,rockHeight(p+vec3<f32>(0,e,0))-h,rockHeight(p+vec3<f32>(0,0,e))-h)/e;
  let n=normalize(normal-(grad-normal*dot(grad,normal)));
  let mineral=noise(p.xz*5.0+vec2<f32>(params.eye.w*.03,3.0))*.5+noise(p.xy*10.0+vec2<f32>(2.7,params.eye.w*.02))*.5;
- let albedo=mix(vec3<f32>(.095,.105,.10),vec3<f32>(.32,.30,.26),smoothstep(.24,.76,mineral));
+ let albedo=mix(vec3<f32>(.018,.022,.026),vec3<f32>(.095,.105,.11),smoothstep(.24,.76,mineral));
  let view=normalize(params.eye.xyz-p);let halfVec=normalize(light+view);
  let nl=max(dot(n,light),0.0);let nv=max(dot(n,view),.001);let nh=max(dot(n,halfVec),0.0);let vh=max(dot(view,halfVec),0.0);
- let roughness=.76;let a=roughness*roughness;let a2=a*a;let denom=nh*nh*(a2-1.0)+1.0;
+ let roughness=mix(.25,.43,mineral);let a=roughness*roughness;let a2=a*a;let denom=nh*nh*(a2-1.0)+1.0;
  let distribution=a2/(3.14159265*denom*denom);let k=(roughness+1.0)*(roughness+1.0)/8.0;
  let geometry=(nl/(nl*(1.0-k)+k))*(nv/(nv*(1.0-k)+k));let f=.04+.96*pow(1.0-vh,5.0);
  let spec=distribution*geometry*f/max(.004,4.0*nl*nv);
- return albedo*(.24+nl*.76)+vec3<f32>(1.0,.91,.79)*spec*nl;
+ let environment=sky(reflect(-view,n));
+ let envFresnel=.045+.955*pow(1.0-nv,5.0);
+ return albedo*(.30+nl*.78)+vec3<f32>(1.0,.95,.88)*spec*nl+environment*(.10+envFresnel*.24);
 }
 fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let q=abs(p-vec3<f32>(0.0,-.1,0.0))/vec3<f32>(.65,.85,.65);var n=vec3<f32>(0.0,0.0,sign(p.z));
