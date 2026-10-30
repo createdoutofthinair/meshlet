@@ -58,7 +58,9 @@ fn roundedObjectField(p:vec3<f32>)->f32{
   var distance=1e6;
   for(var i=0u;i<4u;i++){
    let scale=.43+f32(i%3u)*.035;let local=(p-rockCenter(i))/scale;
-   distance=min(distance,rockField(local,params.eye.w+f32(i)*71.0)*scale);
+   // Outside this conservative sphere the bound is cheaper than noise.
+   let bound=(length(local-vec3<f32>(0.0,-.08,0.0))-1.4)*scale*.27;
+   if(bound<distance){if(bound>0.0){distance=bound;}else{distance=min(distance,rockField(local,params.eye.w+f32(i)*71.0)*scale);}}
   }
   return distance;
  }
@@ -161,6 +163,22 @@ fn cubeHit(origin:vec3<f32>,direction:vec3<f32>)->f32{
 // March only inside a conservative bounding sphere; all optical rays see
 // the same surface, including reflection and refraction below the water.
 fn roundedObjectHit(origin:vec3<f32>,direction:vec3<f32>)->f32{
+ // Trace each small rock only within its own bounding sphere, rather than
+ // evaluating all four fields over the whole group on every ray step.
+ if(params.viewport.z>3.5){
+  var nearest=1e6;
+  for(var rock=0u;rock<4u;rock++){
+   let scale=.43+f32(rock%3u)*.035;let center=rockCenter(rock)+vec3<f32>(0.0,-.08*scale,0.0);
+   let q=origin-center;let b=dot(q,direction);let radius=scale*1.4;let disc=b*b-dot(q,q)+radius*radius;
+   if(disc<0.0){continue;}let far= -b+sqrt(disc);var t=max(.001,-b-sqrt(disc));
+   for(var step=0u;step<100u;step++){
+    if(t>far || t>=nearest){break;}
+    let d=rockField((origin+direction*t-rockCenter(rock))/scale,params.eye.w+f32(rock)*71.0)*scale;
+    if(d<.001){nearest=t;break;}t+=max(.001,d*.9);
+   }
+  }
+  return select(-1.0,nearest,nearest<1e5);
+ }
  let center=vec3<f32>(0.0,-.05,0.0);let q=origin-center;let b=dot(q,direction);let radius=select(1.5,2.2,params.viewport.z>3.5);let disc=b*b-dot(q,q)+radius*radius;
  if(disc<0.0){return -1.0;}let far= -b+sqrt(disc);var t=max(.001,-b-sqrt(disc));
  for(var i=0u;i<128u;i++){if(t>far){break;}let d=roundedObjectField(origin+direction*t);if(d<.001){return t;}t+=max(.001,d*.8);}
@@ -198,13 +216,18 @@ fn cubeFoamDrain(position:vec2<f32>,faceNormal:vec2<f32>,height:f32,faceCoord:f3
    let seed=hash(vec2<f32>(cell+variant*37.0,18.7+f32(i)*.9));let shift=.18+.64*seed;
    let facing=smoothstep(.05,.55,dot(faceNormal,delta)/max(.001,dist));let near=1.0-smoothstep(1.5,4.0,dist);
    let surge=(.25+.08*seed)*smoothstep(0.0,.38,elapsed);
-   let drainage=max(0.0,elapsed-.26)*(.15+.07*seed);
+   let drainage=max(0.0,elapsed-.20)*(.24+.10*seed);
    let head=.03+surge-drainage;
    let waviness=(noise(vec2<f32>(height*14.0,cell+seed))-.5)*.20;
    let width=.20+.16*seed;let across=1.0-smoothstep(width,width+.16,abs(local-shift+waviness));
-   let length=.08+.12*clamp(elapsed,0.0,1.0);let vertical=exp(-pow((height-head)/length,2.0));
+   let length=.07+.07*clamp(elapsed,0.0,1.0);
+   let movingHead=exp(-pow((height-head)/length,2.0));
+   // A trailing film follows the moving front instead of fading in place.
+   let trail=smoothstep(head-.02,head+.05,height)*(1.0-smoothstep(head+.14,head+.34,height));
+   let vertical=max(movingHead,trail*.50);
    let lowerEdge= -.11+.07*noise(vec2<f32>(faceCoord*11.0+variant*13.0,seed*5.0));
-   let fade=smoothstep(0.0,.15,elapsed)*(1.0-smoothstep(2.8,4.8,elapsed))*smoothstep(lowerEdge-.035,lowerEdge+.035,height);
+   let bottom=select(smoothstep(lowerEdge-.035,lowerEdge+.035,height),1.0,params.viewport.z>2.5);
+   let fade=smoothstep(0.0,.15,elapsed)*(1.0-smoothstep(2.8,4.8,elapsed))*bottom;
    result=max(result,across*vertical*fade*facing*near);
   }
  }
@@ -269,14 +292,15 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let band=smoothstep(lowerEdge-.035,lowerEdge+.035,height)*(1.0-smoothstep(.12,.36,height));
  let breakup=noise(vec2<f32>(faceCoord*18.0,p.y*18.0));
  let drain=cubeFoamDrain(p.xz,n.xz,height,faceCoord,time);
- let film=clamp((band*.50*response+drain*.80)*side,0.0,.90);
+ let bandStrength=select(.50,.20,params.viewport.z>2.5);
+ let film=clamp((band*bandStrength*response+drain*1.05)*side,0.0,.90);
  let view=normalize(params.eye.xyz-p);let fresnelWet=.04+.96*pow(1.0-abs(dot(n,view)),5.0);
  let halfVector=normalize(light+view);let highlight=pow(max(dot(n,halfVector),0.0),72.0);
  let reflected=sky(reflect(-view,n));
  color=color*(1.0-film*.30)+reflected*film*(.12+.30*fresnelWet)+vec3<f32>(.8,.9,.87)*film*highlight*.65;
  // Use the same breakup and optical response as the impact foam on water.
  let foamUv=vec2<f32>(faceCoord,height)*8.0;
- let foam=max(band*response,drain*.85)*smoothstep(.44,.73,foamBreakup(foamUv))*.65*side;
+ let foam=max(band*response*select(1.0,.45,params.viewport.z>2.5),drain)*smoothstep(.44,.73,foamBreakup(foamUv))*.65*side;
  let tintedFoam=mix(color,foamColor(n),.52);
  return mix(color,tintedFoam,foam);
 }
