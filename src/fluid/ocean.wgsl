@@ -163,12 +163,12 @@ fn cubeFoamDrain(position:vec2<f32>,faceNormal:vec2<f32>,height:f32,faceCoord:f3
    let grid=(faceCoord+2.0)*7.0+(variant-.5)*1.6;let cell=floor(grid);let local=fract(grid);
    let seed=hash(vec2<f32>(cell+variant*37.0,18.7+f32(i)*.9));let shift=.18+.64*seed;
    let facing=smoothstep(.05,.55,dot(faceNormal,delta)/max(.001,dist));let near=1.0-smoothstep(1.5,4.0,dist);
-   let surge=(.20+.06*seed)*smoothstep(0.0,.38,elapsed);
+   let surge=(.25+.08*seed)*smoothstep(0.0,.38,elapsed);
    let drainage=max(0.0,elapsed-.42)*(.045+.022*seed);
    let head=.03+surge-drainage;
    let waviness=(noise(vec2<f32>(height*14.0,cell+seed))-.5)*.20;
-   let width=.16+.14*seed;let across=1.0-smoothstep(width,width+.16,abs(local-shift+waviness));
-   let length=.06+.10*clamp(elapsed,0.0,1.0);let vertical=exp(-pow((height-head)/length,2.0));
+   let width=.20+.16*seed;let across=1.0-smoothstep(width,width+.16,abs(local-shift+waviness));
+   let length=.08+.12*clamp(elapsed,0.0,1.0);let vertical=exp(-pow((height-head)/length,2.0));
    let fade=smoothstep(0.0,.15,elapsed)*(1.0-smoothstep(2.8,4.8,elapsed))*smoothstep(-.03,.025,height);
    result=max(result,across*vertical*fade*facing*near);
   }
@@ -197,18 +197,18 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  // wave height so adhered water does not stretch and bounce with ripples.
  let height=p.y;
  let faceCoord=select(select(p.x,p.z,abs(n.x)>.5),atan2(p.z,p.x)*.45,params.viewport.z>.5);let response=cubeImpactWash(p.xz,n.xz,time);
- let side=select(select(1.0,0.0,abs(n.y)>.5),smoothstep(.15,.55,length(n.xz)),params.viewport.z>.5);let band=smoothstep(-.025,.02,height)*(1.0-smoothstep(.10,.30,height));
+ let side=select(select(1.0,0.0,abs(n.y)>.5),smoothstep(.15,.55,length(n.xz)),params.viewport.z>.5);let band=smoothstep(-.025,.02,height)*(1.0-smoothstep(.12,.36,height));
  let breakup=noise(vec2<f32>(faceCoord*18.0,p.y*18.0));
  let drain=cubeFoamDrain(p.xz,n.xz,height,faceCoord,time);
- let film=clamp((band*.30*response+drain*.53)*side,0.0,.68);
+ let film=clamp((band*.50*response+drain*.80)*side,0.0,.90);
  let view=normalize(params.eye.xyz-p);let fresnelWet=.04+.96*pow(1.0-abs(dot(n,view)),5.0);
  let halfVector=normalize(light+view);let highlight=pow(max(dot(n,halfVector),0.0),72.0);
  let reflected=sky(reflect(-view,n));
- color=color*(1.0-film*.24)+reflected*film*(.08+.24*fresnelWet)+vec3<f32>(.8,.9,.87)*film*highlight*.45;
+ color=color*(1.0-film*.30)+reflected*film*(.12+.30*fresnelWet)+vec3<f32>(.8,.9,.87)*film*highlight*.65;
  // Use the same breakup and optical response as the impact foam on water.
  let foamUv=vec2<f32>(faceCoord,height)*8.0;
- let foam=max(band*response,drain*.85)*smoothstep(.48,.77,foamBreakup(foamUv))*.30*side;
- let tintedFoam=mix(color,foamColor(n),.32);
+ let foam=max(band*response,drain*.85)*smoothstep(.44,.73,foamBreakup(foamUv))*.65*side;
+ let tintedFoam=mix(color,foamColor(n),.52);
  return mix(color,tintedFoam,foam);
 }
 // Thin expanding crown surface, expressed as a 3D implicit sheet.
