@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#080d13"><title>River Lab — Meshlet Engine</title><link rel="stylesheet" href="./src/ui/style.css"><link rel="stylesheet" href="./src/river/style.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#080d13"><title>River Lab — Meshlet Engine</title><link rel="stylesheet" href="./src/ui/style.css"><link rel="stylesheet" href="./src/river/style.css"><link rel="stylesheet" href="./src/ui/properties.css"></head>
 <body class="river-lab">
 <div class="app">
  <header class="topbar">
@@ -17,7 +17,7 @@
    <div id="loading" class="loading"><div class="spinner"></div><strong id="loading-title">Finding a river</strong><span>Generating drainage and building the reach on the GPU</span></div>
    <div id="error" class="error" hidden><strong>Unable to start River Lab</strong><p id="error-message"></p><a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API#browser_compatibility" target="_blank" rel="noopener">Check WebGPU browser support ↗</a></div>
   </section>
-  <aside class="panel river-panel">
+  <aside class="panel river-panel properties-panel">
    <div class="panel-head"><div><span class="kicker">PROCEDURAL WATER</span><h2>River lab</h2></div><span class="live"><span></span> LIVE</span></div>
    <p class="intro">Inspect a selected planet drainage segment as a locally rebuilt reach. The water follows its upstream-to-downstream direction.</p>
    <div class="section-title"><span>RIVER SOURCE</span><span>01 / 04</span></div>
@@ -26,20 +26,20 @@
    <div class="reach-stats"><div><span>CHANNEL WIDTH</span><strong id="width-stat">—</strong></div><div><span>REACH SLOPE</span><strong id="slope-stat">—</strong></div><div><span>RUNOFF INDEX</span><strong id="flow-stat">—</strong></div><div><span>FRAME RATE</span><strong id="fps">—</strong></div></div>
    <p class="metric-note">Slope is the modeled water-surface grade. Runoff is an index from the planet drainage field, not a measured discharge.</p>
    <div class="section-title"><span>WATER SURFACE</span><span>02 / 04</span></div>
-   <label class="river-slider"><span>FLOW SPEED <strong id="speed-value">1.00 m/s</strong></span><input id="speed" type="range" min="0" max="250" value="100"></label>
-   <label class="river-slider"><span>WATER CLARITY <strong id="clarity-value">1.30×</strong></span><input id="clarity" type="range" min="20" max="300" value="130"></label>
-   <label class="river-slider"><span>WAVE STRENGTH <strong id="ripples-value">0.80×</strong></span><input id="ripples" type="range" min="0" max="180" value="80"></label>
-   <label class="river-slider"><span>SURFACE FOAM <strong id="foam-value">0.45×</strong></span><input id="foam" type="range" min="0" max="150" value="45"></label>
+   <label class="river-slider property-slider"><span>FLOW SPEED <strong id="speed-value">1.00 m/s</strong></span><input id="speed" type="range" min="0" max="250" value="100"></label>
+   <label class="river-slider property-slider"><span>WATER CLARITY <strong id="clarity-value">1.30×</strong></span><input id="clarity" type="range" min="20" max="300" value="130"></label>
+   <label class="river-slider property-slider"><span>WAVE STRENGTH <strong id="ripples-value">0.80×</strong></span><input id="ripples" type="range" min="0" max="180" value="80"></label>
+   <label class="river-slider property-slider"><span>SURFACE FOAM <strong id="foam-value">0.45×</strong></span><input id="foam" type="range" min="0" max="150" value="45"></label>
    <div class="river-toggles"><label><input id="waterfall" type="checkbox"><span>Mountain waterfall</span></label></div>
-   <label class="river-slider"><span>WATERFALL DROP <strong id="drop-value">35.0 m</strong></span><input id="drop" type="range" min="100" max="800" value="350"></label>
-   <label class="river-slider"><span>IMPACT SPRAY <strong id="spray-value">0.80×</strong></span><input id="spray" type="range" min="0" max="150" value="80"></label>
-   <label class="river-select"><span>REFLECTION QUALITY</span><select id="reflection-quality"><option value="0.5">BALANCED · HALF RESOLUTION</option><option value="1">HIGH · FULL RESOLUTION</option></select></label>
+   <label class="river-slider property-slider"><span>WATERFALL DROP <strong id="drop-value">35.0 m</strong></span><input id="drop" type="range" min="100" max="800" value="350"></label>
+   <label class="river-slider property-slider"><span>IMPACT SPRAY <strong id="spray-value">0.80×</strong></span><input id="spray" type="range" min="0" max="150" value="80"></label>
+   <label class="river-select property-field"><span>REFLECTION QUALITY</span><select id="reflection-quality"><option value="0.5">BALANCED · HALF RESOLUTION</option><option value="1">HIGH · FULL RESOLUTION</option></select></label>
    <div class="river-toggles"><label><input id="flow-arrows" type="checkbox"><span>Show downstream flow arrows</span></label><label><input id="paused" type="checkbox"><span>Pause water animation</span></label></div>
    <div class="section-title"><span>CHANNEL &amp; BANKS</span><span>03 / 04</span></div>
-   <label class="river-slider"><span>CHANNEL WIDTH <strong id="channel-value">1.00×</strong></span><input id="channel" type="range" min="50" max="150" value="100"></label>
-   <label class="river-slider"><span>WATER DEPTH <strong id="depth-value">4.0 m</strong></span><input id="depth" type="range" min="1" max="120" value="40"></label>
-   <label class="river-slider"><span>BANK HEIGHT <strong id="bank-value">12.0 m</strong></span><input id="bank" type="range" min="0" max="300" value="120"></label>
-   <label class="river-slider"><span>GROUND ROUGHNESS <strong id="roughness-value">0.80×</strong></span><input id="roughness" type="range" min="0" max="180" value="80"></label>
+   <label class="river-slider property-slider"><span>CHANNEL WIDTH <strong id="channel-value">1.00×</strong></span><input id="channel" type="range" min="50" max="150" value="100"></label>
+   <label class="river-slider property-slider"><span>WATER DEPTH <strong id="depth-value">4.0 m</strong></span><input id="depth" type="range" min="1" max="120" value="40"></label>
+   <label class="river-slider property-slider"><span>BANK HEIGHT <strong id="bank-value">12.0 m</strong></span><input id="bank" type="range" min="0" max="300" value="120"></label>
+   <label class="river-slider property-slider"><span>GROUND ROUGHNESS <strong id="roughness-value">0.80×</strong></span><input id="roughness" type="range" min="0" max="180" value="80"></label>
    <div class="section-title"><span>VIEW &amp; DIAGNOSTICS</span><span>04 / 04</span></div>
    <div class="river-actions"><button id="view-overview" type="button">OVERVIEW</button><button id="view-low" type="button">LOW VIEW</button><button id="view-top" type="button">TOP VIEW</button></div>
    <p class="metric-note">This is a local visualization, not a fluid-dynamics simulation. Meanders, depth, material and banks are procedural refinements around the selected graph edge.</p>

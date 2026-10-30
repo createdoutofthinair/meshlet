@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#080d13"><title>Planet Lab — Meshlet Engine</title><link rel="stylesheet" href="./src/ui/style.css"><link rel="stylesheet" href="./src/planet/style.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#080d13"><title>Planet Lab — Meshlet Engine</title><link rel="stylesheet" href="./src/ui/style.css"><link rel="stylesheet" href="./src/planet/style.css"><link rel="stylesheet" href="./src/ui/properties.css"></head>
 <body class="planet-lab">
 <div class="app">
  <header class="topbar">
@@ -57,7 +57,7 @@
    <div id="loading" class="loading"><div class="spinner"></div><strong id="loading-title">Creating your world</strong><span id="loading-detail">Compiling shaders and generating terrain</span></div>
    <div id="error" class="error" hidden><strong>Unable to start the planet lab</strong><p id="error-message"></p><a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API#browser_compatibility" target="_blank" rel="noopener">Check WebGPU browser support ↗</a></div>
   </section>
-  <aside class="panel planet-panel">
+  <aside class="panel planet-panel properties-panel">
    <div class="panel-head"><div><span class="kicker">PROCEDURAL PLANET</span><h2>World controls</h2></div><span class="live"><span></span> LIVE</span></div>
    <div class="planet-tabs" role="tablist" aria-label="Planet controls">
     <button type="button" role="tab" id="tab-world" aria-controls="panel-world" aria-selected="true">WORLD</button><button type="button" role="tab" id="tab-atmosphere" aria-controls="panel-atmosphere" aria-selected="false" tabindex="-1">ATMOSPHERE</button><button type="button" role="tab" id="tab-clouds" aria-controls="panel-clouds" aria-selected="false" tabindex="-1">CLOUDS</button><button type="button" role="tab" id="tab-performance" aria-controls="panel-performance" aria-selected="false" tabindex="-1">PERFORMANCE</button>
@@ -69,40 +69,40 @@
    <div class="planet-actions"><button id="orbit">ORBIT</button><button id="highlands" class="accent">HIGHLANDS</button><button id="find-valleys">VALLEYS</button><button id="find-rivers">RIVERS</button><button id="fly" class="walk-start" type="button">FLY OVER SURFACE</button><button id="walk" class="walk-start" type="button">WALK ON SURFACE</button></div>
    <p id="walk-help" class="walk-help" aria-live="polite" hidden></p>
    <div class="section-title"><span>CAMERA &amp; TERRAIN</span><span>02 / 04</span></div>
-   <label class="planet-field"><span>VIEW</span><select id="mode"><option value="orbit">Orbit / top-down</option><option value="flyover">Flyover / horizon</option><option value="flight">Space flight / land</option><option value="walk">Walk / surface</option></select></label>
-   <div id="flight-settings" hidden><label class="planet-slider"><span>FLIGHT SPEED <strong id="flight-speed-value">20 m/s</strong></span><input id="flight-speed" type="range" min="5" max="200" step="5" value="20"></label><p class="metric-note">From orbit hold W to approach the planet. W/S forward and back · A/D strafe · Q/E down and up · Shift boosts · Click the view to use keyboard and mouse look.</p></div>
-   <label class="planet-slider"><span>ALTITUDE ABOVE SURFACE <strong id="altitude">—</strong></span><input id="altitude-range" type="range" min="0" max="1000" value="880"></label>
-   <label class="planet-slider"><span>RELIEF <strong id="relief-value">1.00×</strong></span><input id="relief" type="range" min="50" max="160" value="100"></label>
-   <label class="planet-slider"><span>VALLEY DETAIL <strong id="valleys-value">1.00×</strong></span><input id="valleys" type="range" min="0" max="160" value="100"></label>
-   <label class="planet-slider"><span>EROSION <strong id="erosion-value">1.00×</strong></span><input id="erosion" type="range" min="0" max="160" value="100"></label>
+   <label class="planet-field property-field"><span>VIEW</span><select id="mode"><option value="orbit">Orbit / top-down</option><option value="flyover">Flyover / horizon</option><option value="flight">Space flight / land</option><option value="walk">Walk / surface</option></select></label>
+   <div id="flight-settings" hidden><label class="planet-slider property-slider"><span>FLIGHT SPEED <strong id="flight-speed-value">20 m/s</strong></span><input id="flight-speed" type="range" min="5" max="200" step="5" value="20"></label><p class="metric-note">From orbit hold W to approach the planet. W/S forward and back · A/D strafe · Q/E down and up · Shift boosts · Click the view to use keyboard and mouse look.</p></div>
+   <label class="planet-slider property-slider"><span>ALTITUDE ABOVE SURFACE <strong id="altitude">—</strong></span><input id="altitude-range" type="range" min="0" max="1000" value="880"></label>
+   <label class="planet-slider property-slider"><span>RELIEF <strong id="relief-value">1.00×</strong></span><input id="relief" type="range" min="50" max="160" value="100"></label>
+   <label class="planet-slider property-slider"><span>VALLEY DETAIL <strong id="valleys-value">1.00×</strong></span><input id="valleys" type="range" min="0" max="160" value="100"></label>
+   <label class="planet-slider property-slider"><span>EROSION <strong id="erosion-value">1.00×</strong></span><input id="erosion" type="range" min="0" max="160" value="100"></label>
    <div class="debug-toggles planet-toggles"><label><input id="ocean" type="checkbox" checked><span>Flat ocean surface</span></label><label><input id="rivers" type="checkbox" checked><span>Rivers &amp; lakes</span></label><label><input id="regional" type="checkbox" checked><span>Regional drainage detail</span></label><label><input id="biomes" type="checkbox" checked><span>Climate colors</span></label></div>
    </div>
    <div id="panel-atmosphere" role="tabpanel" aria-labelledby="tab-atmosphere" hidden>
     <div class="section-title"><span>SUN POSITION</span><span>LIGHTING</span></div>
     <div class="debug-toggles planet-toggles"><label><input id="sun-follow" type="checkbox" checked><span>Sun follows the view</span></label></div>
-    <label class="planet-slider"><span>SUN AZIMUTH <strong id="sun-azimuth-value">45°</strong></span><input id="sun-azimuth" type="range" min="-180" max="180" value="45"></label>
-    <label class="planet-slider"><span>SUN ELEVATION <strong id="sun-elevation-value">30°</strong></span><input id="sun-elevation" type="range" min="-30" max="90" value="30"></label>
+    <label class="planet-slider property-slider"><span>SUN AZIMUTH <strong id="sun-azimuth-value">45°</strong></span><input id="sun-azimuth" type="range" min="-180" max="180" value="45"></label>
+    <label class="planet-slider property-slider"><span>SUN ELEVATION <strong id="sun-elevation-value">30°</strong></span><input id="sun-elevation" type="range" min="-30" max="90" value="30"></label>
     <p class="metric-note">Changing either angle sets the sun relative to your current location and turns off follow view. Negative elevation creates twilight and night.</p>
     <div class="section-title"><span>ATMOSPHERIC SCATTERING</span><span>APPROXIMATE</span></div>
-    <label class="planet-slider"><span>SKY INTENSITY <strong id="sky-strength-value">1.00×</strong></span><input id="sky-strength" type="range" min="0" max="200" value="100"></label>
-    <label class="planet-slider"><span>MIE / SUN HAZE <strong id="mie-strength-value">1.00×</strong></span><input id="mie-strength" type="range" min="0" max="300" value="100"></label>
-    <label class="planet-slider"><span>PLANET HALO <strong id="halo-strength-value">1.00×</strong></span><input id="halo-strength" type="range" min="0" max="300" value="100"></label>
+    <label class="planet-slider property-slider"><span>SKY INTENSITY <strong id="sky-strength-value">1.00×</strong></span><input id="sky-strength" type="range" min="0" max="200" value="100"></label>
+    <label class="planet-slider property-slider"><span>MIE / SUN HAZE <strong id="mie-strength-value">1.00×</strong></span><input id="mie-strength" type="range" min="0" max="300" value="100"></label>
+    <label class="planet-slider property-slider"><span>PLANET HALO <strong id="halo-strength-value">1.00×</strong></span><input id="halo-strength" type="range" min="0" max="300" value="100"></label>
     <p class="metric-note">These are artistic controls over the current lightweight scattering approximation.</p>
    </div>
    <div id="panel-clouds" role="tabpanel" aria-labelledby="tab-clouds" hidden>
     <div class="section-title"><span>CLOUD LAYER</span><span>VOLUMETRIC</span></div>
     <div class="debug-toggles planet-toggles"><label><input id="cloud-enabled" type="checkbox" checked><span>Show clouds</span></label></div>
-    <label class="planet-slider"><span>CLOUD COVERAGE <strong id="cloud-coverage-value">48%</strong></span><input id="cloud-coverage" type="range" min="0" max="100" value="48"></label>
-    <label class="planet-slider"><span>CLOUD SIZE <strong id="cloud-size-value">2.00×</strong></span><input id="cloud-size" type="range" min="50" max="500" value="200"></label>
-    <label class="planet-slider"><span>CLOUD DENSITY <strong id="cloud-density-value">1.00×</strong></span><input id="cloud-density" type="range" min="0" max="200" value="100"></label>
-    <label class="planet-slider"><span>WIND SPEED <strong id="cloud-speed-value">8 m/s</strong></span><input id="cloud-speed" type="range" min="0" max="50" value="8"></label>
-    <label class="planet-field"><span>CLOUD RAY-MARCH QUALITY</span><select id="cloud-quality"><option value="0.5">Fast · fewer samples</option><option value="0.8" selected>Balanced</option><option value="1">High · original sample count</option></select></label>
+    <label class="planet-slider property-slider"><span>CLOUD COVERAGE <strong id="cloud-coverage-value">48%</strong></span><input id="cloud-coverage" type="range" min="0" max="100" value="48"></label>
+    <label class="planet-slider property-slider"><span>CLOUD SIZE <strong id="cloud-size-value">2.00×</strong></span><input id="cloud-size" type="range" min="50" max="500" value="200"></label>
+    <label class="planet-slider property-slider"><span>CLOUD DENSITY <strong id="cloud-density-value">1.00×</strong></span><input id="cloud-density" type="range" min="0" max="200" value="100"></label>
+    <label class="planet-slider property-slider"><span>WIND SPEED <strong id="cloud-speed-value">8 m/s</strong></span><input id="cloud-speed" type="range" min="0" max="50" value="8"></label>
+    <label class="planet-field property-field"><span>CLOUD RAY-MARCH QUALITY</span><select id="cloud-quality"><option value="0.5">Fast · fewer samples</option><option value="0.8" selected>Balanced</option><option value="1">High · original sample count</option></select></label>
     <p class="metric-note">Clouds use the same seeded spherical weather and volume as Atmosphere Lab. Coverage and density are independent.</p>
    </div>
    <div id="panel-performance" role="tabpanel" aria-labelledby="tab-performance" hidden>
    <div class="section-title"><span>DETAIL &amp; DEBUG</span><span>03 / 04</span></div>
-   <label class="planet-field"><span>PATCH BUDGET</span><select id="quality"><option value="120">Fast · 120 patches</option><option value="240">Balanced · 240 patches</option><option value="384" selected>High · 384 patches</option><option value="512">Extreme · 512 patches</option></select></label>
-   <label class="planet-field"><span>RENDER SCALE</span><select id="render-scale"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></label>
+   <label class="planet-field property-field"><span>PATCH BUDGET</span><select id="quality"><option value="120">Fast · 120 patches</option><option value="240">Balanced · 240 patches</option><option value="384" selected>High · 384 patches</option><option value="512">Extreme · 512 patches</option></select></label>
+   <label class="planet-field property-field"><span>RENDER SCALE</span><select id="render-scale"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></label>
    <div class="debug-toggles planet-toggles"><label><input id="culling" type="checkbox" checked><span>GPU meshlet frustum culling</span></label></div>
    <button id="inspect-open-panel" class="inspector-panel-button" type="button" aria-controls="planet-inspector" aria-expanded="false">OPEN TERRAIN INSPECTOR <span>↗</span></button>
    <p class="metric-note">Walking keeps your selected budget. The inspector shows LODs, patch and meshlet overlays, and measurement history.</p>

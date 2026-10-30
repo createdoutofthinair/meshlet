@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#080d13">
   <title>Meshlet — WebGPU Engine Lab</title>
   <link rel="stylesheet" href="./src/ui/style.css">
-</head>
+<link rel="stylesheet" href="./src/ui/properties.css"></head>
 <body>
   <div class="app">
     <header class="topbar">
@@ -26,7 +26,7 @@
         <div id="loading" class="loading"><div class="spinner"></div><strong id="loading-title">Waking up the GPU</strong><span id="loading-detail">Preparing the engine and geometry</span></div>
         <div id="error" class="error" hidden><strong>Unable to start the engine</strong><p id="error-message"></p><a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API#browser_compatibility" target="_blank" rel="noopener">Check WebGPU browser support ↗</a></div>
       </section>
-      <aside class="panel">
+      <aside class="panel properties-panel">
         <div class="panel-head"><div><span class="kicker">LIVE TELEMETRY</span><h2>Performance</h2></div><span class="live"><span></span> LIVE</span></div>
         <div class="frame-metrics"><div><span class="metric-label">FRAME RATE</span><div class="metric-large"><span id="fps">—</span><small>FPS</small></div></div><div class="frame-time"><span class="metric-label">FRAME TIME</span><strong id="frame-ms">—</strong><small>ms</small></div></div>
         <div class="bar"><span id="fps-bar"></span></div><p class="metric-note">Frame rate can be limited by display refresh.</p>
