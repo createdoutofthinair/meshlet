@@ -17,7 +17,7 @@ function fakeRenderer(){
    if(pipeline?.kind==='cull')ops.push(()=>{new Uint32Array(r.indirect.data)[1]=1;});
   },end(){}};
   const render={setPipeline(){},setBindGroup(){},drawIndirect(){},draw(){},end(){}};
-  return {beginComputePass:()=>compute,beginRenderPass:descriptor=>{renderPasses.push(descriptor);return render;},copyBufferToBuffer(a,ao,b,bo,size){ops.push(()=>new Uint8Array(b.data,bo,size).set(new Uint8Array(a.data,ao,size)));},finish(){return ops;}};
+  return {beginComputePass:()=>compute,beginRenderPass:descriptor=>{renderPasses.push(descriptor);return render;},copyBufferToBuffer(a,ao,b,bo,size){ops.push(()=>new Uint8Array(b.data,bo,size).set(new Uint8Array(a.data,ao,size)));},resolveQuerySet(){},finish(){return ops;}};
  };
  device.queue={writeBuffer(target,offset,source){const bytes=source instanceof ArrayBuffer?new Uint8Array(source):new Uint8Array(source.buffer,source.byteOffset,source.byteLength);new Uint8Array(target.data,offset,bytes.length).set(bytes);},submit(commands){for(const command of commands)for(const op of command)op();},onSubmittedWorkDone:async()=>{}};
  const canvas={width:960,height:600},context={getCurrentTexture:()=>({createView:()=>({})})};
@@ -70,4 +70,12 @@ test('an above-target merge cannot indefinitely prevent a requested refinement',
  assert.ok(r.stage);r.stage.uncovered=false;r.stage.hasRefinement=true;let sawWaiting=false;
  for(let i=0;i<100&&r.stage;i++){r.frame(20150+i*250);await flush();sawWaiting||=r.transition.waiting;}
  assert.ok(sawWaiting);assert.equal(r.stage,null);assert.equal(r.transition.overTarget,true);
+});
+
+
+test('GPU render timing covers the cloud pass and disabled clouds retain sky',async()=>{
+ const {r,renderPasses}=fakeRenderer();r.timing=true;r.queries={};r.resolve=r.device.createBuffer({size:32});r.cloudPipe={};r.cloudBind={};r.cloudUniform=r.device.createBuffer({size:176});r.clouds=false;r.lastSample=0;
+ r.frame(1000);await flush();assert.equal(renderPasses.length,3);
+ assert.equal(renderPasses[0].timestampWrites.beginningOfPassWriteIndex,2);assert.equal(renderPasses[1].timestampWrites,undefined);assert.equal(renderPasses[2].timestampWrites.endOfPassWriteIndex,3);
+ assert.equal(new Float32Array(r.cloudUniform.data)[7],0);
 });

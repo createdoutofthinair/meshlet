@@ -90,6 +90,7 @@
     <label class="planet-slider"><span>CLOUD COVERAGE <strong id="cloud-coverage-value">72%</strong></span><input id="cloud-coverage" type="range" min="0" max="100" value="72"></label>
     <label class="planet-slider"><span>CLOUD DENSITY <strong id="cloud-density-value">1.00×</strong></span><input id="cloud-density" type="range" min="0" max="200" value="100"></label>
     <label class="planet-slider"><span>WIND SPEED <strong id="cloud-speed-value">8 m/s</strong></span><input id="cloud-speed" type="range" min="0" max="50" value="8"></label>
+    <label class="planet-field"><span>CLOUD RAY-MARCH QUALITY</span><select id="cloud-quality"><option value="0.5">Fast · fewer samples</option><option value="0.8" selected>Balanced</option><option value="1">High · original sample count</option></select></label>
     <p class="metric-note">Clouds use the same seeded spherical weather and volume as Atmosphere Lab. Coverage and density are independent.</p>
    </div>
    <div id="panel-performance" role="tabpanel" aria-labelledby="tab-performance" hidden>
@@ -101,7 +102,7 @@
    <p class="metric-note">Walking keeps your selected budget. The inspector shows LODs, patch and meshlet overlays, and measurement history.</p>
    <div class="section-title"><span>LIVE PERFORMANCE</span><span>04 / 04</span></div>
    <div class="planet-stats"><div><span>FRAME RATE</span><strong><b id="fps">—</b> <small>FPS</small></strong></div><div><span>FRAME TIME</span><strong><b id="frame-ms">—</b> <small>ms</small></strong></div></div>
-   <div class="stat-row"><span>Visible patches</span><strong id="patches">—</strong></div><div class="stat-row"><span>Quadtree levels</span><strong id="depth">—</strong></div><div class="stat-row"><span>Visible meshlets</span><strong id="meshlets">—</strong></div><div class="stat-row"><span>Submitted triangles</span><strong id="triangles">—</strong></div><div class="stat-row"><span>CPU patch selection</span><strong id="selection-ms">—</strong></div><div class="stat-row"><span id="compute-label">GPU visibility</span><strong id="compute-ms">—</strong></div><div class="stat-row"><span>GPU rendering</span><strong id="render-ms">—</strong></div>
+   <div class="stat-row"><span>Visible patches</span><strong id="patches">—</strong></div><div class="stat-row"><span>Quadtree levels</span><strong id="depth">—</strong></div><div class="stat-row"><span>Visible meshlets</span><strong id="meshlets">—</strong></div><div class="stat-row"><span>Submitted triangles</span><strong id="triangles">—</strong></div><div class="stat-row"><span>CPU patch selection</span><strong id="selection-ms">—</strong></div><div class="stat-row"><span id="compute-label">GPU visibility</span><strong id="compute-ms">—</strong></div><div class="stat-row"><span>GPU rendering + clouds</span><strong id="render-ms">—</strong></div>
    <div class="stat-row"><span>Last LOD difference</span><strong id="transition-error">—</strong></div><div class="stat-row"><span>LOD preparation</span><strong id="transition-status">—</strong></div>
    <p class="metric-note" id="timing-note">Checking GPU timestamp support…</p>
    </div>

@@ -3,7 +3,7 @@ import {InspectorHistory,HISTORY_MS,levelCounts,graphCeiling} from './inspector-
 const LEVEL_COLORS=['#1fa8cc','#3bc07a','#d9ab33','#e65c33','#ba45ad','#5c5ee6'];
 const MODES={
  frame:{unit:'ms',minimum:20,reference:16.67,series:[['frameMs','Frame avg','#aeeec0'],['framePeakMs','Frame peak','#f4c579'],['cpuMs','CPU submit','#68c6dc']],note:'Frame average and peak use 250 ms of frames; CPU is submission time. Frame time includes display pacing.'},
- gpu:{unit:'ms',minimum:5,series:[['gpuComputeMs','Compute','#68c6dc'],['gpuRenderMs','Render','#efa978']],note:'GPU timings are sampled asynchronously about twice per second and may include patch generation.'},
+ gpu:{unit:'ms',minimum:5,series:[['gpuComputeMs','Compute','#68c6dc'],['gpuRenderMs','Render','#efa978']],note:'GPU render time includes terrain, ocean and clouds; compute may include patch generation.'},
  lod:{unit:'px',minimum:1,reference:.5,cap:64,series:[['lodError','Last difference','#c19aee']],note:'The last measured difference remains until another transition is measured. Dashed line: 0.5 px target; values above 64 px are clipped on the graph.'},
  patches:{unit:'patches',minimum:10,series:[['patches','Active patches','#aeeec0']],note:'Selected terrain patches; GPU meshlet culling can make fewer meshlets visible.'},
  meshlets:{unit:'meshlets',minimum:100,series:[['meshlets','Visible meshlets','#68c6dc']],note:'Visible meshlets are read back asynchronously about twice per second.'}

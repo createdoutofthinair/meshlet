@@ -12,22 +12,23 @@
  if(params.sun.w>0.5 && ground.x>0.0){limit=min(limit,ground.x);}
  let outer=sphereInterval(origin.y,ray,8000.0);let inner=sphereInterval(origin.y,ray,1500.0);
  var transmission=1.0;var light=vec3<f32>(0.0);
- if(outer.y>0.0 && outer.y>outer.x){
+ if(params.sky.w>0.001 && params.cloud.x>0.001 && outer.y>0.0 && outer.y>outer.x){
   var start=max(0.0,outer.x);var end=min(outer.y,limit);
   if(inner.y>inner.x){if(inner.x>start){end=min(end,inner.x);}else if(inner.y>start){start=inner.y;}}
   if(end>start){
-   let steps=u32(mix(40.0,72.0,smoothstep(12000.0,100000.0,end-start)));
+   let steps=u32(max(8.0,mix(40.0,72.0,smoothstep(12000.0,100000.0,end-start))*params.atmosphere.w));
    let stepSize=(end-start)/f32(steps);let weather=weatherField(origin+ray*((start+end)*.5));
    let footprint=max(stepSize,(start+end)*.58/params.view.y);
    let detail=1.0-smoothstep(900.0,7000.0,footprint);
    let orbital=smoothstep(80000.0,600000.0,origin.y);
    let jitter=cloudHash(vec3<f32>(floor(input.pos.xy),1.0));
+   var shadow=1.0;var shadowReady=false;
    for(var i=0u;i<steps;i++){
     if(transmission<.02){break;}
     let point=origin+ray*(start+(f32(i)+jitter)*stepSize);let density=cloudDensity(point,weather,detail);
     if(density>.001){
      let alpha=1.0-exp(-density*stepSize*mix(.0018,.0009,orbital));
-     let shadow=exp(-cloudDensity(point+sun*mix(420.0,1600.0,orbital),weather,detail)*mix(1.15,2.0,orbital));
+     if(!shadowReady || i%3u==0u){shadow=exp(-cloudDensity(point+sun*mix(420.0,1600.0,orbital),weather,detail)*mix(1.15,2.0,orbital));shadowReady=true;}
      let cloudUp=normalize(vec3<f32>(point.x,PLANET_RADIUS+point.y,point.z));let elevation=dot(cloudUp,sun);
      let day=atmosphereDaylight(elevation);let twilight=atmosphereTwilight(elevation);
      let phase=.55+.45*pow(max(dot(ray,sun),0.0),6.0);

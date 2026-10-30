@@ -99,4 +99,5 @@ test('tabs expose their panels and atmosphere and cloud sliders update the rende
  element('tab-clouds').click();element('cloud-coverage').value='36';element('cloud-coverage').dispatchEvent(new Event('input'));assert.equal(renderer.cloudCoverage,.36);
  element('cloud-density').value='135';element('cloud-density').dispatchEvent(new Event('input'));assert.equal(renderer.cloudDensity,1.35);
  element('cloud-enabled').checked=false;element('cloud-enabled').dispatchEvent(new Event('change'));assert.equal(renderer.clouds,false);
+ element('cloud-quality').value='.5';element('cloud-quality').dispatchEvent(new Event('change'));assert.equal(renderer.cloudQuality,.5);
 });

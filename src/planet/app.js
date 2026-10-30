@@ -155,7 +155,7 @@ async function start(){
   walker=new SurfaceWalker(renderer,inputForWalk,error=>fail(`Walking surface probe: ${error.message}`));
   const info=renderer.adapter.info;const device=[info?.vendor,info?.architecture,info?.description].filter(Boolean).join(' · ');
   el['device-status'].textContent=device?`WEBGPU / ${device.toUpperCase()}`:'WEBGPU READY';
-  el['timing-note'].textContent=renderer.timing?'GPU timings are asynchronous; terrain generation runs when patches change.':'GPU timestamps are unavailable on this adapter.';
+  el['timing-note'].textContent=renderer.timing?'GPU rendering includes terrain, ocean and clouds; terrain generation runs when patches change.':'GPU timestamps are unavailable on this adapter.';
   setAltitude(renderer.cameraState.altitude);requestAnimationFrame(frame);
  }catch(error){fail(error.message);}
 }
@@ -227,6 +227,7 @@ for(const [id,property,factor,format,manualSun] of controls){
  $(id).addEventListener('input',()=>{const value=Number($(id).value)*factor;$(`${id}-value`).textContent=format(value);if(!renderer)return;renderer[property]=value;if(manualSun){renderer.followSun=false;el['sun-follow'].checked=false;}});
 }
 $('cloud-enabled').addEventListener('change',()=>{if(renderer)renderer.clouds=$('cloud-enabled').checked;});
+$('cloud-quality').addEventListener('change',()=>{if(renderer)renderer.cloudQuality=Number($('cloud-quality').value);});
 let drag=null;
 function look(dx,dy){
  const camera=renderer.cameraState;camera.heading-=dx*.004;camera.pitch=Math.max(-1.35,Math.min(1.35,camera.pitch+dy*.004));renderer.needsSelection=true;
