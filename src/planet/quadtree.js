@@ -63,15 +63,24 @@ class CandidateHeap {
   return top;
  }
 }
+// Once an ancestor has been visited, all of its ancestors were visited too.
+// Shared paths need only be walked once across the complete covering tree.
+function addAncestors(keys,node){
+ let x=node.x,y=node.y;
+ for(let level=node.level-1;level>=0;level--){
+  x=Math.floor(x/2);y=Math.floor(y/2);
+  const key=`${node.face}/${level}/${x}/${y}`;
+  if(keys.has(key))break;
+  keys.add(key);
+ }
+}
 // Reconcile complete covering trees by at most one generation per region.
 // Transactions include balancing dependencies; failed splits cannot leave a
 // partially modified tree. A reduced budget is approached by safe merges.
 export function intermediateLeaves(previous,target,budget,priority=()=>0){
  const original=new Map(previous.map(p=>[p.key,p])),desired=new Map(target.map(p=>[p.key,p]));
  let leaves=new Map(original);const wantsSplit=new Set();
- for(const node of target)for(let level=0;level<node.level;level++){
-  const scale=2**(node.level-level);wantsSplit.add(`${node.face}/${level}/${Math.floor(node.x/scale)}/${Math.floor(node.y/scale)}`);
- }
+ for(const node of target)addAncestors(wantsSplit,node);
  const coveredByTarget=node=>{
   for(let level=node.level;level>=0;level--){const scale=2**(node.level-level);if(desired.has(`${node.face}/${level}/${Math.floor(node.x/scale)}/${Math.floor(node.y/scale)}`))return true;}
   return false;
@@ -238,8 +247,6 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
   visible.push({...node,stitch,normalStitch:stitch|corners,coarseKeys,edgeKeys,cornerKeys});
  }
  const splits=new Set();
- for(const node of all)for(let level=0;level<node.level;level++){
-  const scale=2**(node.level-level);splits.add(`${node.face}/${level}/${Math.floor(node.x/scale)}/${Math.floor(node.y/scale)}`);
- }
+ for(const node of all)addAncestors(splits,node);
  return {leaves:all,visible,splits,deepest:Math.max(...visible.map(x=>x.level),0)};
 }
