@@ -21,7 +21,7 @@ fn baseWave(p:vec2<f32>,time:f32,dist:f32)->f32{
 }
 fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
  var ring=0.0;
- for(var eventIndex=0u;eventIndex<30u;eventIndex++){
+ for(var eventIndex=0u;eventIndex<u32(params.viewport.w);eventIndex++){
   let event=impact[eventIndex];let age=time-event.z;
   if(event.w>0.0 && age>=0.0 && age<4.0){let radius=length(p-event.xy);let front=radius-age*1.4;ring+=.045*sin(front*13.0)*exp(-front*front*3.0)*exp(-age*.8);}
  }
@@ -46,7 +46,7 @@ fn roundedObjectNormal(p:vec3<f32>)->vec3<f32>{
 // never reads another invocation's partially updated state.
 @compute @workgroup_size(1) fn updateBalls(){
  let dt=min(.033,params.settings.w);if(dt<=0.0){return;}
- for(var i=0u;i<30u;i++){
+ for(var i=0u;i<u32(params.viewport.w);i++){
   var ball=balls[i];if(ball.position.w<=0.0){continue;}let water=wave(ball.position.xz,params.settings.x,0.0);let radius=ball.position.w;
   let submerged=clamp((water-(ball.position.y-radius))/(2.0*radius),0.0,1.0);
   ball.velocity.y=(ball.velocity.y+9.81*(submerged*2.0-1.0)*dt)*exp(-2.5*dt);
@@ -57,7 +57,7 @@ fn roundedObjectNormal(p:vec3<f32>)->vec3<f32>{
  }
  // Several sequential projections handle chains of simultaneous contacts.
  for(var iteration=0u;iteration<4u;iteration++){
-  for(var i=0u;i<30u;i++){
+  for(var i=0u;i<u32(params.viewport.w);i++){
    var ball=balls[i];let r=ball.position.w;if(r<=0.0){continue;}let lo=vec3<f32>(-.65,-.95,-.65);let hi=vec3<f32>(.65,.75,.65);
    if(params.viewport.z>.5){
     let d=roundedObjectField(ball.position.xyz);if(d<r){let normal=roundedObjectNormal(ball.position.xyz);ball.position=vec4<f32>(ball.position.xyz+normal*(r-d),r);let vn=dot(ball.velocity.xyz,normal);if(vn<0.0){ball.velocity=vec4<f32>(ball.velocity.xyz-normal*vn*1.15,0.0);}}
@@ -77,7 +77,7 @@ fn roundedObjectNormal(p:vec3<f32>)->vec3<f32>{
    }
    }
    balls[i]=ball;
-   for(var j=i+1u;j<30u;j++){
+   for(var j=i+1u;j<u32(params.viewport.w);j++){
     var other=balls[j];if(other.position.w<=0.0){continue;}ball=balls[i];let deltaPair=other.position.xyz-ball.position.xyz;let dPair=length(deltaPair);let overlap=ball.position.w+other.position.w-dPair;
     if(overlap>0.0){
      var normal=vec3<f32>(1.0,0.0,0.0);if(dPair>.00001){normal=deltaPair/dPair;}
@@ -89,7 +89,7 @@ fn roundedObjectNormal(p:vec3<f32>)->vec3<f32>{
    }
   }
  }
- for(var i=0u;i<30u;i++){
+ for(var i=0u;i<u32(params.viewport.w);i++){
   var ball=balls[i];if(ball.position.w<=0.0){continue;}if(abs(ball.position.x)>3.0){ball.position.x=clamp(ball.position.x,-3.0,3.0);ball.velocity.x*= -.7;}
   if(abs(ball.position.z)>2.5){ball.position.z=clamp(ball.position.z,-2.5,2.5);ball.velocity.z*= -.7;}balls[i]=ball;
  }
@@ -135,7 +135,7 @@ fn roundedObjectHit(origin:vec3<f32>,direction:vec3<f32>)->f32{
 // Ripples travel from each actual impact to the cube, then the wash fades.
 fn cubeImpactWash(position:vec2<f32>,faceNormal:vec2<f32>,time:f32)->f32{
  var response=0.0;
- for(var i=0u;i<30u;i++){
+ for(var i=0u;i<u32(params.viewport.w);i++){
   let event=impact[i];let distance=length(position-event.xy);let arrival=distance/1.4;let elapsed=time-event.z-arrival;
   if(event.w>0.0 && elapsed>=0.0 && elapsed<4.0){
    let near=1.0-smoothstep(1.5,4.0,distance);
@@ -156,7 +156,7 @@ fn cubeImpactWash(position:vec2<f32>,faceNormal:vec2<f32>,time:f32)->f32{
 // drainage. Each patch has a different path, width and fall speed.
 fn cubeFoamDrain(position:vec2<f32>,faceNormal:vec2<f32>,height:f32,faceCoord:f32,time:f32)->f32{
  var result=0.0;
- for(var i=0u;i<30u;i++){
+ for(var i=0u;i<u32(params.viewport.w);i++){
   let event=impact[i];let delta=event.xy-position;let dist=length(delta);let elapsed=time-event.z-dist/1.4;
   if(event.w>0.0 && elapsed>=0.0 && elapsed<4.8){
    let variant=hash(vec2<f32>(event.z*7.13+f32(i)*19.17,dot(event.xy,vec2<f32>(13.7,31.1))+dot(faceNormal,vec2<f32>(5.3,9.7))));
@@ -244,7 +244,7 @@ struct ObjectHit {distance:f32,color:vec3<f32>,opacity:f32};
 fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
  var distance=cubeHit(origin,direction);if(params.viewport.z>.5){distance=roundedObjectHit(origin,direction);}var color=vec3<f32>(0.0);var opacity=1.0;
  if(distance>0.0){color=cubeColor(origin+direction*distance);}
- for(var i=0u;i<30u;i++){
+ for(var i=0u;i<u32(params.viewport.w);i++){
   let ball=balls[i];if(ball.position.w<=0.0){continue;}let delta=origin-ball.position.xyz;let b=dot(delta,direction);let discriminant=b*b-dot(delta,delta)+ball.position.w*ball.position.w;
   if(discriminant>0.0){let root=sqrt(discriminant);var hit= -b-root;if(hit<=.001){hit= -b+root;}
    if(hit>.001 && (distance<0.0 || hit<distance)){
@@ -255,7 +255,7 @@ fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
    }
   }
  }
- for(var eventIndex=0u;eventIndex<30u;eventIndex++){
+ for(var eventIndex=0u;eventIndex<u32(params.viewport.w);eventIndex++){
  let event=impact[eventIndex];
  // Trace a continuous curved sheet with an irregular, moving rim.
  let crownAge=params.settings.x-event.z;
@@ -353,7 +353,7 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
   color=foamOptics(color,reflection,normal,near*smoothstep(.38,.71,texture)*.72*response,f);
  }
  // Advected multiscale breakup creates foam around the expanding impact.
- for(var eventIndex=0u;eventIndex<30u;eventIndex++){
+ for(var eventIndex=0u;eventIndex<u32(params.viewport.w);eventIndex++){
  let event=impact[eventIndex];
  let foamAge=time-event.z;
  if(event.w>0.0 && foamAge>=0.0 && foamAge<6.0){
