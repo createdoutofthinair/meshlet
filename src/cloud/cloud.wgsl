@@ -65,7 +65,10 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  let seed=params.cloud.z;let angle=params.sky.x*params.cloud.y/PLANET_RADIUS;let global=vec3<f32>(p.x,PLANET_RADIUS+p.y,p.z);
  let rotated=vec3<f32>(global.x*cos(angle)+global.z*sin(angle),global.y,-global.x*sin(angle)+global.z*cos(angle));
  let q=rotated*.00028+vec3<f32>(seed*.071,seed*.039,seed*.053);
- let base=cloudNoise(q)*.68+cloudNoise(q*2.03+vec3<f32>(12.0,3.0,6.0))*.32;
+ let coarse=cloudNoise(q*.16+vec3<f32>(8.0,14.0,3.0));
+ let baseShape=cloudNoise(q)*.68+cloudNoise(q*2.03+vec3<f32>(12.0,3.0,6.0))*.32;
+ // Filter the base shape as well as erosion when it becomes subpixel.
+ let base=mix(coarse,baseShape,detailWeight);
  let erode=cloudNoise(q*4.1+vec3<f32>(2.0,7.0,4.0));
  // Regional humidity gates broad clear areas and dense weather systems.
  let humidity=smoothstep(.31,.67,weather.x);
@@ -97,7 +100,7 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
    let steps=48u;let stepSize=(end-start)/f32(steps);var transmission=1.0;var lightAccum=vec3<f32>(0.0);
    let midpoint=origin+ray*((start+end)*.5);let weather=weatherField(midpoint);
    let footprint=max(stepSize,(start+end)*.58/params.view.y);
-   let detailWeight=1.0-smoothstep(250.0,1300.0,footprint);
+   let detailWeight=1.0-smoothstep(250.0,1800.0,footprint);
    let jitter=.5+(cloudHash(vec3<f32>(floor(input.pos.xy),1.0))-.5)*.35;
    for(var i=0u;i<steps;i++){
     if(transmission<.02){break;}let distance=start+(f32(i)+jitter)*stepSize;let point=origin+ray*distance;let density=cloudDensity(point,weather,detailWeight);
@@ -109,6 +112,11 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
      lightAccum+=transmission*alpha*illumination;transmission*=1.0-alpha;
     }
    }
+   // Cloud light travels through the atmosphere before reaching the eye.
+   // Blend distant details toward the same blue haze as the planetary limb.
+   let aerial=1.0-exp(-max(0.0,start-15000.0)/220000.0);
+   let haze=vec3<f32>(.25,.44,.62);
+   lightAccum=mix(lightAccum,haze*(1.0-transmission),aerial*.82);
    color=color*transmission+lightAccum;
   }
  }
