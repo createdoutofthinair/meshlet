@@ -35,7 +35,7 @@ fn oceanIntersection(radial:vec3<f32>,height:f32,ray:vec3<f32>)->vec2<f32>{retur
  let ray=normalize(oceanView.forwardTanY.xyz+oceanView.rightTanX.xyz*(ndc.x*oceanView.rightTanX.w)+oceanView.upWidth.xyz*(ndc.y*oceanView.forwardTanY.w));
  let radial=normalize(oceanView.radialHeight.xyz);let height=oceanView.radialHeight.w;
  let signedDepth=textureLoad(waterDepth,vec2<i32>(pixel.xy),0).x;
- var hit=vec2<f32>(0.0);var direction=radial;var isLake=false;
+ var hit=vec2<f32>(0.0);var direction=radial;var isLake=false;var coast=vec2<f32>(0.0);
  if(signedDepth<0.0 && frame.hydrology.y>.5 && frame.hydrology.x>0.0){
   let rayForward=max(.000001,dot(ray,oceanView.forwardTanY.xyz));
   let terrainDistance=oceanView.viewport.y/(abs(signedDepth)*rayForward);
@@ -57,12 +57,12 @@ fn oceanIntersection(radial:vec3<f32>,height:f32,ray:vec3<f32>)->vec2<f32>{retur
   if(signedDepth<0.0){discard;}
   hit=oceanIntersection(radial,height,ray);if(hit.y<.5){discard;}
   direction=normalize(radial+(radial*height+ray*hit.x)/frame.settings.x);
-  if(naturalCoast(direction,frame.counts.z).x>=0.0){discard;}
+  coast=naturalCoast(direction,frame.counts.z);if(coast.x>=0.0){discard;}
  }
  let relative=ray*hit.x;let clip=frame.viewProjection*vec4<f32>(relative,1.0);let depth=clip.z/clip.w;if(depth<=0.0 || depth>1.0){discard;}
  if(!isLake && signedDepth>0.0 && depth<=signedDepth){discard;}
  let deep=vec3<f32>(0.012,0.055,0.092);let shallow=vec3<f32>(0.025,0.17,0.23);
- let coast=naturalCoast(direction,frame.counts.z);var base=mix(deep,shallow,smoothstep(-4.0,0.0,min(coast.y,0.0)));
+ var base=mix(deep,shallow,smoothstep(-4.0,0.0,min(coast.y,0.0)));
  if(isLake){base=vec3<f32>(.025,.16,.19);}
  let diffuse=max(dot(direction,normalize(frame.sun.xyz)),0.0);let fill=.22+.10*max(direction.y,0.0);
  var color=base*(fill+diffuse*.95);
