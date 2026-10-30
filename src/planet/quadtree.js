@@ -87,9 +87,20 @@ export function intermediateLeaves(previous,target,budget,priority=()=>0){
  const original=new Map(previous.map(p=>[p.key,p])),desired=new Map(target.map(p=>[p.key,p]));
  let leaves=new Map(original);const wantsSplit=new Set();
  for(const node of target)addAncestors(wantsSplit,node);
+ // Neighboring candidates share much of the same ancestor chain. Cache
+ // whether each visited ancestor is covered by a target leaf for this pass.
+ const targetCoverage=new Map();
  const coveredByTarget=node=>{
-  for(let level=node.level;level>=0;level--){const scale=2**(node.level-level);if(desired.has(`${node.face}/${level}/${Math.floor(node.x/scale)}/${Math.floor(node.y/scale)}`))return true;}
-  return false;
+  let x=node.x,y=node.y,covered=false;const visited=[];
+  for(let level=node.level;level>=0;level--){
+   const key=`${node.face}/${level}/${x}/${y}`;
+   if(targetCoverage.has(key)){covered=targetCoverage.get(key);break;}
+   visited.push(key);
+   if(desired.has(key)){covered=true;break;}
+   x=Math.floor(x/2);y=Math.floor(y/2);
+  }
+  for(const key of visited)targetCoverage.set(key,covered);
+  return covered;
  };
  // Most candidate parents cannot merge. Defer constructing spherical tile
  // geometry until target coverage and all four resident children are known.
