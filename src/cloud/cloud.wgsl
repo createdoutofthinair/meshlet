@@ -89,8 +89,8 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
   groundDistance=ground.x;
   // A simple ocean-colored spherical ground supplies contrast through gaps.
   let horizonDistance=sqrt(max(1.0,origin.y*(2.0*PLANET_RADIUS+origin.y)));
-  let haze=smoothstep(.20,1.0,groundDistance/horizonDistance);
-  color=mix(vec3<f32>(.045,.12,.19),vec3<f32>(.26,.49,.67),haze*.8)*mix(.06,1.0,day);
+  let haze=smoothstep(.48,1.0,groundDistance/horizonDistance);
+  color=mix(vec3<f32>(.045,.12,.19),vec3<f32>(.26,.49,.67),haze*.62)*mix(.06,1.0,day);
  }
  let outer=sphereInterval(origin.y,ray,8000.0);let inner=sphereInterval(origin.y,ray,1500.0);
  if(outer.y>0.0 && outer.y>outer.x){
@@ -101,7 +101,7 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
    let steps=48u;let stepSize=(end-start)/f32(steps);var transmission=1.0;var lightAccum=vec3<f32>(0.0);
    let midpoint=origin+ray*((start+end)*.5);let weather=weatherField(midpoint);
    let footprint=max(stepSize,(start+end)*.58/params.view.y);
-   let detailWeight=1.0-smoothstep(250.0,1800.0,footprint);
+   let detailWeight=1.0-smoothstep(650.0,3400.0,footprint);
    let jitter=.5+(cloudHash(vec3<f32>(floor(input.pos.xy),1.0))-.5)*.35;
    for(var i=0u;i<steps;i++){
     if(transmission<.02){break;}let distance=start+(f32(i)+jitter)*stepSize;let point=origin+ray*distance;let density=cloudDensity(point,weather,detailWeight);
@@ -119,9 +119,9 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
    }
    // Cloud light travels through the atmosphere before reaching the eye.
    // Blend distant details toward the same blue haze as the planetary limb.
-   let aerial=1.0-exp(-max(0.0,start-15000.0)/220000.0);
+   let aerial=1.0-exp(-max(0.0,start-90000.0)/480000.0);
    let haze=mix(vec3<f32>(.012,.02,.045),mix(vec3<f32>(.25,.44,.62),vec3<f32>(.60,.24,.12),twilight*.6),max(day,twilight*.35));
-   lightAccum=mix(lightAccum,haze*(1.0-transmission),aerial*.82);
+   lightAccum=mix(lightAccum,haze*(1.0-transmission),aerial*.65);
    color=color*transmission+lightAccum;
   }
  }
@@ -138,7 +138,7 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
   let inner=exp(-tangentHeight/9000.0)*altitudeVisibility*upwardFade;
   let sunSide=.65+.35*max(dot(ray,sun),0.0);
   let limbTint=mix(vec3<f32>(.07,.25,.65),vec3<f32>(.60,.18,.06),twilight*pow(max(dot(ray,sun),0.0),2.0));
-  color+=(limbTint*broad+vec3<f32>(.22,.42,.65)*inner)*sunSide*max(.035,day+twilight*.22);
+  color+=(limbTint*broad+vec3<f32>(.12,.25,.40)*inner)*sunSide*max(.035,day+twilight*.22)*.72;
  }
  let mapped=max(color,vec3<f32>(0.0))/(1.0+max(color,vec3<f32>(0.0))*.22);return vec4<f32>(pow(mapped,vec3<f32>(1.0/2.2)),1.0);
 }
