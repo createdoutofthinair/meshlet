@@ -42,8 +42,11 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
  if(params.sky.w>0.001 && params.cloud.x>0.001){
  let outer=sphereInterval(origin.y,ray,8000.0);
  if(outer.y>0.0 && outer.y>outer.x){
-  let inner=sphereInterval(origin.y,ray,1500.0);
   var start=max(0.0,outer.x);var end=min(outer.y,limit);
+  // Terrain or ocean can block the complete outer segment. In that case no
+  // inner-shell intersection or cloud sampling is necessary.
+  if(end>start){
+  let inner=sphereInterval(origin.y,ray,1500.0);
   if(inner.y>inner.x){if(inner.x>start){end=min(end,inner.x);}else if(inner.y>start){start=inner.y;}}
   if(end>start){
    let span=end-start;
@@ -96,6 +99,7 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
    }
    if(farWeight>0.0){light=mix(light,distant.rgb,farWeight);transmission=mix(transmission,1.0-distant.a,farWeight);}
   }
+ }
  }
  }
  // Preserve cloud coverage up to the visible horizon. The actual depth
