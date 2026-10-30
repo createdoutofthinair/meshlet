@@ -2,6 +2,10 @@
 export function planetCloudSource(atmosphere,cloud,fragment){
  const prefix=cloud.slice(0,cloud.indexOf('@fragment fn fragment'))
   .replace('shape:vec4<f32>};','shape:vec4<f32>,radial:vec4<f32>,east:vec4<f32>,north:vec4<f32>,forward:vec4<f32>,right:vec4<f32>,up:vec4<f32>,sun:vec4<f32>,atmosphere:vec4<f32>};')
+  // These planet-only uniform components hold values shared by every pixel.
+  .replace('let windCos=cos(angle);let windSin=sin(angle);','let windCos=params.sky.y;let windSin=params.cloud.w;')
+  .replace('let axis=normalize(vec3<f32>(.08+sin(seed*.07)*.08,.99,.07+cos(seed*.09)*.08));','let axis=params.shape.yzw;')
+  .replace('cos(angle),sin(angle),.00028/max(.5,params.shape.x)', 'params.sky.y,params.cloud.w,.00028/max(.5,params.shape.x)')
   .replace('let pos=vec3<f32>(point.x,PLANET_RADIUS+point.y,point.z);','let pos=params.east.xyz*point.x+params.radial.xyz*(PLANET_RADIUS+point.y)+params.north.xyz*point.z;')
   .replace('let global=vec3<f32>(p.x,PLANET_RADIUS+p.y,p.z);','let global=params.east.xyz*p.x+params.radial.xyz*(PLANET_RADIUS+p.y)+params.north.xyz*p.z;')
   // The lab's very coarse fallback creates huge opaque islands in orbit.

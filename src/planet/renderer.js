@@ -682,7 +682,10 @@ export class PlanetRenderer {
   const d=this.device;
   const east=normalize([camera.radial[2],0,-camera.radial[0]]),north=normalize([camera.radial[1]*east[2],camera.radial[2]*east[0]-camera.radial[0]*east[2],-camera.radial[1]*east[0]]);
   this.cloudWindDistance=(this.cloudWindDistance??0)+Math.max(0,Math.min(.25,(now-(this.cloudLastTime??now))*.001))*(this.cloudSpeed??8);this.cloudLastTime=now;
-  const cloudData=this.cloudUniformData;cloudData.set([camera.width,camera.height,0,0,this.cloudWindDistance,0,camera.altitude*1000,this.clouds===false?0:(this.cloudCoverage??.72),this.cloudDensity??1,1,this.seed%10000,0, this.cloudSize??2,0,0,0],0);cloudData.set([...camera.radial,0,...east,0,...north,0,...camera.forward,camera.tanX,...camera.right,camera.tanY,...camera.up,camera.near,...sun,separateOcean?1:0],16);cloudData.set([this.skyStrength??1,this.mieStrength??1,this.haloStrength??1,this.cloudQuality??.8],44);if(this.cloudUniform)d.queue.writeBuffer(this.cloudUniform,0,cloudData);
+  const weatherSeed=this.seed%10000,windAngle=this.cloudWindDistance/6371000;
+  if(this.cloudWeatherSeed!==weatherSeed){this.cloudWeatherSeed=weatherSeed;this.cloudWeatherAxis=normalize([.08+Math.sin(weatherSeed*.07)*.08,.99,.07+Math.cos(weatherSeed*.09)*.08]);}
+  const weatherAxis=this.cloudWeatherAxis;
+  const cloudData=this.cloudUniformData;cloudData.set([camera.width,camera.height,0,0,this.cloudWindDistance,Math.cos(windAngle),camera.altitude*1000,this.clouds===false?0:(this.cloudCoverage??.72),this.cloudDensity??1,1,weatherSeed,Math.sin(windAngle),this.cloudSize??2,...weatherAxis],0);cloudData.set([...camera.radial,0,...east,0,...north,0,...camera.forward,camera.tanX,...camera.right,camera.tanY,...camera.up,camera.near,...sun,separateOcean?1:0],16);cloudData.set([this.skyStrength??1,this.mieStrength??1,this.haloStrength??1,this.cloudQuality??.8],44);if(this.cloudUniform)d.queue.writeBuffer(this.cloudUniform,0,cloudData);
   d.queue.writeBuffer(this.uniform,0,raw);
   if(patchDirty&&lastPatch>=firstPatch){
    const offset=firstPatch*PATCH_BYTES,size=(lastPatch-firstPatch+1)*PATCH_BYTES;

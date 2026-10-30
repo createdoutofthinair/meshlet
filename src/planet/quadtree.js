@@ -10,13 +10,18 @@ function indexedLeaves(entries=[]){
 }
 function setLeaf(leaves,node){leaves.set(node.key,node);leaves.tileIndex.set(numericTileKey(node.face,node.level,node.x,node.y),node);}
 function deleteLeaf(leaves,key){const node=leaves.get(key);if(node)leaves.tileIndex.delete(numericTileKey(node.face,node.level,node.x,node.y));leaves.delete(key);}
-function tileAt(leaves,face,u,v,maxDepth,index=null) {
+function tileAt(leaves,face,u,v,maxDepth,index=null,hint=0) {
  const uu=Math.min(1-Number.EPSILON,Math.max(0,(u+1)/2));
  const vv=Math.min(1-Number.EPSILON,Math.max(0,(v+1)/2));
- // A covering quadtree has no overlapping ancestor leaves. Searching from
- // the root finds the same unique leaf without probing unused deep levels.
+ // A covering quadtree has no overlapping leaves. Adjacent leaves are
+ // usually at the caller's level, so try it before the root-to-leaf search.
+ if(index&&hint>0&&hint<=maxDepth){
+  const n=2**hint,x=Math.floor(uu*n),y=Math.floor(vv*n);
+  const node=index.get(numericTileKey(face,hint,x,y));if(node)return node;
+ }
  let n=1;
  for(let level=0;level<=maxDepth;level++,n*=2){
+  if(index&&hint>0&&level===hint)continue;
   const x=Math.floor(uu*n),y=Math.floor(vv*n);
   const node=index?index.get(numericTileKey(face,level,x,y)):leaves.get(`${face}/${level}/${x}/${y}`);if(node)return node;
  }
@@ -39,7 +44,7 @@ export function neighbors(leaves,node,edge,maxDepth=MAX_DEPTH,index=null) {
   // strictly inside its face-space bounds; boundary ties still use tileAt.
   let other;
   for(const known of found)if(known.face===face&&Math.abs(u-known.u)<known.span/2&&Math.abs(v-known.v)<known.span/2){other=known;break;}
-  if(!other)other=tileAt(leaves,face,u,v,maxDepth,index);
+  if(!other)other=tileAt(leaves,face,u,v,maxDepth,index,node.level);
   if(other && other.key!==node.key&&!found.some(known=>known.key===other.key))found.push(other);
  }
  return found;
@@ -292,8 +297,8 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
    const sx=corner&1?1:-1,sy=corner&2?1:-1;
    const u=node.u+sx*(half+eps),v=node.v+sy*(half+eps);
    let diagonal;
-   if(Math.abs(u)<1&&Math.abs(v)<1)diagonal=tileAt(leaves,node.face,u,v,MAX_DEPTH,index);
-   else{const f=directionToFace(faceCube(node.face,u,v));diagonal=tileAt(leaves,f.face,f.u,f.v,MAX_DEPTH,index);}
+   if(Math.abs(u)<1&&Math.abs(v)<1)diagonal=tileAt(leaves,node.face,u,v,MAX_DEPTH,index,node.level);
+   else{const f=directionToFace(faceCube(node.face,u,v));diagonal=tileAt(leaves,f.face,f.u,f.v,MAX_DEPTH,index,node.level);}
    if(diagonal && diagonal.level<node.level)corners|=1<<(corner+4);
    const around=[...adjacentEdges[sx<0?0:1],...adjacentEdges[sy<0?2:3]];
    if(diagonal)around.push(diagonal);
