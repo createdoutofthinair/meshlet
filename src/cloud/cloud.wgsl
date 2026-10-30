@@ -42,13 +42,15 @@ fn sphereInterval(altitude:f32,ray:vec3<f32>,shellHeight:f32)->vec2<f32>{
 fn weatherField(point:vec3<f32>)->vec2<f32>{
  let seed=params.cloud.z;let angle=params.sky.x*params.cloud.y/PLANET_RADIUS;
  let pos=vec3<f32>(point.x,PLANET_RADIUS+point.y,point.z);
- let direction=normalize(vec3<f32>(pos.x*cos(angle)+pos.z*sin(angle),pos.y,-pos.x*sin(angle)+pos.z*cos(angle)));
+ let windCos=cos(angle);let windSin=sin(angle);
+ let direction=normalize(vec3<f32>(pos.x*windCos+pos.z*windSin,pos.y,-pos.x*windSin+pos.z*windCos));
  let key=vec3<f32>(seed*.071,seed*.039,seed*.053);
  // Bend the planetary weather coordinates around seeded large-scale vortices.
  // The three-dimensional direction is continuous across the sphere.
  let axis=normalize(vec3<f32>(.08+sin(seed*.07)*.08,.99,.07+cos(seed*.09)*.08));
- let distance=length(cross(direction,axis));let rotation=2.8*exp(-distance*distance*38.0);
- let swirled=direction*cos(rotation)+cross(axis,direction)*sin(rotation)+axis*dot(axis,direction)*(1.0-cos(rotation));
+ let axisCross=cross(axis,direction);let distanceSquared=dot(axisCross,axisCross);
+ let rotation=2.8*exp(-distanceSquared*38.0);let rotationCos=cos(rotation);let rotationSin=sin(rotation);
+ let swirled=direction*rotationCos+axisCross*rotationSin+axis*dot(axis,direction)*(1.0-rotationCos);
  let regional=swirled*22.0+key;
  let warp=vec3<f32>(cloudNoise(regional+vec3<f32>(7,13,3)),cloudNoise(regional+vec3<f32>(19,2,11)),cloudNoise(regional+vec3<f32>(4,17,23)))-.5;
  let warped=regional+warp*2.8;let large=cloudNoise(warped*.65);let medium=cloudNoise(warped*1.9+vec3<f32>(9,3,17));
