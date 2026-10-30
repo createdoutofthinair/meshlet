@@ -19,7 +19,7 @@ fn probeTriangle(a:vec3<f32>,b:vec3<f32>,c:vec3<f32>,origin:vec3<f32>,ray:vec3<f
 }
 @compute @workgroup_size(64)
 fn main(@builtin(local_invocation_index) lane:u32){
- let slot=probe.cell.x;let tile=patches[slot];let origin=probe.origin.xyz;let ray=normalize(probe.direction.xyz);
+ let slot=probe.cell.x;let origin=probe.origin.xyz;let ray=normalize(probe.direction.xyz);
  var found=false;var height=0.0;
  let metadata=morphs.patches[slot];
  let overlay=metadata.slots.w!=0u && (metadata.slots.z&16u)!=0u;
@@ -43,6 +43,15 @@ fn main(@builtin(local_invocation_index) lane:u32){
  }
  if(overlay){if(lane==0u){let best=probeCandidates[0];result[0]=vec4<f32>(best.x+probe.origin.w,best.y,0.0,0.0);}return;}
  if(lane!=0u){return;}
+ regularProbe();
+}
+
+@compute @workgroup_size(1)
+fn regularMain(){regularProbe();}
+
+fn regularProbe(){
+ let slot=probe.cell.x;let tile=patches[slot];let origin=probe.origin.xyz;let ray=normalize(probe.direction.xyz);
+ var found=false;var height=0.0;
  // During a morph a radial ray need not hit its original fine-grid cell.
  // Search the complete patch then; normal probes keep the small neighborhood.
  let moving=morphs.patches[slot].slots.w!=0u && morphs.patches[slot].mapping.w<1.0;

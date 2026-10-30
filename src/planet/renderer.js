@@ -63,7 +63,7 @@ export class PlanetRenderer {
   this.lodErrorPipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:modules[5],entryPoint:'main'}});
   this.transitionPipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:modules[6],entryPoint:'main'}});
   const walkProbeModule=await shader(d,common+'\n'+patchSurface+'\n'+patchMorph+'\n'+walkProbeSource,'Walking surface probe');
-  this.walkProbePipe=await d.createComputePipelineAsync({layout:'auto',compute:{module:walkProbeModule,entryPoint:'main'}});
+  [this.walkProbePipe,this.walkRegularPipe]=await Promise.all(['main','regularMain'].map(entryPoint=>d.createComputePipelineAsync({layout:'auto',compute:{module:walkProbeModule,entryPoint}}))); 
   [this.highlandsPipe,this.pointPipe,this.valleyPipe,this.riverPipe]=await Promise.all(['highlands','point','valleyCandidates','riverCandidates'].map(entryPoint=>d.createComputePipelineAsync({layout:'auto',compute:{module:modules[0],entryPoint}})));
   this.renderPipe=await d.createRenderPipelineAsync({layout:'auto',vertex:{module:modules[4],entryPoint:'vs'},fragment:{module:modules[4],entryPoint:'fs',targets:[{format:this.format},{format:'r32float'}]},primitive:{topology:'triangle-list',cullMode:'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'}});
   // r32float can be loaded without the optional float32-filterable feature.
@@ -148,6 +148,7 @@ export class PlanetRenderer {
   this.valleyBind=d.createBindGroup({layout:this.valleyPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.uniform}},{binding:4,resource:{buffer:this.plates}},{binding:5,resource:{buffer:this.sampleBuffer}}]});
   this.pointBind=bindEntries(this.pointPipe,[[0,this.uniform],[4,this.plates],[5,this.sampleBuffer],[6,this.probeInput],...worldEntries]);
   this.walkProbeBind=bind(this.walkProbePipe,[this.patchBuffer,this.vertices,this.walkProbeInput,this.walkProbeResult,this.morphBuffer]);
+  this.walkRegularBind=bind(this.walkRegularPipe,[this.patchBuffer,this.vertices,this.walkProbeInput,this.walkProbeResult,this.morphBuffer]);
   this.riverBind=bindEntries(this.riverPipe,[[5,this.sampleBuffer],[7,this.world],[8,this.worldDirections]]);
   if(this.timing){this.queries=d.createQuerySet({type:'timestamp',count:8});this.resolve=make('GPU timestamp resolve',64,BUFFER.QUERY_RESOLVE|BUFFER.COPY_SRC);}
   d.queue.writeBuffer(this.plates,0,seedPlates(this.seed));
@@ -516,7 +517,8 @@ export class PlanetRenderer {
   floats.set([...origin,reference,...direction,0]);uints.set([patch.slot,cell(face.u,patch.u),cell(face.v,patch.v),0],8);
   const d=this.device;d.queue.writeBuffer(this.walkProbeInput,0,raw);
   const readback=d.createBuffer({size:16,usage:BUFFER.COPY_DST|BUFFER.MAP_READ}),encoder=d.createCommandEncoder({label:'Walkable terrain probe'});
-  const pass=encoder.beginComputePass();pass.setPipeline(this.walkProbePipe);pass.setBindGroup(0,this.walkProbeBind);pass.dispatchWorkgroups(1);pass.end();
+  const overlay=this.stage?.state==='transitioning'&&this.topologySlots?.has(patch.slot);
+  const pass=encoder.beginComputePass();pass.setPipeline(overlay?this.walkProbePipe:(this.walkRegularPipe||this.walkProbePipe));pass.setBindGroup(0,overlay?this.walkProbeBind:(this.walkRegularBind||this.walkProbeBind));pass.dispatchWorkgroups(1);pass.end();
   encoder.copyBufferToBuffer(this.walkProbeResult,0,readback,0,16);d.queue.submit([encoder.finish()]);this.surfaceReads=(this.surfaceReads||0)+1;
   try{await readback.mapAsync(GPUMapMode.READ);const values=new Float32Array(readback.getMappedRange().slice(0));readback.unmap();return generation===this.generation&&revision===this.surfaceRevision&&values[1]>.5?values[0]:null;}
   catch(error){if(this.deviceLost||generation!==this.generation)return null;throw error;}

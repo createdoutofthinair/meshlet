@@ -458,3 +458,14 @@ test('compact unchanged worker response retains the active covering',async()=>{
  r.frame(1200);await flush();assert.equal(r.patches,patches);assert.equal(r.coveringLeaves,leaves);
  assert.equal(r.needsSelection,false);assert.equal(r.stage,null);assert.equal(r.stats.selectionMs,2);
 });
+
+test('surface probes dispatch the regular or overlay pipeline for the displayed patch',async()=>{
+ const {r}=fakeRenderer();r.frame(1000);await flush();
+ r.walkProbeInput=r.device.createBuffer({size:48});r.walkProbeResult=r.device.createBuffer({size:16});
+ r.walkProbePipe={kind:'overlay-probe'};r.walkProbeBind={};r.walkRegularPipe={kind:'regular-probe'};r.walkRegularBind={};
+ const seen=[],create=r.device.createCommandEncoder;
+ r.device.createCommandEncoder=(...args)=>{const e=create(...args),begin=e.beginComputePass;e.beginComputePass=(...params)=>{const pass=begin(...params),set=pass.setPipeline;pass.setPipeline=p=>{seen.push(p.kind);set(p);};return pass;};return e;};
+ const patch=r.patches[0];await r.sampleRenderedSurface(patch.direction);assert.equal(seen.at(-1),'regular-probe');
+ r.stage={state:'transitioning'};r.topologySlots=new Set([patch.slot]);await r.sampleRenderedSurface(patch.direction);assert.equal(seen.at(-1),'overlay-probe');
+ r.topologySlots=new Set();await r.sampleRenderedSurface(patch.direction);assert.equal(seen.at(-1),'regular-probe');
+});
