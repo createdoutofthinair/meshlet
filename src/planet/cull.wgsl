@@ -10,6 +10,11 @@ struct Indirect { vertexCount:u32,instanceCount:atomic<u32>,firstVertex:u32,firs
 fn main(@builtin(global_invocation_id) gid:vec3<u32>) {
  let index=gid.x;if(index>=frame.counts.x*MESHLETS_PER_PATCH){return;}
  let slot=activeSlots[index/MESHLETS_PER_PATCH];let meshlet=index%MESHLETS_PER_PATCH;
+ // With frustum culling disabled no bounds or morph union is needed. Keep
+ // the same indirect draw entries without touching the bounds buffers.
+ if((frame.counts.w & 1u)==0u){
+  let dest=atomicAdd(&indirect.instanceCount,1u);visible[dest]=(slot<<4u)|meshlet;return;
+ }
  var bound=bounds[slot*MESHLETS_PER_PATCH+meshlet].sphere;
  let morph=morphs.patches[slot];
  if(morph.slots.w!=0u && (morph.mapping.w<1.0 || (morph.slots.z&16u)!=0u)){
@@ -31,6 +36,6 @@ fn main(@builtin(global_invocation_id) gid:vec3<u32>) {
   bound=vec4<f32>((lo+hi)*.5,length((hi-lo)*.5)*1.0001+.00001);
  }
  let center=bound.xyz+patches[slot].relative.xyz;
- if((frame.counts.w & 1u)!=0u){for(var p=0u;p<5u;p++){let plane=frame.planes[p];if(dot(plane.xyz,center)+plane.w < -bound.w){return;}}}
+ for(var p=0u;p<5u;p++){let plane=frame.planes[p];if(dot(plane.xyz,center)+plane.w < -bound.w){return;}}
  let dest=atomicAdd(&indirect.instanceCount,1u);visible[dest]=(slot<<4u)|meshlet;
 }
