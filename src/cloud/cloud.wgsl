@@ -115,11 +115,14 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  // Limb glow is evaluated from tangent altitude above the spherical ground.
  // This inexpensive single-scattering approximation is visible from orbit.
  let tangentDistance=max(0.0,-(PLANET_RADIUS+origin.y)*ray.y);
- if(tangentDistance>0.0 && groundDistance>1e8){
+ if(groundDistance>1e8){
   let tangentHeight=max(0.0,planetAltitude(origin+ray*tangentDistance));
   let altitudeVisibility=smoothstep(5000.0,60000.0,origin.y);
-  let broad=exp(-tangentHeight/40000.0)*altitudeVisibility;
-  let inner=exp(-tangentHeight/9000.0)*altitudeVisibility;
+  // Upward rays have their closest point at the camera. Fade their short
+  // atmospheric path smoothly instead of abruptly dropping the halo at y=0.
+  let upwardFade=exp(-max(0.0,ray.y)*5.0);
+  let broad=exp(-tangentHeight/40000.0)*altitudeVisibility*upwardFade;
+  let inner=exp(-tangentHeight/9000.0)*altitudeVisibility*upwardFade;
   let sunSide=.65+.35*max(dot(ray,sun),0.0);
   color+=((vec3<f32>(.07,.25,.65)*broad)+(vec3<f32>(.22,.42,.65)*inner))*sunSide;
  }
