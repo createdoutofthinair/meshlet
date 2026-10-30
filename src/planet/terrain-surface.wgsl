@@ -62,12 +62,14 @@ fn surfaceBase(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,
  // down to sub-meter scales. Their low amplitudes preserve the landforms.
  let s=worldSample(direction);let profile=worldProfile(s);
  let natural=naturalHeight(base,high,low,delta,seed);
- var change=(profile.y-profile.x)*frame.hydrology.x;
- change-=regionalIncision(s,profile,direction,high,low,delta,natural+change,seed);
  // Coarse erosion is interpolated over much finer landforms. It must not
  // turn an existing piece of dry land into a new sea-level hole.
- var baseline=natural+change;
- if(natural>0.0){baseline=max(baseline,natural*.10);}else{baseline=natural;}
+ var baseline=natural;
+ if(natural>0.0){
+  var change=(profile.y-profile.x)*frame.hydrology.x;
+  change-=regionalIncision(s,profile,direction,high,low,delta,natural+change,seed);
+  baseline=max(natural+change,natural*.10);
+ }
  // Regional simulation tiles are an exploratory cache, not part of the
  // displayed height field. Loading or evicting one must never move terrain.
  // The seeded drainage incision above supplies stable regional-scale detail.

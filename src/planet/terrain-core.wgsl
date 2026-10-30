@@ -253,7 +253,9 @@ fn terrainShapeFromBaseDetail(base:TerrainBase,seed:u32,valleyStrength:f32,direc
  if(valleyEnabled){
   let tangent=ridgeGradient-d*dot(ridgeGradient,d);let magnitude=length(tangent);
   let slope=magnitude*roughness*7.5/6371.0;
-  if(magnitude>.0001 && slope>.003){
+  // Both remaining mask factors are exactly zero below these thresholds.
+  // Avoid evaluating the channel noise when it cannot affect the terrain.
+  if(magnitude>.0001 && slope>.003 && ridges>.08 && unshaped>.05){
    let down=-tangent/magnitude;
    var primary:f32;var secondary:f32;
    if(preciseBands){
