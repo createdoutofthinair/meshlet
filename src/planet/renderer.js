@@ -34,7 +34,7 @@ export class PlanetRenderer {
   this.patchBytes=new ArrayBuffer(CAPACITY*PATCH_BYTES);this.patchFloats=new Float32Array(this.patchBytes);this.patchUints=new Uint32Array(this.patchBytes);
   this.slotByKey=new Map();this.stitchByKey=new Map();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.patches=[];this.pending=[];this.normalPending=[];
   this.needsSelection=true;this.lastSelection=0;this.previousSplits=null;this.lodErrors=new Map();this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
-  this.transitionErrors=new Map();this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
+  this.transitionErrors=new Map();this.transitionCommitId=0;this.lastTransitionCommit=null;this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
   this.transitionTargetPixels=TRANSITION_TARGET_PIXELS;
   this.lastSample=0;this.pendingRead=false;this.generation=0;this.inFlight=0;this.probePending=false;this.lastProbeKey='';this.lastProbeTime=0;this.stats={leaves:0,visiblePatches:0,deepest:0,selectionMs:0,generated:0};
   this.hydrologySeed=null;
@@ -267,6 +267,7 @@ export class PlanetRenderer {
  commitStage(now){
   const stage=this.stage;if(!stage)return;
   for(const [key,slot] of this.slotByKey)if(!stage.slots.has(key))this.free.push(slot);
+  this.lastTransitionCommit={id:++this.transitionCommitId,at:now,pairs:stage.pairs.length,refinements:stage.pairs.filter(p=>p.refining).length,merges:stage.pairs.filter(p=>!p.refining).length,maxRefinementPixels:stage.maxRefine??null,maxMergePixels:stage.maxMerge??null,maxPixels:this.transition.pixels,uncovered:stage.uncovered};
   this.slotByKey=stage.slots;this.stitchByKey=stage.signatures;this.patches=stage.nodes;this.previousSplits=stage.result.splits;
   // New patches were shaded while staged; world-space normals do not depend
   // on which neighboring LOD is currently selected.
@@ -472,16 +473,16 @@ export class PlanetRenderer {
   if(stage)this.transition={...this.transition,pending:stage.todo.length};
   d.queue.onSubmittedWorkDone().then(()=>{this.inFlight--;}).catch(()=>{this.inFlight--;});
   if(transitionRead)transitionRead.mapAsync(GPUMapMode.READ).then(()=>{
-   const values=new Float32Array(transitionRead.getMappedRange());let maxPixel=0,maxMerge=0;
+   const values=new Float32Array(transitionRead.getMappedRange());let maxPixel=0,maxMerge=0,maxRefine=0;
    if(this.stage===stage&&stage.generation===this.generation){
     for(let i=0;i<stage.pairs.length;i++){
      const px=values[i*2],world=values[i*2+1],pair=stage.pairs[i];
      if(!Number.isFinite(px)||!Number.isFinite(world))throw new Error('Non-finite terrain transition measurement');
-     maxPixel=Math.max(maxPixel,px);if(!pair.refining)maxMerge=Math.max(maxMerge,px);
+     maxPixel=Math.max(maxPixel,px);if(!pair.refining)maxMerge=Math.max(maxMerge,px);else maxRefine=Math.max(maxRefine,px);
      this.transitionErrors.set(pair.coarse.key,Math.max(this.transitionErrors.get(pair.coarse.key)||0,world));
     }
     while(this.transitionErrors.size>8192)this.transitionErrors.delete(this.transitionErrors.keys().next().value);
-    stage.maxMerge=maxMerge;stage.state='ready';this.transition={pixels:maxPixel,pending:0,overTarget:maxPixel>this.transitionTargetPixels,waiting:false};
+    stage.maxMerge=maxMerge;stage.maxRefine=maxRefine;stage.state='ready';this.transition={pixels:maxPixel,pending:0,overTarget:maxPixel>this.transitionTargetPixels,waiting:false};
    }
    transitionRead.unmap();
   }).catch(e=>{if(this.stage===stage){this.cancelStage();this.needsSelection=true;this.onError?.(`Terrain transition: ${e.message}`);}}).finally(()=>transitionRead.destroy());
