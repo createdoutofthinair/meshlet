@@ -43,15 +43,24 @@ fn weatherField(point:vec3<f32>)->vec2<f32>{
  let seed=params.cloud.z;let angle=params.sky.x*params.cloud.y/PLANET_RADIUS;
  let pos=vec3<f32>(point.x,PLANET_RADIUS+point.y,point.z);
  let direction=normalize(vec3<f32>(pos.x*cos(angle)+pos.z*sin(angle),pos.y,-pos.x*sin(angle)+pos.z*cos(angle)));
- let key=vec3<f32>(seed*.071,seed*.039,seed*.053);let regional=direction*22.0+key;
+ let key=vec3<f32>(seed*.071,seed*.039,seed*.053);
+ // Bend the planetary weather coordinates around seeded large-scale vortices.
+ // The three-dimensional direction is continuous across the sphere.
+ let axis=normalize(vec3<f32>(.08+sin(seed*.07)*.08,.99,.07+cos(seed*.09)*.08));
+ let distance=length(cross(direction,axis));let rotation=2.8*exp(-distance*distance*38.0);
+ let swirled=direction*cos(rotation)+cross(axis,direction)*sin(rotation)+axis*dot(axis,direction)*(1.0-cos(rotation));
+ let regional=swirled*22.0+key;
  let warp=vec3<f32>(cloudNoise(regional+vec3<f32>(7,13,3)),cloudNoise(regional+vec3<f32>(19,2,11)),cloudNoise(regional+vec3<f32>(4,17,23)))-.5;
  let warped=regional+warp*2.8;let large=cloudNoise(warped*.65);let medium=cloudNoise(warped*1.9+vec3<f32>(9,3,17));
  let fronts=1.0-abs(2.0*cloudNoise(warped*1.2+vec3<f32>(4,7,21))-1.0);
  return vec2<f32>(clamp(large*.56+medium*.24+fronts*.20,0.0,1.0),cloudNoise(warped*.8+vec3<f32>(12,5,19)));
 }
 fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
- let height=(planetAltitude(p)-1500.0)/1800.0;
- let profile=smoothstep(0.0,.10,height)*(1.0-smoothstep(mix(.46,.72,weather.y),1.0,height));
+ let height=(planetAltitude(p)-1500.0)/6500.0;
+ // Low sheet clouds and taller cumulus coexist, with smooth regional changes.
+ let low=smoothstep(0.0,.055,height)*(1.0-smoothstep(.18,.40,height));
+ let tall=smoothstep(0.0,.08,height)*(1.0-smoothstep(.55,1.0,height));
+ let profile=mix(low,tall,smoothstep(.32,.68,weather.y));
  if(profile<=0.0 || params.sky.w<=0.0){return 0.0;}
  let seed=params.cloud.z;let angle=params.sky.x*params.cloud.y/PLANET_RADIUS;let global=vec3<f32>(p.x,PLANET_RADIUS+p.y,p.z);
  let rotated=vec3<f32>(global.x*cos(angle)+global.z*sin(angle),global.y,-global.x*sin(angle)+global.z*cos(angle));
@@ -79,7 +88,7 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
   let haze=smoothstep(.20,1.0,groundDistance/horizonDistance);
   color=mix(vec3<f32>(.045,.12,.19),vec3<f32>(.26,.49,.67),haze*.8);
  }
- let outer=sphereInterval(origin.y,ray,3300.0);let inner=sphereInterval(origin.y,ray,1500.0);
+ let outer=sphereInterval(origin.y,ray,8000.0);let inner=sphereInterval(origin.y,ray,1500.0);
  if(outer.y>0.0 && outer.y>outer.x){
   var start=max(0.0,outer.x);var end=min(outer.y,groundDistance);
   // A ray can cross the inner sphere: retain the near cloud-shell segment.
@@ -94,8 +103,9 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
     if(transmission<.02){break;}let distance=start+(f32(i)+jitter)*stepSize;let point=origin+ray*distance;let density=cloudDensity(point,weather,detailWeight);
     if(density>.001){
      let optical=density*stepSize*.0018;let alpha=1.0-exp(-optical);
-     let shadow=exp(-cloudDensity(point+sun*280.0,weather,detailWeight)*.8);let phase=.55+.45*pow(max(dot(ray,sun),0.0),6.0);
-     let illumination=mix(vec3<f32>(.32,.38,.43),vec3<f32>(1.0,.86,.68),shadow*phase);
+     let shadow=exp(-cloudDensity(point+sun*420.0,weather,detailWeight)*1.15);let phase=.55+.45*pow(max(dot(ray,sun),0.0),6.0);
+     let cloudHeight=clamp((planetAltitude(point)-1500.0)/6500.0,0.0,1.0);
+     let illumination=mix(vec3<f32>(.24,.31,.39),vec3<f32>(1.0,.92,.80),clamp(shadow*phase*(.70+.45*cloudHeight),0.0,1.0));
      lightAccum+=transmission*alpha*illumination;transmission*=1.0-alpha;
     }
    }
@@ -108,9 +118,10 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  if(tangentDistance>0.0 && groundDistance>1e8){
   let tangentHeight=max(0.0,planetAltitude(origin+ray*tangentDistance));
   let altitudeVisibility=smoothstep(5000.0,60000.0,origin.y);
-  let limb=exp(-tangentHeight/12000.0)*altitudeVisibility;
-  let sunSide=.55+.45*max(dot(ray,sun),0.0);
-  color+=vec3<f32>(.08,.30,.78)*limb*sunSide;
+  let broad=exp(-tangentHeight/40000.0)*altitudeVisibility;
+  let inner=exp(-tangentHeight/9000.0)*altitudeVisibility;
+  let sunSide=.65+.35*max(dot(ray,sun),0.0);
+  color+=((vec3<f32>(.07,.25,.65)*broad)+(vec3<f32>(.22,.42,.65)*inner))*sunSide;
  }
  let mapped=max(color,vec3<f32>(0.0))/(1.0+max(color,vec3<f32>(0.0))*.22);return vec4<f32>(pow(mapped,vec3<f32>(1.0/2.2)),1.0);
 }
