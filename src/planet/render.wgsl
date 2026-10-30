@@ -52,11 +52,10 @@ fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->
  }
  var vert=vertices[slot*GRID_COUNT+(coord.y+2u)*GRID+coord.x+2u];
  var relative:vec3<f32>;
- if(overlay){let displayed=displayedOverlay(slot,q);vert=displayed.vertex;relative=displayed.relative;}
- else{
-  if(morphs.patches[slot].slots.w!=0u){vert=displayedAttributes(slot,q,stitch);}
-  relative=displayedPosition(slot,coord,stitch);
- }
+ if(morphs.patches[slot].slots.w!=0u){
+  let mask=select(stitch,morphs.patches[slot].slots.z&15u,overlay);
+  let displayed=displayedVertex(slot,q,mask);vert=displayed.vertex;relative=displayed.relative;
+ }else{relative=tile.relative.xyz+vert.position.xyz;}
  let local=vert.position.xyz+(relative-(tile.relative.xyz+vert.position.xyz));
  var mask=0u;
  if((frame.counts.w & 8u)!=0u){if(onPatchEdge(b,c)){mask|=1u;}if(onPatchEdge(c,a)){mask|=2u;}if(onPatchEdge(a,b)){mask|=4u;}}
