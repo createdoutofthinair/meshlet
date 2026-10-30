@@ -314,3 +314,17 @@ test('GPU remeasurement refreshes an active morph without restarting its progres
  r.surfaceReads=0;r.advanceTransition({...moved,eye:moved.eye.map((v,i)=>v-m.direction[i]*.001)},900200);
  assert.equal(r.stage,null);await flush();
 });
+
+test('worker selection does not block frames and ignores stale world generations',async()=>{
+ const old=globalThis.Worker;let worker;
+ globalThis.Worker=class {constructor(){worker=this;}postMessage(message){this.message=message;}terminate(){}};
+ try{
+  const {r}=fakeRenderer();r.frame(1000);await flush();assert.ok(worker.message);assert.equal(r.patches.length,0);
+  const first=worker.message;r.resetPatchCache();
+  const {selectPatches}=await import('../src/planet/quadtree.js');
+  worker.onmessage({data:{...first,result:selectPatches(first.camera,first.options),selectionMs:1}});
+  r.frame(1200);await flush();assert.equal(r.patches.length,0);assert.notEqual(worker.message.id,first.id);
+  const next=worker.message;worker.onmessage({data:{...next,result:selectPatches(next.camera,next.options),selectionMs:1}});
+  r.frame(1400);await flush();assert.ok(r.patches.length>0);assert.equal(r.stage,null);
+ }finally{if(old===undefined)delete globalThis.Worker;else globalThis.Worker=old;}
+});

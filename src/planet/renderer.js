@@ -43,6 +43,11 @@ export class PlanetRenderer {
   this.hydrologySeed=null;
   this.regionSeed=null;this.regions=new Map();this.regionFree=Array.from({length:REGION_CAPACITY},(_,i)=>REGION_CAPACITY-1-i);
   this.simulateRegionsForAnalysis=false;
+  if(typeof Worker!=='undefined'){
+   this.selectionWorker=new Worker(new URL('./selection-worker.js',import.meta.url),{type:'module'});
+   this.selectionWorker.onmessage=e=>{if(this.selectionRequest?.id===e.data.id){this.selectionRequest=null;this.selectionResult=e.data;}};
+   this.selectionWorker.onerror=e=>{this.selectionWorker?.terminate();this.selectionWorker=null;this.selectionRequest=null;this.needsSelection=true;this.onError?.(`Terrain selection worker: ${e.message}`);};
+  }
   this.regionLookup=new Uint32Array(REGION_LOOKUPS);this.regionLookup.fill(0xffffffff);
   this.regionMeta=new Uint32Array(REGION_CAPACITY*4);this.regionPending=[];
  }
@@ -183,7 +188,7 @@ export class PlanetRenderer {
   this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
   this.transitionErrors.clear();this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
-  this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
+  this.selectionResult=null;this.selectionRequest=null;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
   this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
  }
  handleDeviceLoss(info){
@@ -239,10 +244,10 @@ export class PlanetRenderer {
    this.needsSelection=true;
   }
  }
- select(camera,now){
+ select(camera,now,computed=null){
   const start=performance.now();
   const maxDepth=this.cameraState.mode==='walk'?22:this.maxDepth;
-  const result=selectPatches(camera,{budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.transitionErrors,previousLeaves:this.coveringLeaves});
+  const result=computed?.result??selectPatches(camera,{budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.transitionErrors,previousLeaves:this.coveringLeaves});
   const wantedNodes=new Map(result.visible.map(p=>[p.key,p]));
   // A changed stitch graph may alter geometry even for a retained patch.
   const signatureFor=node=>{
@@ -278,7 +283,7 @@ export class PlanetRenderer {
    slots.set(node.key,slot);signatures.set(node.key,signature);
    return {...node,slot};
   });
-  const selectionMs=performance.now()-start;
+  const selectionMs=(computed?.selectionMs??0)+performance.now()-start;
   const previousEye=this.selectionState?.eye;
   this.selectionState={eye:[...camera.eye],forward:[...camera.forward],mode:this.cameraState.mode,budget:this.budget,maxDepth,pixelSize:this.pixelSize,width:camera.width,height:camera.height,generation:this.generation};
   this.lastSelection=now;this.needsSelection=false;
@@ -415,7 +420,7 @@ export class PlanetRenderer {
   this.cancelStage();this.needsSelection=true;this.lastSelection=0;
  }
  shouldSelect(camera,now){
-  if(this.stage)return false;
+  if(this.stage||this.selectionRequest)return false;
   if(!this.needsSelection)return false;
   if(!this.patches.length)return true;
   if(now-this.lastSelection<=100)return false;
@@ -517,7 +522,21 @@ export class PlanetRenderer {
   }
   this.advanceTransition(camera,now);
   if(this.stage?.state==='waiting'&&now>=this.stage.nextMeasure){this.stage.state='building';this.transition={...this.transition,waiting:false};}
-  if(this.shouldSelect(camera,now))this.select(camera,now);
+  if(this.selectionResult){
+   const ready=this.selectionResult;this.selectionResult=null;
+   const current=[this.generation,this.cameraState.mode,this.budget,this.maxDepth,this.pixelSize,camera.width,camera.height].join('/');
+   const movement=Math.hypot(...camera.eye.map((x,i)=>x-ready.camera.eye[i]));
+   if(!this.stage&&current===ready.key&&movement<=Math.max(.05,ready.camera.clearance*.7)&&dot(camera.forward,ready.camera.forward)>=Math.cos(20*Math.PI/180))this.select(ready.camera,now,ready);
+   else this.needsSelection=true;
+  }
+  if(this.shouldSelect(camera,now)){
+   if(!this.selectionWorker)this.select(camera,now);
+   else{
+    const id=(this.selectionSerial=(this.selectionSerial||0)+1),key=[this.generation,this.cameraState.mode,this.budget,this.maxDepth,this.pixelSize,camera.width,camera.height].join('/');
+    const options={budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth:this.cameraState.mode==='walk'?22:this.maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.transitionErrors,previousLeaves:this.coveringLeaves};
+    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options});
+   }
+  }
   const stage=this.stage;
   const drawPatches=stage?.state==='transitioning'?stage.drawNodes:this.patches;
   this.stats.visiblePatches=drawPatches.length;

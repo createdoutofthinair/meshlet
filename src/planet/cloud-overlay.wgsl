@@ -50,8 +50,8 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>)->vec4<f32>
    if(farWeight>0.0){distant=orbitalCloud(origin+ray*((start+end)*.5),span,ray,sun);}
    if(farWeight<.999){
    // Long, grazing rays need smaller steps than short vertical views.
-   let targetSteps=max(mix(48.0,96.0,smoothstep(12000.0,100000.0,span)),span/1800.0);
-   let steps=u32(max(16.0,min(144.0,targetSteps)*params.atmosphere.w));
+   let targetSteps=max(mix(32.0,64.0,smoothstep(12000.0,100000.0,span)),span/2700.0);
+   let steps=u32(max(16.0,min(96.0,targetSteps)*params.atmosphere.w));
    let stepSize=(end-start)/f32(steps);let weather=weatherField(origin+ray*((start+end)*.5));
    let footprint=max(stepSize,(start+end)*.58/params.view.y);
    let detail=1.0-smoothstep(900.0,7000.0,footprint);
