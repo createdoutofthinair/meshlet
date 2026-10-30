@@ -318,10 +318,8 @@ export class PlanetRenderer {
    this.stats={...this.stats,leaves:result.leaves.length,deepest:result.deepest,selectionMs,generated:0,normalUpdates:0,reusedNormalUpdates:0};return;
   }
   const oldNodes=new Map(this.patches.map(node=>[node.key,node])),newNodesByKey=new Map(nodes.map(node=>[node.key,node]));
-  const pairs=(computed?.relationships?computed.relationships.map(p=>({
-   fine:(p.fineOld?oldNodes:newNodesByKey).get(p.fineKey),coarse:(p.coarseOld?oldNodes:newNodesByKey).get(p.coarseKey),
-   originX:p.originX,originY:p.originY,scale:p.scale,refining:p.refining
-  })):transitionPairs(this.patches,nodes)).map(p=>{
+  const resolvePair=p=>({fine:(p.fineOld?oldNodes:newNodesByKey).get(p.fineKey),coarse:(p.coarseOld?oldNodes:newNodesByKey).get(p.coarseKey),originX:p.originX,originY:p.originY,scale:p.scale,refining:p.refining});
+  const pairs=(computed?.relationships?computed.relationships.map(resolvePair):transitionPairs(this.patches,nodes)).map(p=>{
    if(!p.fine||!p.coarse)throw new Error('Stale terrain transition relationship');
    return {...p,refining:p.refining??slots.has(p.fine.key)};
   });
@@ -332,7 +330,25 @@ export class PlanetRenderer {
   const matched=new Set(pairs.map(p=>p.refining?p.fine.key:p.coarse.key));
   const uncovered=newNodes.some(n=>!matched.has(n.key));
   // Reuse one ancestry pass for comparison, grouping and coordination.
-  const groups=transitionGroups(this.patches,nodes,pairs),components=coordinateTransitions(this.patches,nodes,groups);
+  let groups,components;
+  if(computed?.groupPlan&&computed?.componentPlan){
+   groups=computed.groupPlan.map(g=>{
+    const coarse=(g.coarseOld?oldNodes:newNodesByKey).get(g.coarseKey),groupPairs=g.pairs.map(p=>{
+     const pair=resolvePair(p);
+     if(g.type==='stitch')delete pair.refining;
+     else if(pair.fine)pair.refining=pair.refining??slots.has(pair.fine.key);
+     return pair;
+    });
+    if(!coarse||groupPairs.some(p=>!p.fine||!p.coarse))throw new Error('Stale terrain transition group');
+    return {key:g.key,type:g.type,coarse,pairs:groupPairs,slots:[...new Set(groupPairs.flatMap(p=>[p.fine.slot,p.coarse.slot]))]};
+   });
+   const byKey=new Map(groups.map(g=>[g.key,g]));
+   components=computed.componentPlan.map(c=>{
+    const componentGroups=c.groupKeys.map(key=>byKey.get(key));
+    if(componentGroups.some(g=>!g))throw new Error('Stale terrain transition component');
+    return {groups:componentGroups,slots:[...new Set(componentGroups.flatMap(g=>g.slots))],deferredReasons:c.deferredReasons};
+   });
+  }else{groups=transitionGroups(this.patches,nodes,pairs);components=coordinateTransitions(this.patches,nodes,groups);}
   this.stage={components,groups,result,nodes,slots,signatures,newNodes,todo:newNodes.map(n=>n.slot),normalPending,pairs,selectionMs,state:'building',generation:this.generation,reference:camera,previousEye,nextMeasure:0,uncovered,hasRefinement:pairs.some(p=>p.refining),waitingSince:null,computedTopology:computed?.topology,packedTopology:computed?.packedTopology};
   this.transition={...this.transition,pending:newNodes.length,waiting:false};
  }
