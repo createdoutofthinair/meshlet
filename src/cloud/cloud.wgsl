@@ -85,17 +85,22 @@ fn cloudDensityWithTerms(p:vec3<f32>,detailWeight:f32,height:f32,terms:CloudWeat
  // At full detail the coarse field has zero contribution to the mix.
  var coarse=0.0;
  if(detailWeight<1.0){coarse=cloudNoise(q*.16+vec3<f32>(8.0,14.0,3.0));}
+ let threshold=terms.threshold;
+ let lower=threshold;
  // Filter the base shape as well as erosion when it becomes subpixel.
  // When the detail weight is exactly zero, its noise and erosion cannot
  // affect the output. Orbital samples always use this filtered path.
  var base=coarse;
  if(detailWeight>0.0){
-  let baseShape=cloudNoise(q)*.68+cloudNoise(q*2.03+vec3<f32>(12.0,3.0,6.0))*.32;
+  let first=cloudNoise(q);
+  // The remaining base octave is at most 1, and erosion adds at most .08.
+  // The margin keeps the rejection conservative under f32 rounding.
+  let upper=coarse*(1.0-detailWeight)+(first*.68+.32001)*detailWeight+.08001*detailWeight;
+  if(upper<=lower){return 0.0;}
+  let baseShape=first*.68+cloudNoise(q*2.03+vec3<f32>(12.0,3.0,6.0))*.32;
   base=mix(coarse,baseShape,detailWeight);
  }
  // Regional humidity gates broad clear areas and dense weather systems.
- let threshold=terms.threshold;
- let lower=threshold;
  // Noise is in [0,1], so erosion can increase density by at most .08 times
  // the detail weight. Samples below that bound cannot produce cloud density.
  if(base+.080001*detailWeight<=lower){return 0.0;}

@@ -9,3 +9,16 @@ test('early cloud-density rejection remains below the density threshold for ever
   }
  }
 });
+
+test('first-octave bound never rejects a nonzero cloud sample',()=>{
+ for(let t=0;t<=20;t++)for(let c=0;c<=20;c++)for(let n=0;n<=20;n++)for(let k=0;k<=20;k++){
+  const detail=t/20,coarse=c/20,first=n/20,threshold=.3+.56*k/20;
+  for(const lower of [threshold,threshold-.04*(1-detail)]){
+   const upper=coarse*(1-detail)+(first*.68+.32001)*detail+.08001*detail;
+   if(upper<=lower)for(const second of [0,.5,1])for(const erosion of [0,.5,1]){
+    const sample=coarse*(1-detail)+(first*.68+second*.32)*detail+(erosion-.5)*.16*detail;
+    assert.ok(sample<=lower+1e-12);
+   }
+  }
+ }
+});
