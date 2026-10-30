@@ -2,7 +2,7 @@ import {PlanetRenderer} from './renderer.js';
 import {SurfaceWalker,WALK_EYE_HEIGHT_KM,directionFromCamera,setCameraDirection,walkStep} from './walk.js';
 import {PlanetInspector} from './inspector.js';
 const $=id=>document.getElementById(id);
-const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','flight-controls','flight-settings','flight-speed','flight-speed-value','fly','walk','walk-help','generation-status','seed-form','seed','river-link','random','orbit','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','transition-error','transition-status','timing-note'];
+const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','flight-controls','flight-settings','flight-speed','flight-speed-value','fly','walk','walk-help','generation-status','seed-form','seed','river-link','random','space','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','transition-error','transition-status','timing-note'];
 const el=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const MIN_ALT=.03,MAX_ALT=30000;
 const fmt=n=>Math.round(n).toLocaleString('en-US');
@@ -72,7 +72,7 @@ async function enterWalk({touchdown=false}={}){
   el['altitude-range'].disabled=true;el.altitude.textContent='1.7 m';el['altitude-overlay'].textContent='1.7 m';
   el['clearance-label'].textContent='EYE HEIGHT';el['clearance-note'].textContent='above the rendered surface';
   el['planet-hint'].textContent='WASD / ARROWS TO WALK  ·  SHIFT TO MOVE FASTER  ·  CLICK OR DRAG TO LOOK  ·  ESC RELEASES MOUSE';
-  el['walk-help'].textContent='WASD or arrow keys to walk; hold Shift to move faster. Click the view to look around, or drag on touch. Esc releases the mouse. Choose Orbit to leave.';
+  el['walk-help'].textContent='WASD or arrow keys to walk; hold Shift to move faster. Click the view to look around, or drag on touch. Esc releases the mouse. Choose Flight to take off.';
  }catch(error){if(epoch===walkEpoch)fail(`Landing: ${error.message}`);}
  finally{if(epoch===walkEpoch){walkLanding=false;el.walk.disabled=false;el.walk.textContent='WALK ON SURFACE';}}
 }
@@ -166,12 +166,12 @@ async function start(){
   const info=renderer.adapter.info;const device=[info?.vendor,info?.architecture,info?.description].filter(Boolean).join(' · ');
   el['device-status'].textContent=device?`WEBGPU / ${device.toUpperCase()}`:'WEBGPU READY';
   el['timing-note'].textContent=renderer.timing?'GPU rendering includes terrain, ocean and clouds; terrain generation runs when patches change.':'GPU timestamps are unavailable on this adapter.';
-  setAltitude(renderer.cameraState.altitude);requestAnimationFrame(frame);
+  setAltitude(renderer.cameraState.altitude);setMode('flight');requestAnimationFrame(frame);
  }catch(error){fail(error.message);}
 }
 el['seed-form'].addEventListener('submit',e=>{e.preventDefault();setSeed(el.seed.value);});
 el.random.addEventListener('click',()=>{const value=new Uint32Array(1);crypto.getRandomValues(value);setSeed(String(value[0]));});
-el.orbit.addEventListener('click',()=>{if(!renderer)return;renderer.cameraState.surfaceHeight=0;setMode('orbit');setAltitude(14000);});
+el.space.addEventListener('click',()=>{if(!renderer)return;renderer.cameraState.surfaceHeight=0;setMode('flight');renderer.cameraState.pitch=1.48;setAltitude(14000);});
 el.walk.addEventListener('click',()=>enterWalk());
 el.fly.addEventListener('click',()=>setMode('flight'));
 el['flight-speed'].addEventListener('input',()=>{el['flight-speed-value'].textContent=`${el['flight-speed'].value} m/s`;});
@@ -185,23 +185,23 @@ el.highlands.addEventListener('click',async()=>{
  }catch(error){fail(error.message);}finally{findBusy=false;el.highlands.disabled=false;el.highlands.textContent='HIGHLANDS';}
 });
 el['find-valleys'].addEventListener('click',async()=>{
- if(!renderer||findBusy)return;setMode('orbit');findBusy=true;el['find-valleys'].disabled=true;el['find-valleys'].textContent='SEARCHING…';
+ if(!renderer||findBusy)return;setMode('flight');findBusy=true;el['find-valleys'].disabled=true;el['find-valleys'].textContent='SEARCHING…';
  try{
   const point=await renderer.findValleys();if(!point)return;
   const d=point.direction;renderer.cameraState.longitude=Math.atan2(d[2],d[0]);renderer.cameraState.latitude=Math.asin(Math.max(-1,Math.min(1,d[1])));
-  renderer.cameraState.mode='orbit';el.mode.value='orbit';setAltitude(4);
+  renderer.cameraState.mode='flight';renderer.cameraState.pitch=1.35;el.mode.value='flight';setAltitude(4);
   renderer.cameraState.surfaceHeight=renderer.ocean?Math.max(0,point.height):point.height;renderer.lastProbeKey='';renderer.needsSelection=true;
  }catch(error){fail(error.message);}finally{findBusy=false;el['find-valleys'].disabled=false;el['find-valleys'].textContent='VALLEYS';}
 });
 el['find-rivers'].addEventListener('click',async()=>{
- if(!renderer||findBusy)return;setMode('orbit');findBusy=true;el['find-rivers'].disabled=true;el['find-rivers'].textContent='SEARCHING…';
+ if(!renderer||findBusy)return;setMode('flight');findBusy=true;el['find-rivers'].disabled=true;el['find-rivers'].textContent='SEARCHING…';
  try{
   let rebuild=!renderer.rivers;
   if(renderer.erosion===0){renderer.erosion=1;el.erosion.value='100';el['erosion-value'].textContent='1.00×';rebuild=true;}
   renderer.rivers=true;el.rivers.checked=true;if(rebuild){renderer.invalidateTerrain();ready=false;loading(true,'Shaping the world');}
   const point=await renderer.findRivers();if(!point)return;
   const d=point.direction;renderer.cameraState.longitude=Math.atan2(d[2],d[0]);renderer.cameraState.latitude=Math.asin(Math.max(-1,Math.min(1,d[1])));
-  renderer.cameraState.mode='orbit';el.mode.value='orbit';setAltitude(25);
+  renderer.cameraState.mode='flight';renderer.cameraState.pitch=1.35;el.mode.value='flight';setAltitude(25);
   renderer.cameraState.surfaceHeight=renderer.ocean?Math.max(0,point.height):point.height;renderer.lastProbeKey='';renderer.needsSelection=true;
  }catch(error){fail(error.message);}finally{findBusy=false;el['find-rivers'].disabled=false;el['find-rivers'].textContent='RIVERS';}
 });

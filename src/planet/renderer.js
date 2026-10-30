@@ -28,7 +28,7 @@ export class PlanetRenderer {
  }
  constructor(canvas,adapter,device,context,timing,onError){
   Object.assign(this,{canvas,adapter,device,context,timing,onError});this.format=navigator.gpu.getPreferredCanvasFormat();
-  this.cameraState={longitude:.8,latitude:.4,altitude:14000,surfaceHeight:0,mode:'orbit',heading:.45,pitch:.3};
+  this.cameraState={longitude:.8,latitude:.4,altitude:14000,surfaceHeight:0,mode:'flight',heading:.45,pitch:1.48};
   this.seed=918273;this.relief=1;this.valleys=1;this.erosion=1;this.regional=true;this.rivers=true;this.biomes=true;this.ocean=true;this.followSun=true;this.culling=true;this.lodColors=false;this.patchColors=false;this.meshletColors=false;this.wireframe=false;this.patchLines=false;this.meshletLines=false;this.debugOpacity=.75;
   this.budget=384;this.pixelSize=6;this.resolution=1;this.maxDepth=20;
   this.patchBytes=new ArrayBuffer(CAPACITY*PATCH_BYTES);this.patchFloats=new Float32Array(this.patchBytes);this.patchUints=new Uint32Array(this.patchBytes);

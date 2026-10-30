@@ -23,7 +23,7 @@ class MockDocument extends EventTarget {
 const doc=new MockDocument();globalThis.document=doc;globalThis.Element=MockElement;globalThis.window=new EventTarget();
 globalThis.location={href:'https://example.test/planet.html',search:''};globalThis.history={replaceState(){}};
 let animation;globalThis.requestAnimationFrame=callback=>{animation=callback;};
-const cameraState={longitude:0,latitude:0,altitude:14000,surfaceHeight:0,mode:'orbit',heading:0,pitch:.3};
+const cameraState={longitude:0,latitude:0,altitude:14000,surfaceHeight:0,mode:'flight',heading:0,pitch:1.48};
 const renderer={cameraState,adapter:{info:{}},timing:false,seed:918273,relief:1,valleys:1,erosion:1,regional:true,rivers:true,ocean:true,budget:384,generation:0,lastSelection:1,
  stats:{visiblePatches:1,deepest:20,leaves:1,generated:1,selectionMs:0},latest:{visibleMeshlets:1,gpuComputeMs:null,gpuRenderMs:null},
  invalidateTerrain(){this.generation++;},frame(){return 1;},
@@ -35,8 +35,9 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const tick=async time=>{const callback=animation;assert.ok(callback);callback(time);await flush();};
 const key=(type,code)=>{const event=new Event(type,{cancelable:true});Object.defineProperty(event,'code',{value:code});doc.dispatchEvent(event);};
 await import('../src/planet/app.js');await flush();
+const initialMode=cameraState.mode,initialFlightControlsVisible=!doc.getElementById('flight-controls').hidden;
 
-test('page lands, walks, responds to terrain changes and returns to orbit',async()=>{
+test('page lands, walks, responds to terrain changes and returns to flight',async()=>{
  doc.getElementById('walk').dispatchEvent(new Event('click'));await flush();
  assert.equal(cameraState.mode,'walk');assert.equal(doc.getElementById('altitude-range').disabled,true);
  assert.equal(renderer.budget,384,'walking keeps the selected patch budget');
@@ -46,8 +47,8 @@ test('page lands, walks, responds to terrain changes and returns to orbit',async
  key('keyup','KeyW');await tick(420);
  doc.getElementById('seed').value='42';doc.getElementById('seed-form').dispatchEvent(new Event('submit',{cancelable:true}));await flush();
  assert.equal(renderer.seed,42);assert.equal(doc.getElementById('river-link').href,'./river.html?seed=42');assert.equal(cameraState.mode,'walk','walk mode relands after a new seed');
- doc.getElementById('orbit').dispatchEvent(new Event('click'));
- assert.equal(cameraState.mode,'orbit');assert.equal(cameraState.altitude,14000);
+ doc.getElementById('space').dispatchEvent(new Event('click'));
+ assert.equal(cameraState.mode,'flight');assert.equal(cameraState.altitude,14000);
  assert.equal(renderer.budget,384);
  assert.equal(doc.getElementById('altitude-range').disabled,false);assert.equal(doc.getElementById('walk-controls').hidden,true);
 });
@@ -61,18 +62,18 @@ test('landing over the ocean chooses a nearby dry sample',async()=>{
 });
 
 test('landing reports when there is no sampled dry land',async()=>{
- doc.getElementById('orbit').dispatchEvent(new Event('click'));
+ doc.getElementById('space').dispatchEvent(new Event('click'));
  renderer.sampleTerrain=async direction=>direction?new Float32Array([...direction,-3]):new Float32Array([1,0,0,-3,0,0,1,-1]);
  doc.getElementById('walk').dispatchEvent(new Event('click'));await flush();
- assert.equal(cameraState.mode,'orbit');assert.equal(doc.getElementById('mode').value,'orbit');
+ assert.equal(cameraState.mode,'flight');assert.equal(doc.getElementById('mode').value,'flight');
  assert.match(doc.getElementById('walk-help').textContent,/No dry landing place/);
 });
 
-test('a patch budget chosen while walking remains selected after returning to orbit',async()=>{
+test('a patch budget chosen while walking remains selected after returning to flight',async()=>{
  renderer.sampleTerrain=async direction=>new Float32Array([...(direction||[1,0,0]),1]);
  doc.getElementById('walk').dispatchEvent(new Event('click'));await flush();
  doc.getElementById('quality').value='240';doc.getElementById('quality').dispatchEvent(new Event('change'));
- assert.equal(renderer.budget,240);doc.getElementById('orbit').dispatchEvent(new Event('click'));assert.equal(renderer.budget,240);
+ assert.equal(renderer.budget,240);doc.getElementById('space').dispatchEvent(new Event('click'));assert.equal(renderer.budget,240);
 });
 
 test('inspector opens, controls real renderer overlays and can pause its graph',async()=>{
@@ -105,34 +106,34 @@ test('tabs expose their panels and atmosphere and cloud sliders update the rende
 
 test('flight button provides speed control and follows the view above terrain',async()=>{
  const element=id=>doc.getElementById(id);renderer.sampleTerrain=async direction=>new Float32Array([...(direction||[1,0,0]),1]);renderer.sampleRenderedSurface=async()=>1;renderer.ocean=true;
- element('orbit').click();cameraState.latitude=0;cameraState.longitude=0;cameraState.surfaceHeight=1;cameraState.altitude=.3;cameraState.heading=0;cameraState.pitch=0;
+ element('space').click();cameraState.latitude=0;cameraState.longitude=0;cameraState.surfaceHeight=1;cameraState.altitude=.3;cameraState.heading=0;cameraState.pitch=0;
  element('flight-speed').value='20';element('fly').click();assert.equal(cameraState.mode,'flight');assert.equal(element('flight-controls').hidden,false);assert.equal(element('flight-settings').hidden,false);
  await tick(10000);key('keydown','KeyW');await tick(10050);key('keyup','KeyW');assert.ok(cameraState.latitude>0,'forward flies over the surface');
  const before=cameraState.altitude;key('keydown','KeyE');await tick(10100);key('keyup','KeyE');assert.ok(cameraState.altitude>before,'E ascends');
  element('flight-speed').value='55';element('flight-speed').dispatchEvent(new Event('input'));assert.equal(element('flight-speed-value').textContent,'55 m/s');
- element('orbit').click();assert.equal(element('flight-controls').hidden,true);
+ element('space').click();assert.equal(element('flight-controls').hidden,false);
 });
 
 test('flight touchdown changes to walk at the rendered dry surface',async()=>{
- const element=id=>doc.getElementById(id);element('orbit').click();cameraState.latitude=0;cameraState.longitude=0;cameraState.surfaceHeight=1;cameraState.altitude=.0018;renderer.ocean=true;renderer.sampleTerrain=async direction=>new Float32Array([...(direction||[1,0,0]),1]);renderer.sampleRenderedSurface=async()=>1;
+ const element=id=>doc.getElementById(id);element('space').click();cameraState.latitude=0;cameraState.longitude=0;cameraState.surfaceHeight=1;cameraState.altitude=.0018;renderer.ocean=true;renderer.sampleTerrain=async direction=>new Float32Array([...(direction||[1,0,0]),1]);renderer.sampleRenderedSurface=async()=>1;
  element('fly').click();cameraState.altitude=.0018;await tick(20000);key('keydown','KeyQ');await tick(20050);await flush();key('keyup','KeyQ');assert.equal(cameraState.mode,'walk');assert.ok(Math.abs(cameraState.altitude-.0017)<1e-9);
 });
 
 
-test('flight from orbit focuses the viewport and W descends toward the planet',async()=>{
- const element=id=>doc.getElementById(id);element('orbit').click();cameraState.latitude=0;cameraState.longitude=0;cameraState.pitch=0;element('view').focused=false;element('fly').click();
+test('flight from space focuses the viewport and W descends toward the planet',async()=>{
+ const element=id=>doc.getElementById(id);element('space').click();cameraState.latitude=0;cameraState.longitude=0;cameraState.pitch=1.48;element('view').focused=false;element('fly').click();
  assert.equal(element('view').focused,true);assert.ok(cameraState.pitch>1.4);const initial=cameraState.altitude;await tick(30000);key('keydown','KeyW');
  for(let i=1;i<=700;i++)await tick(30000+i*50);key('keyup','KeyW');assert.ok(cameraState.mode==='walk'||cameraState.altitude<.1,`descent reached ${cameraState.altitude} km from ${initial}`);
 });
 
 test('flight descent remains practical at intermediate altitudes',async()=>{
- const element=id=>doc.getElementById(id);element('orbit').click();element('fly').click();cameraState.surfaceHeight=0;cameraState.altitude=10;cameraState.pitch=1.48;await tick(80000);key('keydown','KeyW');
+ const element=id=>doc.getElementById(id);element('space').click();element('fly').click();cameraState.surfaceHeight=0;cameraState.altitude=10;cameraState.pitch=1.48;await tick(80000);key('keydown','KeyW');
  for(let i=1;i<=100;i++)await tick(80000+i*50);key('keyup','KeyW');assert.ok(cameraState.altitude<3,`descent reached ${cameraState.altitude} km`);
 });
 
 
 test('descent advances by elapsed time when terrain readback spans several frames',async()=>{
- const element=id=>doc.getElementById(id);element('orbit').click();element('fly').click();cameraState.altitude=10;cameraState.surfaceHeight=0;cameraState.pitch=1.48;
+ const element=id=>doc.getElementById(id);element('space').click();element('fly').click();cameraState.altitude=10;cameraState.surfaceHeight=0;cameraState.pitch=1.48;
  let release;renderer.sampleTerrain=()=>new Promise(resolve=>{release=()=>resolve(new Float32Array([1,0,0,1]));});
  await tick(100000);key('keydown','KeyW');await tick(100050);const before=cameraState.altitude;
  for(let i=2;i<=5;i++)await tick(100000+i*50);release();await flush();assert.ok(cameraState.altitude<before);
@@ -141,8 +142,16 @@ test('descent advances by elapsed time when terrain readback spans several frame
 });
 
 test('continuous descent transitions to walking at dry rendered ground',async()=>{
- const element=id=>doc.getElementById(id);element('orbit').click();element('fly').click();cameraState.altitude=.08;cameraState.surfaceHeight=1;cameraState.pitch=1.48;renderer.ocean=true;
+ const element=id=>doc.getElementById(id);element('space').click();element('fly').click();cameraState.altitude=.08;cameraState.surfaceHeight=1;cameraState.pitch=1.48;renderer.ocean=true;
  renderer.sampleTerrain=async direction=>new Float32Array([...(direction||[1,0,0]),1]);renderer.sampleRenderedSurface=async()=>1;
  await tick(110000);key('keydown','KeyW');for(let i=1;i<200&&cameraState.mode==='flight';i++)await tick(110000+i*50);key('keyup','KeyW');
  assert.equal(cameraState.mode,'walk');assert.equal(cameraState.surfaceHeight,1);assert.equal(cameraState.altitude,.0017);
+});
+
+
+test('planet starts in flight with the flight controls available',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const page=await readFile(new URL('../planet.html',import.meta.url),'utf8');
+ assert.match(page,/<option value="flight" selected>/);assert.doesNotMatch(page,/<option value="orbit"/);
+ assert.equal(initialMode,'flight');assert.equal(initialFlightControlsVisible,true);
 });
