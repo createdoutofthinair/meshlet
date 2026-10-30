@@ -103,11 +103,10 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
  // sphere encloses the tile and the bounded terrain, and avoids false culling.
  const radius=Math.min(2*RADIUS_KM,RADIUS_KM*node.span*.9)+HEIGHT_LIMIT_KM;
  const z=dot(relative,camera.forward),x=dot(relative,camera.right),y=dot(relative,camera.up);
- if(z+radius<camera.near || Math.abs(x)>z*camera.tanX+radius*Math.hypot(1,camera.tanX) || Math.abs(y)>z*camera.tanY+radius*Math.hypot(1,camera.tanY))return 0;
- const eyeLength=length(camera.eye),inner=RADIUS_KM-HEIGHT_LIMIT_KM,outer=RADIUS_KM+HEIGHT_LIMIT_KM;
+ if(z+radius<camera.near || Math.abs(x)>z*camera.tanX+radius*camera.selection.frustumX || Math.abs(y)>z*camera.tanY+radius*camera.selection.frustumY)return 0;
+ const {eyeLength,inner,horizon}=camera.selection;
  if(eyeLength>inner){
   const angle=Math.acos(Math.max(-1,Math.min(1,dot(node.direction,camera.eye)/eyeLength)));
-  const horizon=Math.acos(Math.min(1,inner/eyeLength))+Math.acos(inner/outer);
   if(angle>horizon+Math.min(Math.PI,node.span*1.5))return 0;
  }
  // Projected cell size remains a coverage floor, especially while a patch has
@@ -161,7 +160,9 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
 }
 export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10,previousSplits=null,hysteresis=.1,errorEstimates=null,previousLeaves=null,includeHidden=false}={}) {
  budget=Math.max(6,Math.floor(budget));maxDepth=Math.min(MAX_DEPTH,Math.max(0,maxDepth));
- camera={...camera,facing:directionToFace(camera.eye),focus:directionToFace(camera.focusDirection||camera.eye)};
+ const eyeLength=length(camera.eye),inner=RADIUS_KM-HEIGHT_LIMIT_KM,outer=RADIUS_KM+HEIGHT_LIMIT_KM;
+ const selection={eyeLength,inner,horizon:eyeLength>inner?Math.acos(Math.min(1,inner/eyeLength))+Math.acos(inner/outer):0,frustumX:Math.hypot(1,camera.tanX),frustumY:Math.hypot(1,camera.tanY)};
+ camera={...camera,selection,facing:directionToFace(camera.eye),focus:directionToFace(camera.focusDirection||camera.eye)};
  let leaves=new Map();for(let face=0;face<6;face++){const n=makeTile(face,0,0,0);leaves.set(n.key,n);}
  // A node's projected priority cannot change during one selection: the camera,
  // previous splits and error estimates are fixed. Cache it instead of repeating
