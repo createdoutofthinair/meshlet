@@ -1,19 +1,23 @@
 // Slot-indexed transition metadata. Disabled entries never read a parent.
 fn displayedPosition(slot:u32,point:vec2<u32>,mask:u32)->vec3<f32>{
- let fine=at(slot,point,mask);let morph=morphs.patches[slot];
+ let morph=morphs.patches[slot];
+ if(morph.slots.w!=0u && morph.mapping.w<=0.0){
+  let actual=stitchCoord(point,mask);
+  return parentSurface(morph.slots.x,morph.mapping.xy+vec2<f32>(actual)*morph.mapping.z,morph.slots.y);
+ }
+ let fine=at(slot,point,mask);
  if(morph.slots.w==0u || morph.mapping.w>=1.0){return fine;}
  let actual=stitchCoord(point,mask);
  let coarse=parentSurface(morph.slots.x,morph.mapping.xy+vec2<f32>(actual)*morph.mapping.z,morph.slots.y);
- if(morph.mapping.w<=0.0){return coarse;}
  return mix(coarse,fine,morph.mapping.w);
 }
 
 fn displayedSample(slot:u32,q:vec2<f32>)->vec3<f32>{
  let m=morphs.patches[slot];
+ if(m.mapping.w<=0.0){return parentSurface(m.slots.x,m.mapping.xy+q*m.mapping.z,m.slots.y);}
  let fine=parentSurface(slot,q,m.slots.z&15u);
  if(m.mapping.w>=1.0){return fine;}
  let coarse=parentSurface(m.slots.x,m.mapping.xy+q*m.mapping.z,m.slots.y);
- if(m.mapping.w<=0.0){return coarse;}
  return mix(coarse,fine,m.mapping.w);
 }
 
