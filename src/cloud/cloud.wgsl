@@ -181,18 +181,18 @@ fn cloudDensityWithTerms(p:vec3<f32>,detailWeight:f32,height:f32,terms:CloudWeat
    // Long, shallow views cross more of the cloud volume and need more
    // samples; otherwise repeated sampling planes appear as stripes.
    let steps=u32(mix(48.0,96.0,smoothstep(12000.0,100000.0,end-start)));let stepSize=(end-start)/f32(steps);var transmission=1.0;var lightAccum=vec3<f32>(0.0);
-   let midpoint=origin+ray*((start+end)*.5);let weather=weatherField(midpoint);
+   let midpoint=origin+ray*((start+end)*.5);let weather=weatherField(midpoint);let terms=cloudWeatherTerms(weather);
    let footprint=max(stepSize,(start+end)*.58/params.view.y);
    let detailWeight=1.0-smoothstep(650.0,3400.0,footprint);
    // A per-pixel offset breaks up aligned ray-march slices without
    // time-varying noise or flicker when the camera is stationary.
-   let jitter=cloudHash(vec3<f32>(floor(input.pos.xy),1.0));
+   let jitter=cloudHash(vec3<f32>(floor(input.pos.xy),1.0));let phase=.55+.45*pow(max(dot(ray,sun),0.0),6.0);
    for(var i=0u;i<steps;i++){
-    if(transmission<.02){break;}let distance=start+(f32(i)+jitter)*stepSize;let point=origin+ray*distance;let density=cloudDensity(point,weather,detailWeight);
+    if(transmission<.02){break;}let distance=start+(f32(i)+jitter)*stepSize;let point=origin+ray*distance;let height=(planetAltitude(point)-1500.0)/6500.0;let density=cloudDensityWithTerms(point,detailWeight,height,terms);
     if(density>.001){
      let optical=density*stepSize*.0018;let alpha=1.0-exp(-optical);
-     let shadow=exp(-cloudDensity(point+sun*420.0,weather,detailWeight)*1.15);let phase=.55+.45*pow(max(dot(ray,sun),0.0),6.0);
-     let cloudHeight=clamp((planetAltitude(point)-1500.0)/6500.0,0.0,1.0);
+     let shadow=exp(-cloudDensityPrepared(point+sun*420.0,detailWeight,terms)*1.15);
+     let cloudHeight=clamp(height,0.0,1.0);
      let cloudUp=normalize(vec3<f32>(point.x,PLANET_RADIUS+point.y,point.z));
      let cloudSun=dot(cloudUp,sun);let cloudDay=atmosphereDaylight(cloudSun);let cloudTwilight=atmosphereTwilight(cloudSun);
      let cool=mix(vec3<f32>(.018,.025,.05),vec3<f32>(.24,.31,.39),cloudDay);
