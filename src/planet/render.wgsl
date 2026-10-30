@@ -29,14 +29,6 @@ fn onMeshletEdge(a:vec2<u32>,b:vec2<u32>)->bool {
 fn debugHash(value:u32)->u32{
  var x=value;x=(x^(x>>16u))*2246822519u;x=(x^(x>>13u))*3266489917u;return x^(x>>16u);
 }
-fn stitchCoord(point:vec2<u32>,stitch:u32)->vec2<u32>{
- var p=point;
- if(p.x==0u && (stitch&1u)!=0u && p.y%2u!=0u){p.y-=1u;}
- if(p.x==CELLS && (stitch&2u)!=0u && p.y%2u!=0u){p.y-=1u;}
- if(p.y==0u && (stitch&4u)!=0u && p.x%2u!=0u){p.x-=1u;}
- if(p.y==CELLS && (stitch&8u)!=0u && p.x%2u!=0u){p.x-=1u;}
- return p;
-}
 @vertex
 fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->Output {
  let entry=visible[instance];let slot=entry>>4u;let meshlet=entry&15u;let tile=patches[slot];

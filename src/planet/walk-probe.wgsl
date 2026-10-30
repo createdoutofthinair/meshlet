@@ -4,19 +4,6 @@ struct WalkProbe {origin:vec4<f32>,direction:vec4<f32>,cell:vec4<u32>};
 @group(0) @binding(2) var<uniform> probe:WalkProbe;
 @group(0) @binding(3) var<storage,read_write> result:array<vec4<f32>>;
 
-// Match the render shader's collapsed edge vertices at 2:1 LOD boundaries.
-fn walkStitch(point:vec2<u32>,stitch:u32)->vec2<u32>{
- var p=point;
- if(p.x==0u && (stitch&1u)!=0u && p.y%2u!=0u){p.y-=1u;}
- if(p.x==CELLS && (stitch&2u)!=0u && p.y%2u!=0u){p.y-=1u;}
- if(p.y==0u && (stitch&4u)!=0u && p.x%2u!=0u){p.x-=1u;}
- if(p.y==CELLS && (stitch&8u)!=0u && p.x%2u!=0u){p.x-=1u;}
- return p;
-}
-fn walkVertex(slot:u32,point:vec2<u32>,stitch:u32)->vec3<f32>{
- let p=walkStitch(point,stitch);
- return patches[slot].relative.xyz+vertices[slot*GRID_COUNT+(p.y+2u)*GRID+p.x+2u].position.xyz;
-}
 @compute @workgroup_size(1)
 fn main(){
  let slot=probe.cell.x;let tile=patches[slot];let origin=probe.origin.xyz;let ray=normalize(probe.direction.xyz);
@@ -28,9 +15,9 @@ fn main(){
   let cell=vec2<u32>(u32(cx),u32(cy));
   let offsets=array<vec2<u32>,6>(vec2<u32>(0u,0u),vec2<u32>(1u,0u),vec2<u32>(0u,1u),vec2<u32>(1u,0u),vec2<u32>(1u,1u),vec2<u32>(0u,1u));
   for(var tri=0u;tri<2u;tri++){
-   let a=walkVertex(slot,cell+offsets[tri*3u],tile.details.z);
-   let b=walkVertex(slot,cell+offsets[tri*3u+1u],tile.details.z);
-   let c=walkVertex(slot,cell+offsets[tri*3u+2u],tile.details.z);
+   let a=at(slot,cell+offsets[tri*3u],tile.details.z);
+   let b=at(slot,cell+offsets[tri*3u+1u],tile.details.z);
+   let c=at(slot,cell+offsets[tri*3u+2u],tile.details.z);
    let ab=b-a;let ac=c-a;let normal=cross(ab,ac);let denom=dot(normal,ray);
    if(abs(denom)<1e-13){continue;}
    let t=dot(normal,a-origin)/denom;let ap=origin+ray*t-a;
