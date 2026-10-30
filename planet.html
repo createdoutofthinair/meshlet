@@ -106,6 +106,9 @@
    <div class="debug-toggles planet-toggles"><label><input id="culling" type="checkbox" checked><span>GPU meshlet frustum culling</span></label></div>
    <button id="inspect-open-panel" class="inspector-panel-button" type="button" aria-controls="planet-inspector" aria-expanded="false">OPEN TERRAIN INSPECTOR <span>↗</span></button>
    <p class="metric-note">Walking keeps your selected budget. The inspector shows LODs, patch and meshlet overlays, and measurement history.</p>
+   <div class="section-title"><span>STATISTICS RECORDING</span><span>NO VIDEO</span></div>
+   <div class="planet-actions"><button id="stats-start" type="button">START RECORDING</button><button id="stats-stop" type="button" disabled>STOP &amp; DOWNLOAD</button></div>
+   <p class="metric-note" id="stats-status" aria-live="polite">Record a flight or walk and download performance samples as JSON.</p>
    <div class="section-title"><span>LIVE PERFORMANCE</span><span>04 / 04</span></div>
    <div class="planet-stats"><div><span>FRAME RATE</span><strong><b id="fps">—</b> <small>FPS</small></strong></div><div><span>FRAME TIME</span><strong><b id="frame-ms">—</b> <small>ms</small></strong></div></div>
    <div class="stat-row"><span>Visible patches</span><strong id="patches">—</strong></div><div class="stat-row"><span>Quadtree levels</span><strong id="depth">—</strong></div><div class="stat-row"><span>Visible meshlets</span><strong id="meshlets">—</strong></div><div class="stat-row"><span>Submitted triangles</span><strong id="triangles">—</strong></div><div class="stat-row"><span>CPU patch selection</span><strong id="selection-ms">—</strong></div><div class="stat-row"><span id="compute-label">GPU visibility</span><strong id="compute-ms">—</strong></div><div class="stat-row"><span>GPU rendering + clouds</span><strong id="render-ms">—</strong></div>

@@ -1,5 +1,6 @@
 import {PlanetRenderer} from './renderer.js';
 import {SurfaceWalker,WALK_EYE_HEIGHT_KM,directionFromCamera,setCameraDirection,walkStep} from './walk.js';
+import {StatisticsRecorder} from './statistics-recorder.js';
 import {PlanetInspector} from './inspector.js';
 const $=id=>document.getElementById(id);
 const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','flight-controls','flight-settings','flight-speed','flight-speed-value','fly','walk','walk-help','generation-status','seed-form','seed','river-link','random','space','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','transition-error','transition-status','timing-note'];
@@ -15,7 +16,9 @@ function seedNumber(value){
  let h=2166136261;for(const byte of new TextEncoder().encode(value)){h^=byte;h=Math.imul(h,16777619);}return h>>>0;
 }
 let renderer,walker,previous=0,frames=[],cpuFrames=[],ready=false,findBusy=false,walkEpoch=0,walkLanding=false;
-const inspector=new PlanetInspector(()=>renderer);
+const inspector=new PlanetInspector(()=>renderer),statistics=new StatisticsRecorder();
+function downloadStats(data){const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download='planet-performance.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function stopStats(){if(!statistics.startedUtc)return;const report=statistics.stop(performance.now());downloadStats(report);$('stats-start').disabled=false;$('stats-stop').disabled=true;$('stats-status').textContent=`Saved ${report.samples.length} samples${report.truncated?' · recording limit reached':''}.`;}
 const keys=new Set(),touchWalk=new Set(),touchFlight=new Set(),orbitHint=el['planet-hint'].innerHTML;
 const inputForWalk=()=>({forward:Number(keys.has('KeyW')||keys.has('ArrowUp')||(touchWalk.has('forward')||touchFlight.has('forward')))-Number(keys.has('KeyS')||keys.has('ArrowDown')||(touchWalk.has('back')||touchFlight.has('back'))),strafe:Number(keys.has('KeyD')||keys.has('ArrowRight')||(touchWalk.has('right')||touchFlight.has('right')))-Number(keys.has('KeyA')||keys.has('ArrowLeft')||(touchWalk.has('left')||touchFlight.has('left'))),fast:keys.has('ShiftLeft')||keys.has('ShiftRight')});
 function loading(show,title='Creating your world',detail='Generating terrain on the GPU'){el.loading.hidden=!show;el['loading-title'].textContent=title;el['loading-detail'].textContent=detail;}
@@ -153,7 +156,7 @@ function frame(now){
   advanceFlight(now);walker?.advance(now);
   const cpu=renderer.frame(now);
   if(cpu!=null)walker?.afterFrame();
-  if(cpu!=null){const delta=previous?now-previous:0;previous=now;if(delta>0&&delta<5000){frames.push(delta);if(frames.length>60)frames.shift();}cpuFrames.push(cpu);if(cpuFrames.length>60)cpuFrames.shift();inspector.record(now,delta,cpu);}
+  if(cpu!=null){const delta=previous?now-previous:0;previous=now;if(delta>0&&delta<5000){frames.push(delta);if(frames.length>60)frames.shift();}cpuFrames.push(cpu);if(cpuFrames.length>60)cpuFrames.shift();inspector.record(now,delta,cpu);statistics.record(now,delta,cpu,renderer);if(statistics.startedUtc&&!statistics.active&&!$('stats-stop').disabled)stopStats();}
   if(!ready&&renderer.latest.visibleMeshlets!=null){ready=true;loading(false);}
   updateTelemetry();
  }catch(error){fail(error.message);}
@@ -169,6 +172,8 @@ async function start(){
   setAltitude(renderer.cameraState.altitude);setMode('flight');requestAnimationFrame(frame);
  }catch(error){fail(error.message);}
 }
+$('stats-start').addEventListener('click',()=>{if(!renderer)return;statistics.start(performance.now(),renderer);$('stats-start').disabled=true;$('stats-stop').disabled=false;$('stats-status').textContent=renderer.timing?'Recording · GPU pass timings available.':'Recording · GPU timestamps unavailable; CPU and frame statistics only.';});
+$('stats-stop').addEventListener('click',stopStats);
 el['seed-form'].addEventListener('submit',e=>{e.preventDefault();setSeed(el.seed.value);});
 el.random.addEventListener('click',()=>{const value=new Uint32Array(1);crypto.getRandomValues(value);setSeed(String(value[0]));});
 el.space.addEventListener('click',()=>{if(!renderer)return;renderer.cameraState.surfaceHeight=0;setMode('flight');renderer.cameraState.pitch=1.48;setAltitude(14000);});

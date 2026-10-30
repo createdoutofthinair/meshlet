@@ -140,7 +140,7 @@ export class PlanetRenderer {
   this.pointBind=bindEntries(this.pointPipe,[[0,this.uniform],[4,this.plates],[5,this.sampleBuffer],[6,this.probeInput],...worldEntries]);
   this.walkProbeBind=bind(this.walkProbePipe,[this.patchBuffer,this.vertices,this.walkProbeInput,this.walkProbeResult]);
   this.riverBind=bindEntries(this.riverPipe,[[5,this.sampleBuffer],[7,this.world],[8,this.worldDirections]]);
-  if(this.timing){this.queries=d.createQuerySet({type:'timestamp',count:4});this.resolve=make('GPU timestamp resolve',32,BUFFER.QUERY_RESOLVE|BUFFER.COPY_SRC);}
+  if(this.timing){this.queries=d.createQuerySet({type:'timestamp',count:8});this.resolve=make('GPU timestamp resolve',64,BUFFER.QUERY_RESOLVE|BUFFER.COPY_SRC);}
   d.queue.writeBuffer(this.plates,0,seedPlates(this.seed));
  }
  ensureHydrology(){
@@ -454,16 +454,16 @@ export class PlanetRenderer {
    {view:colorView,clearValue:{r:.006,g:.009,b:.016,a:1},loadOp:'clear',storeOp:'store'},
    {view:this.waterDepth.createView(),clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}
   ],depthStencilAttachment:{view:depthView,depthClearValue:0,depthLoadOp:'clear',depthStoreOp:separateOcean||cloudActive?'store':'discard'}};
-  if(sample&&this.timing)descriptor.timestampWrites=separateOcean||cloudActive?{querySet:this.queries,beginningOfPassWriteIndex:2}:{querySet:this.queries,beginningOfPassWriteIndex:2,endOfPassWriteIndex:3};
+  if(sample&&this.timing)descriptor.timestampWrites={querySet:this.queries,beginningOfPassWriteIndex:2,endOfPassWriteIndex:3};
   const pass=encoder.beginRenderPass(descriptor);pass.setPipeline(this.renderPipe);pass.setBindGroup(0,this.renderBind);pass.drawIndirect(this.indirect,0);pass.end();
   if(separateOcean){
    const waterDescriptor={colorAttachments:[{view:colorView,loadOp:'load',storeOp:'store'}],depthStencilAttachment:{view:depthView,depthLoadOp:'load',depthStoreOp:cloudActive?'store':'discard'}};
-   if(sample&&this.timing&&!cloudActive)waterDescriptor.timestampWrites={querySet:this.queries,endOfPassWriteIndex:3};
+   if(sample&&this.timing)waterDescriptor.timestampWrites={querySet:this.queries,beginningOfPassWriteIndex:4,endOfPassWriteIndex:5};
    const waterPass=encoder.beginRenderPass(waterDescriptor);waterPass.setPipeline(this.oceanPipe);waterPass.setBindGroup(0,this.oceanBind);waterPass.draw(3);waterPass.end();
   }
-  if(cloudActive){const cloudDescriptor={colorAttachments:[{view:colorView,loadOp:'load',storeOp:'store'}]};if(sample&&this.timing)cloudDescriptor.timestampWrites={querySet:this.queries,endOfPassWriteIndex:3};const clouds=encoder.beginRenderPass(cloudDescriptor);clouds.setPipeline(this.cloudPipe);clouds.setBindGroup(0,this.cloudBind);clouds.draw(3);clouds.end();}
+  if(cloudActive){const cloudDescriptor={colorAttachments:[{view:colorView,loadOp:'load',storeOp:'store'}]};if(sample&&this.timing)cloudDescriptor.timestampWrites={querySet:this.queries,beginningOfPassWriteIndex:6,endOfPassWriteIndex:7};const clouds=encoder.beginRenderPass(cloudDescriptor);clouds.setPipeline(this.cloudPipe);clouds.setBindGroup(0,this.cloudBind);clouds.draw(3);clouds.end();}
   const measured=sample?this.patches.map(({key,slot})=>({key,slot})):null;
-  let readback;if(sample){readback=d.createBuffer({size:48+CAPACITY*4,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});encoder.copyBufferToBuffer(this.indirect,0,readback,0,16);encoder.copyBufferToBuffer(this.lodErrorBuffer,0,readback,48,CAPACITY*4);if(this.timing){encoder.resolveQuerySet(this.queries,0,4,this.resolve,0);encoder.copyBufferToBuffer(this.resolve,0,readback,16,32);}}
+  let readback;if(sample){readback=d.createBuffer({size:80+CAPACITY*4,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});encoder.copyBufferToBuffer(this.indirect,0,readback,0,16);encoder.copyBufferToBuffer(this.lodErrorBuffer,0,readback,80,CAPACITY*4);if(this.timing){encoder.resolveQuerySet(this.queries,0,8,this.resolve,0);encoder.copyBufferToBuffer(this.resolve,0,readback,16,64);}}
   let transitionRead;if(compare&&stage.pairs.length){
    stage.state='measuring';transitionRead=d.createBuffer({size:stage.pairs.length*8,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});
    encoder.copyBufferToBuffer(this.transitionErrorBuffer,0,transitionRead,0,stage.pairs.length*8);
@@ -486,13 +486,13 @@ export class PlanetRenderer {
    transitionRead.unmap();
   }).catch(e=>{if(this.stage===stage){this.cancelStage();this.needsSelection=true;this.onError?.(`Terrain transition: ${e.message}`);}}).finally(()=>transitionRead.destroy());
   if(readback){const generation=this.generation;readback.mapAsync(GPUMapMode.READ).then(()=>{
-   const data=readback.getMappedRange(),visibleMeshlets=new Uint32Array(data,0,4)[1];let gpuComputeMs=null,gpuRenderMs=null;
-   if(this.timing){const t=new BigUint64Array(data,16,4);if(t[1]>=t[0]&&t[3]>=t[2]){gpuComputeMs=Number(t[1]-t[0])/1e6;gpuRenderMs=Number(t[3]-t[2])/1e6;}}
+   const data=readback.getMappedRange(),visibleMeshlets=new Uint32Array(data,0,4)[1];let gpuComputeMs=null,gpuRenderMs=null,gpuTerrainMs=null,gpuOceanMs=null,gpuCloudMs=null;
+   if(this.timing){const t=new BigUint64Array(data,16,8);const elapsed=(a,b)=>t[b]>=t[a]?Number(t[b]-t[a])/1e6:null;gpuComputeMs=elapsed(0,1);gpuTerrainMs=elapsed(2,3);gpuOceanMs=separateOcean?elapsed(4,5):null;gpuCloudMs=cloudActive?elapsed(6,7):null;gpuRenderMs=gpuTerrainMs==null?null:gpuTerrainMs+(gpuOceanMs??0)+(gpuCloudMs??0);}
    if(generation===this.generation){
-    const residuals=new Float32Array(data,48,CAPACITY);
+    const residuals=new Float32Array(data,80,CAPACITY);
     for(const {key,slot} of measured){const error=residuals[slot];if(Number.isFinite(error)&&error>=0){this.lodErrors.delete(key);this.lodErrors.set(key,error);}}
     while(this.lodErrors.size>8192)this.lodErrors.delete(this.lodErrors.keys().next().value);
-    this.latest={visibleMeshlets,gpuComputeMs,gpuRenderMs,generatedPatchesSample:generatedOnSample};
+    this.latest={visibleMeshlets,gpuComputeMs,gpuRenderMs,gpuTerrainMs,gpuOceanMs,gpuCloudMs,gpuSampleAt:now,generatedPatchesSample:generatedOnSample};
    }readback.unmap();
   }).catch(e=>this.onError?.(`GPU telemetry: ${e.message}`)).finally(()=>{readback.destroy();this.pendingRead=false;});}
   return performance.now()-cpuStart;
