@@ -51,15 +51,12 @@ fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->
   a=morphs.coordinates[first];b=morphs.coordinates[first+1u];c=morphs.coordinates[first+2u];
  }
  var vert=vertices[slot*GRID_COUNT+(coord.y+2u)*GRID+coord.x+2u];
- if(morphs.patches[slot].slots.w!=0u){
-  let attributeMask=select(stitch,morphs.patches[slot].slots.z&15u,overlay);
-  vert=displayedAttributes(slot,q,attributeMask);
- }
- // Overlay geometry samples its fractional coordinates; evaluating the
- // regular-grid position first would perform an unused parent lookup.
  var relative:vec3<f32>;
- if(overlay){relative=displayedSample(slot,q);}
- else{relative=displayedPosition(slot,coord,stitch);}
+ if(overlay){let displayed=displayedOverlay(slot,q);vert=displayed.vertex;relative=displayed.relative;}
+ else{
+  if(morphs.patches[slot].slots.w!=0u){vert=displayedAttributes(slot,q,stitch);}
+  relative=displayedPosition(slot,coord,stitch);
+ }
  let local=vert.position.xyz+(relative-(tile.relative.xyz+vert.position.xyz));
  var mask=0u;
  if((frame.counts.w & 8u)!=0u){if(onPatchEdge(b,c)){mask|=1u;}if(onPatchEdge(c,a)){mask|=2u;}if(onPatchEdge(a,b)){mask|=4u;}}
