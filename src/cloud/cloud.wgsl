@@ -87,6 +87,9 @@ fn cloudDensityWithTerms(p:vec3<f32>,detailWeight:f32,height:f32,terms:CloudWeat
  if(detailWeight<1.0){coarse=cloudNoise(q*.16+vec3<f32>(8.0,14.0,3.0));}
  let threshold=terms.threshold;
  let lower=threshold;
+ // Both fine octaves are bounded by 1 and erosion adds at most .08.
+ // A clear coarse sample can therefore skip all remaining noise evaluation.
+ if(coarse*(1.0-detailWeight)+1.08002*detailWeight<=lower){return 0.0;}
  // Filter the base shape as well as erosion when it becomes subpixel.
  // When the detail weight is exactly zero, its noise and erosion cannot
  // affect the output. Orbital samples always use this filtered path.

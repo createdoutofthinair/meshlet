@@ -22,3 +22,16 @@ test('first-octave bound never rejects a nonzero cloud sample',()=>{
   }
  }
 });
+
+test('coarse cloud bound cannot reject a sample with positive density',()=>{
+ for(let t=0;t<=50;t++)for(let c=0;c<=50;c++)for(let k=0;k<=50;k++){
+  const detail=t/50,coarse=c/50,threshold=.3+.56*k/50;
+  for(const lower of [threshold,threshold-.04*(1-detail)]){
+   const upper=coarse*(1-detail)+1.08002*detail;
+   if(upper<=lower)for(const first of [0,.5,1])for(const second of [0,.5,1])for(const erosion of [0,.5,1]){
+    const sample=coarse*(1-detail)+(first*.68+second*.32)*detail+(erosion-.5)*.16*detail;
+    assert.ok(sample<=lower+1e-12);
+   }
+  }
+ }
+});
