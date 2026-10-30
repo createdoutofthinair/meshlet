@@ -188,7 +188,7 @@ export class PlanetRenderer {
   this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
   this.transitionErrors.clear();this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
-  this.selectionResult=null;this.selectionRequest=null;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
+  this.selectionResult=null;this.selectionRequest=null;this.reconcileSelection=false;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
   this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
  }
  handleDeviceLoss(info){
@@ -286,7 +286,7 @@ export class PlanetRenderer {
   const selectionMs=(computed?.selectionMs??0)+performance.now()-start;
   const previousEye=this.selectionState?.eye;
   this.selectionState={eye:[...camera.eye],forward:[...camera.forward],mode:this.cameraState.mode,budget:this.budget,maxDepth,pixelSize:this.pixelSize,width:camera.width,height:camera.height,generation:this.generation};
-  this.lastSelection=now;this.needsSelection=false;
+  this.lastSelection=now;this.needsSelection=false;this.reconcileSelection=false;
   if(!this.patches.length){
    this.slotByKey=slots;this.stitchByKey=signatures;this.patches=nodes;this.previousSplits=result.splits;this.coveringLeaves=result.leaves;
    this.pending=newNodes.map(n=>n.slot);this.normalPending=normalPending;
@@ -394,7 +394,7 @@ export class PlanetRenderer {
   // on which neighboring LOD is currently selected.
   this.normalPending=[];
   this.stats={leaves:stage.result.leaves.length,visiblePatches:stage.nodes.length,deepest:stage.result.deepest,selectionMs:stage.selectionMs,generated:stage.newNodes.length,normalUpdates:stage.normalPending.length,reusedNormalUpdates:0};
-  this.stage=null;this.surfaceRevision++;this.needsSelection=true;this.lastSelection=now;this.transition={...this.transition,pending:0,waiting:false,capacityDeferred:false,morphProgress:null,retainedParents:0,reselectionPending:false};
+  this.stage=null;this.surfaceRevision++;this.needsSelection=true;this.reconcileSelection=true;this.lastSelection=now;this.transition={...this.transition,pending:0,waiting:false,capacityDeferred:false,morphProgress:null,retainedParents:0,reselectionPending:false};
  }
  selectionSettingsChanged(camera){
   const s=this.selectionState,maxDepth=this.cameraState.mode==='walk'?22:this.maxDepth;
@@ -424,9 +424,12 @@ export class PlanetRenderer {
   if(!this.needsSelection)return false;
   if(!this.patches.length)return true;
   if(now-this.lastSelection<=100)return false;
-  if(this.cameraState.mode!=='walk')return true;
+  if(this.reconcileSelection||this.selectionSettingsChanged(camera))return true;
   const s=this.selectionState;
-  if(this.selectionSettingsChanged(camera))return true;
+  if(this.cameraState.mode!=='walk'){
+   const distance=Math.hypot(...camera.eye.map((x,i)=>x-s.eye[i]));
+   return distance>=Math.max(.00075,Math.min(20,camera.clearance*.02))||dot(camera.forward,s.forward)<Math.cos(2*Math.PI/180);
+  }
   // A full balanced selection is expensive. At walking speed, wait until the
   // camera moves 75 cm or turns five degrees; retained patches are still drawn
   // from the current camera every frame. This also limits small LOD churn.

@@ -328,3 +328,12 @@ test('worker selection does not block frames and ignores stale world generations
   r.frame(1400);await flush();assert.ok(r.patches.length>0);assert.equal(r.stage,null);
  }finally{if(old===undefined)delete globalThis.Worker;else globalThis.Worker=old;}
 });
+
+test('flight selection waits for meaningful camera movement but continues pending LOD reconciliation',async()=>{
+ const {r}=fakeRenderer();r.frame(1000);await flush();
+ const {planetCamera}=await import('../src/planet/camera.js');const camera=planetCamera(r.cameraState,960,600);
+ r.needsSelection=true;assert.equal(r.shouldSelect(camera,1200),false);
+ assert.equal(r.shouldSelect({...camera,eye:camera.eye.map((x,i)=>x+(i===0?25:0))},1200),true);
+ r.reconcileSelection=true;assert.equal(r.shouldSelect(camera,1200),true);
+ r.reconcileSelection=false;r.pixelSize++;assert.equal(r.shouldSelect(camera,1200),true);
+});
