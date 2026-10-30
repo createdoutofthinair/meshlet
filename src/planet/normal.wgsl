@@ -25,7 +25,7 @@ fn main(@builtin(global_invocation_id) gid:vec3<u32>){
  let direction=normalize(tile.centerDirection.xyz+tile.centerLow.xyz+delta);
  if(frame.settings.z>.5 && vert.position.w<0.0){vertices[base].normal=vec4<f32>(direction,0.0);vertices[base].surface=vec4<f32>(vert.surface.xy,0.0,0.0);return;}
  var east=cross(vec3<f32>(0.0,1.0,0.0),direction);
- if(length(east)<.000001){east=cross(vec3<f32>(1.0,0.0,0.0),direction);}
+ if(dot(east,east)<.000000000001){east=cross(vec3<f32>(1.0,0.0,0.0),direction);}
  east=normalize(east);let north=normalize(cross(direction,east));let seed=frame.counts.z;
  let center=select(vert.surface.z,max(vert.surface.z,0.0),frame.settings.z>.5);
  let fine=worldSlopes(direction,tile.centerDirection.xyz,tile.centerLow.xyz,delta,east,north,center,.002,seed);

@@ -6,6 +6,9 @@ const HEIGHT_LIMIT:f32=10.0;
 @group(0) @binding(4) var<storage,read> plates: array<vec4<f32>>;
 @group(0) @binding(11) var<storage,read> riverMasks:array<vec2<f32>>;
 fn carveRiver(base:SurfaceData,river:vec2<f32>)->SurfaceData{
+ // No channel can change the surface when any of these factors is zero.
+ // Most samples are outside rivers, so avoid the logarithm in that case.
+ if(river.x==0.0 || frame.hydrology.x==0.0 || base.height<=.03 || base.lake>=1.0){return base;}
  let channel=river.x*smoothstep(.03,.3,base.height)*(1.0-base.lake);
  var h=base.height-channel*clamp(.006+.006*log2(1.0+river.y),.006,.04)*frame.hydrology.x;
  if(base.height>0.0){h=max(base.height*.10,h);}
