@@ -41,7 +41,7 @@ export class PlanetRenderer {
   this.transitionTargetPixels=TRANSITION_TARGET_PIXELS;
   this.lastSample=0;this.pendingRead=false;this.generation=0;this.surfaceRevision=0;this.inFlight=0;this.probePending=false;this.lastProbeKey='';this.lastProbeTime=0;this.stats={leaves:0,visiblePatches:0,deepest:0,selectionMs:0,generated:0};
   this.probeReadbacks=[];
-  this.terrainFieldRevision=0;this.terrainPointCache=null;
+  this.terrainFieldRevision=0;this.terrainPointCache=null;this.terrainPointInFlight=new Map();
   this.hydrologySeed=null;
   this.regionSeed=null;this.regions=new Map();this.regionFree=Array.from({length:REGION_CAPACITY},(_,i)=>REGION_CAPACITY-1-i);
   this.simulateRegionsForAnalysis=false;
@@ -213,7 +213,7 @@ export class PlanetRenderer {
   this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;this.patchMetadataCache=new WeakMap();this.uploadedPatchEye=null;this.preparedPatchState=null;
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
   this.transitionErrors.clear();this.transitionErrorVersion++;this.workerErrorVersion=null;this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
-  this.selectionResult=null;this.selectionRequest=null;this.workerSelectionSnapshot=null;this.terrainPointCache=null;this.reconcileSelection=false;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
+  this.selectionResult=null;this.selectionRequest=null;this.workerSelectionSnapshot=null;this.terrainPointCache=null;this.terrainPointInFlight.clear();this.reconcileSelection=false;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
   this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
  }
  handleDeviceLoss(info){
@@ -480,6 +480,18 @@ export class PlanetRenderer {
   else buffer.destroy();
  }
  async sampleTerrain(direction=null,kind='terrain'){
+  if(this.deviceLost)throw new Error('WebGPU device is lost. Reload to retry.');
+  if(!direction||kind!=='terrain')return this.sampleTerrainUncached(direction,kind);
+  // Coalesce only identical point inputs and world revisions. Each caller gets
+  // its own result array; different positions remain independent submissions.
+  const point=new Float32Array([...direction,0]);
+  const key=[this.generation,this.terrainFieldRevision,this.seed>>>0,this.relief,this.valleys,this.erosion,this.regional,this.rivers,...point].join('/');
+  let pending=this.terrainPointInFlight.get(key);
+  if(!pending){pending=this.sampleTerrainUncached(direction,kind);this.terrainPointInFlight.set(key,pending);}
+  try{const data=await pending;return data?data.slice():null;}
+  finally{if(this.terrainPointInFlight.get(key)===pending)this.terrainPointInFlight.delete(key);}
+ }
+ async sampleTerrainUncached(direction=null,kind='terrain'){
   if(this.deviceLost)throw new Error('WebGPU device is lost. Reload to retry.');
   const generation=this.generation;
   const point=direction?new Float32Array([...direction,0]):null;

@@ -505,3 +505,19 @@ test('regional changes invalidate in-flight point terrain results',async()=>{
  r.device.createBuffer=options=>{const b=create(options);b.mapAsync=()=>ready;return b;};
  const pending=r.sampleTerrain([1,0,0]);r.terrainFieldRevision++;release();assert.equal(await pending,null);assert.equal(r.terrainPointCache,null);
 });
+
+test('identical concurrent point probes share a submission but not result arrays',async()=>{
+ const {r}=fakeRenderer();r.probeInput=r.device.createBuffer({size:16});r.sampleBuffer=r.device.createBuffer({size:16});r.pointPipe={};r.pointBind={};r.hydrologySeed=r.seed>>>0;
+ let release,submissions=0;const ready=new Promise(resolve=>{release=resolve;}),create=r.device.createBuffer,submit=r.device.queue.submit;
+ r.device.createBuffer=options=>{const b=create(options);b.mapAsync=()=>ready;return b;};r.device.queue.submit=commands=>{submissions++;submit(commands);};
+ const a=r.sampleTerrain([1,0,0]),b=r.sampleTerrain([1,0,0]);assert.equal(submissions,1);release();
+ const [first,second]=await Promise.all([a,b]);assert.notEqual(first,second);first[3]=99;assert.notEqual(second[3],99);assert.equal(r.terrainPointInFlight.size,0);
+});
+
+test('coalesced point probes are all invalidated by a terrain reset',async()=>{
+ const {r}=fakeRenderer();r.probeInput=r.device.createBuffer({size:16});r.sampleBuffer=r.device.createBuffer({size:16});r.pointPipe={};r.pointBind={};r.hydrologySeed=r.seed>>>0;
+ let release;const ready=new Promise(resolve=>{release=resolve;}),create=r.device.createBuffer;
+ r.device.createBuffer=options=>{const b=create(options);b.mapAsync=()=>ready;return b;};
+ const a=r.sampleTerrain([1,0,0]),b=r.sampleTerrain([1,0,0]);r.resetPatchCache();release();
+ assert.deepEqual(await Promise.all([a,b]),[null,null]);assert.equal(r.terrainPointInFlight.size,0);
+});
