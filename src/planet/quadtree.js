@@ -125,12 +125,15 @@ export function intermediateLeaves(previous,target,budget,priority=()=>0){
  return [...leaves.values()];
 }
 function score(node,camera,pixelSize=10,errorEstimates=null) {
- const center=node.direction.map(x=>x*RADIUS_KM);
- const relative=sub(center,camera.eye);
+ // This runs for every candidate. Keep the camera-relative center in scalar
+ // registers instead of allocating temporary arrays for each projection.
+ const rx=node.direction[0]*RADIUS_KM-camera.eye[0],ry=node.direction[1]*RADIUS_KM-camera.eye[1],rz=node.direction[2]*RADIUS_KM-camera.eye[2];
  // Cube-to-sphere is at most 1-Lipschitz in the face coordinates. This loose
  // sphere encloses the tile and the bounded terrain, and avoids false culling.
  const radius=Math.min(2*RADIUS_KM,RADIUS_KM*node.span*.9)+HEIGHT_LIMIT_KM;
- const z=dot(relative,camera.forward),x=dot(relative,camera.right),y=dot(relative,camera.up);
+ const z=rx*camera.forward[0]+ry*camera.forward[1]+rz*camera.forward[2];
+ const x=rx*camera.right[0]+ry*camera.right[1]+rz*camera.right[2];
+ const y=rx*camera.up[0]+ry*camera.up[1]+rz*camera.up[2];
  if(z+radius<camera.near || Math.abs(x)>z*camera.tanX+radius*camera.selection.frustumX || Math.abs(y)>z*camera.tanY+radius*camera.selection.frustumY)return 0;
  const {eyeLength,inner,horizon}=camera.selection;
  if(eyeLength>inner){
@@ -148,7 +151,7 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
  // not yet been measured by the GPU. A measured residual can add priority for
  // rough terrain whose visual error is large at the current distance.
  const facing=camera.facing;
- let distance=length(relative);
+ let distance=Math.hypot(rx,ry,rz);
  // Near the ground, calculate distance to the current surface altitude on
  // every front-facing cube face. Limiting this to the face under the camera
  // makes a neighboring face appear kilometers away on high mountains.
