@@ -19,7 +19,10 @@ fn main(@builtin(workgroup_id) group:vec3<u32>,@builtin(local_invocation_index) 
    if(oddX && oddY){a=position(slot,x-1u,y+1u);b=position(slot,x+1u,y-1u);}
    else if(oddX){a=position(slot,x-1u,y);b=position(slot,x+1u,y);}
    else{a=position(slot,x,y-1u);b=position(slot,x,y+1u);}
-   largest=max(largest,length(position(slot,x,y)-(a+b)*.5));
+   let delta=position(slot,x,y)-(a+b)*.5;
+   // Squared distances preserve the maximum; defer sqrt until the reduction
+   // has selected the largest residual for the whole patch.
+   largest=max(largest,dot(delta,delta));
   }
  }
  residuals[lane]=largest;workgroupBarrier();
@@ -27,5 +30,5 @@ fn main(@builtin(workgroup_id) group:vec3<u32>,@builtin(local_invocation_index) 
   if(lane<step){residuals[lane]=max(residuals[lane],residuals[lane+step]);}
   workgroupBarrier();
  }
- if(lane==0u){errors[slot]=residuals[0];}
+ if(lane==0u){errors[slot]=sqrt(residuals[0]);}
 }
