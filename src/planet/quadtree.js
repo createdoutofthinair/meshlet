@@ -21,8 +21,11 @@ export function neighbors(leaves,node,edge,maxDepth=MAX_DEPTH) {
   if(edge===1){u+=half+eps;v+=fraction*node.span;}
   if(edge===2){v-=half+eps;u+=fraction*node.span;}
   if(edge===3){v+=half+eps;u+=fraction*node.span;}
-  const f=directionToFace(faceCube(node.face,u,v));
-  const other=tileAt(leaves,f.face,f.u,f.v,maxDepth);
+  // Interior samples remain on the same cube face. Only crossings need the
+  // cube-to-face remapping, including its exact tie-breaking at boundaries.
+  let other;
+  if(Math.abs(u)<1&&Math.abs(v)<1)other=tileAt(leaves,node.face,u,v,maxDepth);
+  else{const f=directionToFace(faceCube(node.face,u,v));other=tileAt(leaves,f.face,f.u,f.v,maxDepth);}
   if(other && other.key!==node.key)found.set(other.key,other);
  }
  return [...found.values()];
@@ -215,8 +218,10 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
   const half=node.span/2,eps=node.span*1e-6,cornerKeys=[];
   for(let corner=0;corner<4;corner++){
    const sx=corner&1?1:-1,sy=corner&2?1:-1;
-   const f=directionToFace(faceCube(node.face,node.u+sx*(half+eps),node.v+sy*(half+eps)));
-   const diagonal=tileAt(leaves,f.face,f.u,f.v,MAX_DEPTH);
+   const u=node.u+sx*(half+eps),v=node.v+sy*(half+eps);
+   let diagonal;
+   if(Math.abs(u)<1&&Math.abs(v)<1)diagonal=tileAt(leaves,node.face,u,v,MAX_DEPTH);
+   else{const f=directionToFace(faceCube(node.face,u,v));diagonal=tileAt(leaves,f.face,f.u,f.v,MAX_DEPTH);}
    if(diagonal && diagonal.level<node.level)corners|=1<<(corner+4);
    const around=[...adjacentEdges[sx<0?0:1],...adjacentEdges[sy<0?2:3]];
    if(diagonal)around.push(diagonal);
