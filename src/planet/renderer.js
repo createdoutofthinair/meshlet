@@ -211,6 +211,7 @@ export class PlanetRenderer {
  }
  resetPatchCache(){
   for(const buffer of this.probeReadbacks||[])buffer.destroy();this.probeReadbacks=[];
+  this.telemetryReadback?.destroy();this.telemetryReadback=null;
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
   this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;this.patchMetadataCache=new WeakMap();this.uploadedPatchEye=null;this.preparedPatchState=null;
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
@@ -741,7 +742,7 @@ export class PlanetRenderer {
   }
   if(cloudActive){const cloudDescriptor={colorAttachments:[{view:colorView,loadOp:'load',storeOp:'store'}]};if(sample&&this.timing)cloudDescriptor.timestampWrites={querySet:this.queries,beginningOfPassWriteIndex:6,endOfPassWriteIndex:7};const clouds=encoder.beginRenderPass(cloudDescriptor);clouds.setPipeline(this.cloudPipe);clouds.setBindGroup(0,this.cloudBind);clouds.draw(3);clouds.end();}
   const measured=sample?drawPatches.map(({key,slot})=>({key,slot})):null;
-  let readback;if(sample){readback=d.createBuffer({size:80+CAPACITY*4,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});encoder.copyBufferToBuffer(this.indirect,0,readback,0,16);encoder.copyBufferToBuffer(this.lodErrorBuffer,0,readback,80,CAPACITY*4);if(this.timing){encoder.resolveQuerySet(this.queries,0,8,this.resolve,0);encoder.copyBufferToBuffer(this.resolve,0,readback,16,64);}}
+  let readback;if(sample){readback=this.telemetryReadback||d.createBuffer({size:80+CAPACITY*4,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});this.telemetryReadback=null;encoder.copyBufferToBuffer(this.indirect,0,readback,0,16);encoder.copyBufferToBuffer(this.lodErrorBuffer,0,readback,80,CAPACITY*4);if(this.timing){encoder.resolveQuerySet(this.queries,0,8,this.resolve,0);encoder.copyBufferToBuffer(this.resolve,0,readback,16,64);}}
   let transitionRead;if(compare&&stage.pairs.length){
    if(!morphMeasurement)stage.state='measuring';
    stage.measurementPending=true;stage.nextMeasure=now+200;
@@ -773,7 +774,7 @@ export class PlanetRenderer {
    }
    transitionRead.unmap();
   }).catch(e=>{if(this.stage===stage){if(!morphMeasurement){this.cancelStage();this.needsSelection=true;}this.onError?.(`Terrain transition: ${e.message}`);}}).finally(()=>{stage.measurementPending=false;transitionRead.destroy();});
-  if(readback){const generation=this.generation;readback.mapAsync(GPUMapMode.READ).then(()=>{
+  if(readback){const generation=this.generation;let reusable=false;readback.mapAsync(GPUMapMode.READ).then(()=>{
    const data=readback.getMappedRange(),visibleMeshlets=new Uint32Array(data,0,4)[1];let gpuComputeMs=null,gpuRenderMs=null,gpuTerrainMs=null,gpuOceanMs=null,gpuCloudMs=null;
    if(this.timing){const t=new BigUint64Array(data,16,8);const elapsed=(a,b)=>t[b]>=t[a]?Number(t[b]-t[a])/1e6:null;gpuComputeMs=elapsed(0,1);gpuTerrainMs=elapsed(2,3);gpuOceanMs=separateOcean?elapsed(4,5):null;gpuCloudMs=cloudActive?elapsed(6,7):null;gpuRenderMs=gpuTerrainMs==null?null:gpuTerrainMs+(gpuOceanMs??0)+(gpuCloudMs??0);}
    if(generation===this.generation){
@@ -781,8 +782,8 @@ export class PlanetRenderer {
     for(const {key,slot} of measured){const error=residuals[slot];if(Number.isFinite(error)&&error>=0){this.lodErrors.delete(key);this.lodErrors.set(key,error);}}
     while(this.lodErrors.size>8192)this.lodErrors.delete(this.lodErrors.keys().next().value);
     this.latest={visibleMeshlets,gpuComputeMs,gpuRenderMs,gpuTerrainMs,gpuOceanMs,gpuCloudMs,gpuSampleAt:now,generatedPatchesSample:generatedOnSample};
-   }readback.unmap();
-  }).catch(e=>{if(generation===this.generation&&!this.deviceLost)this.onError?.(`GPU telemetry: ${e.message}`);}).finally(()=>{readback.destroy();this.pendingRead=false;});}
+   }readback.unmap();reusable=true;
+  }).catch(e=>{if(generation===this.generation&&!this.deviceLost)this.onError?.(`GPU telemetry: ${e.message}`);}).finally(()=>{if(reusable&&generation===this.generation&&!this.deviceLost)this.telemetryReadback=readback;else readback.destroy();this.pendingRead=false;});}
   return performance.now()-cpuStart;
  }
 }

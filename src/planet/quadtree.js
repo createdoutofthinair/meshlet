@@ -36,9 +36,11 @@ export function neighbors(leaves,node,edge,maxDepth=MAX_DEPTH) {
 }
 function split(leaves,node,onChild=null){
  leaves.delete(node.key);
+ const children=[];
  for(let y=0;y<2;y++)for(let x=0;x<2;x++){
-  const child=makeTile(node.face,node.level+1,node.x*2+x,node.y*2+y);leaves.set(child.key,child);onChild?.(child);
+  const child=makeTile(node.face,node.level+1,node.x*2+x,node.y*2+y);leaves.set(child.key,child);if(onChild)children.push(child);
  }
+ if(onChild)for(const child of children)onChild(child);
 }
 function splitBalanced(leaves,node,budget,maxDepth,seen=new Set(),onChild=null) {
  if(!leaves.has(node.key)||node.level>=maxDepth||seen.has(node.key))return false;
@@ -132,9 +134,11 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
  // sphere encloses the tile and the bounded terrain, and avoids false culling.
  const radius=Math.min(2*RADIUS_KM,RADIUS_KM*node.span*.9)+HEIGHT_LIMIT_KM;
  const z=rx*camera.forward[0]+ry*camera.forward[1]+rz*camera.forward[2];
+ if(z+radius<camera.near)return 0;
  const x=rx*camera.right[0]+ry*camera.right[1]+rz*camera.right[2];
+ if(Math.abs(x)>z*camera.tanX+radius*camera.selection.frustumX)return 0;
  const y=rx*camera.up[0]+ry*camera.up[1]+rz*camera.up[2];
- if(z+radius<camera.near || Math.abs(x)>z*camera.tanX+radius*camera.selection.frustumX || Math.abs(y)>z*camera.tanY+radius*camera.selection.frustumY)return 0;
+ if(Math.abs(y)>z*camera.tanY+radius*camera.selection.frustumY)return 0;
  const {eyeLength,inner,horizon}=camera.selection;
  if(eyeLength>inner){
   // The angular cutoff is identical for every tile at a level. Compare its
@@ -218,7 +222,7 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
  // a small priority margin. This reduces churn at refinement thresholds without
  // time-based fading, stale coverage, or exceeding the patch budget.
  const candidates=new CandidateHeap();
- const addCandidate=node=>{if(node.level<maxDepth){const value=priority(node);if(value>pixelSize)candidates.push(node,value);}};
+ const addCandidate=node=>{if(leaves.size+3<=budget&&node.level<maxDepth){const value=priority(node);if(value>pixelSize)candidates.push(node,value);}};
  for(const node of leaves.values())addCandidate(node);
  for(let iteration=0;iteration<budget;iteration++){
   let candidate;do{candidate=candidates.pop();}while(candidate&&leaves.get(candidate.node.key)!==candidate.node);
