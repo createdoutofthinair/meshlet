@@ -6,7 +6,7 @@ let yaw=.15,pitch=.24,time=0,last=0,paused=false,drag=null,frames=0,fpsTime=0;
 document.querySelector('#random').addEventListener('click',()=>{controls.seed.value=1+Math.floor(Math.random()*1000);updateLabels();});
 document.querySelector('#pause').addEventListener('click',e=>{paused=!paused;e.currentTarget.textContent=paused?'RESUME':'PAUSE';});
 document.querySelector('#reset').addEventListener('click',()=>{yaw=.15;pitch=.24;});
-canvas.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);});canvas.addEventListener('pointerup',()=>drag=null);canvas.addEventListener('pointercancel',()=>drag=null);canvas.addEventListener('pointermove',e=>{if(drag){yaw-=(e.clientX-drag[0])*.005;pitch=Math.max(-.08,Math.min(1.35,pitch+(e.clientY-drag[1])*.005));drag=[e.clientX,e.clientY];}});
+canvas.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);});canvas.addEventListener('pointerup',()=>drag=null);canvas.addEventListener('pointercancel',()=>drag=null);canvas.addEventListener('pointermove',e=>{if(drag){yaw-=(e.clientX-drag[0])*.005;pitch=Math.max(-1.45,Math.min(1.45,pitch+(e.clientY-drag[1])*.005));drag=[e.clientX,e.clientY];}});
 try{
  if(!navigator.gpu)throw Error('WebGPU is unavailable. Enable it in your browser.');const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});if(!adapter)throw Error('No WebGPU adapter was found.');
  const device=await adapter.requestDevice(),context=canvas.getContext('webgpu'),format=navigator.gpu.getPreferredCanvasFormat();context.configure({device,format,alphaMode:'opaque'});

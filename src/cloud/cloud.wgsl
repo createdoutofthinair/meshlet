@@ -11,10 +11,28 @@ fn cloudNoise(p:vec3<f32>)->f32{
  let b=mix(mix(cloudHash(i+vec3<f32>(0,0,1)),cloudHash(i+vec3<f32>(1,0,1)),u.x),mix(cloudHash(i+vec3<f32>(0,1,1)),cloudHash(i+vec3<f32>(1,1,1)),u.x),u.y);
  return mix(a,b,u.z);
 }
+const PLANET_RADIUS:f32=6371000.0;
+// Local tangent coordinates keep the camera near the origin; rationalized
+// radial altitude avoids subtracting nearly equal planet-sized floats.
+fn planetAltitude(p:vec3<f32>)->f32{
+ let y=PLANET_RADIUS+p.y;let r=sqrt(y*y+dot(p.xz,p.xz));
+ return p.y+dot(p.xz,p.xz)/max(1.0,r+y);
+}
+// Intersection with a sphere specified by height above the planet surface.
+// The quadratic constant uses height differences to preserve f32 precision.
+fn sphereInterval(altitude:f32,ray:vec3<f32>,shellHeight:f32)->vec2<f32>{
+ let b=(PLANET_RADIUS+altitude)*ray.y;
+ let c=(altitude-shellHeight)*(2.0*PLANET_RADIUS+altitude+shellHeight);
+ let disc=b*b-c;if(disc<0.0){return vec2<f32>(1.0,-1.0);}
+ let root=sqrt(disc);return vec2<f32>(-b-root,-b+root);
+}
 fn cloudDensity(p:vec3<f32>)->f32{
- let height=(p.y-1500.0)/1800.0;let profile=smoothstep(0.0,.12,height)*(1.0-smoothstep(.68,1.0,height));
+ let height=(planetAltitude(p)-1500.0)/1800.0;let profile=smoothstep(0.0,.12,height)*(1.0-smoothstep(.68,1.0,height));
  if(profile<=0.0){return 0.0;}
- let seed=params.cloud.z;let wind=params.sky.x*params.cloud.y;let q=(p+vec3<f32>(wind,0.0,wind*.27))*.00055+vec3<f32>(seed*.071,seed*.039,seed*.053);
+ let seed=params.cloud.z;let angle=params.sky.x*params.cloud.y/PLANET_RADIUS;
+ let global=vec3<f32>(p.x,PLANET_RADIUS+p.y,p.z);
+ // Rotate the weather field around the planet rather than scrolling a plane.
+ let q=vec3<f32>(global.x*cos(angle)+global.z*sin(angle),global.y,-global.x*sin(angle)+global.z*cos(angle))*.00055+vec3<f32>(seed*.071,seed*.039,seed*.053);
  let shape=cloudNoise(q)*.65+cloudNoise(q*2.03+vec3<f32>(12.0,3.0,6.0))*.35;
  let detail=cloudNoise(q*4.1+vec3<f32>(2.0,7.0,4.0));let threshold=mix(.79,.27,params.sky.w);
  return smoothstep(threshold,threshold+.20,shape+(detail-.5)*.17)*profile*params.cloud.x*smoothstep(0.0,.08,params.sky.w);
@@ -25,11 +43,16 @@ fn cloudDensity(p:vec3<f32>)->f32{
  let ray=normalize(forward+right*uv.x*(params.view.x/params.view.y)*.58+up*uv.y*.58);
  let sun=normalize(vec3<f32>(.32,sin(params.sky.y),cos(params.sky.y)*.95));let origin=vec3<f32>(0.0,params.sky.z,0.0);
  var color=atmosphereSky(ray,sun,vec3<f32>(0,1,0),origin.y);
- if(ray.y<0.0){let horizon=smoothstep(-.12,.02,ray.y);color=mix(vec3<f32>(.19,.22,.20),color,horizon);}
- if(abs(ray.y)>.001){
-  let a=(1500.0-origin.y)/ray.y;let b=(3300.0-origin.y)/ray.y;let start=max(0.0,min(a,b));let end=min(30000.0,max(a,b));
+ // The horizon is the intersection of the actual planet sphere.
+ let ground=sphereInterval(origin.y,ray,0.0);var groundDistance=1e9;
+ if(ground.y>0.0 && ground.x>0.0){groundDistance=ground.x;color=vec3<f32>(.19,.22,.20);}
+ let outer=sphereInterval(origin.y,ray,3300.0);let inner=sphereInterval(origin.y,ray,1500.0);
+ if(outer.y>0.0 && outer.y>outer.x){
+  var start=max(0.0,outer.x);var end=min(outer.y,groundDistance);
+  // A ray can cross the inner sphere: retain the near cloud-shell segment.
+  if(inner.y>inner.x){if(inner.x>start){end=min(end,inner.x);}else if(inner.y>start){start=inner.y;}}
   if(end>start){
-   let steps=28u;let stepSize=(end-start)/f32(steps);var transmission=1.0;var lightAccum=vec3<f32>(0.0);
+   let steps=36u;let stepSize=(end-start)/f32(steps);var transmission=1.0;var lightAccum=vec3<f32>(0.0);
    let jitter=cloudHash(vec3<f32>(floor(input.pos.xy),1.7));
    for(var i=0u;i<steps;i++){
     if(transmission<.02){break;}let distance=start+(f32(i)+jitter)*stepSize;let point=origin+ray*distance;let density=cloudDensity(point);
