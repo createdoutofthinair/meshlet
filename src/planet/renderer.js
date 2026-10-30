@@ -317,13 +317,13 @@ export class PlanetRenderer {
   let groups,components;
   if(computed?.groupPlan&&computed?.componentPlan){
    groups=computed.groupPlan.map(g=>{
-    const coarse=(g.coarseOld?oldNodes:newNodesByKey).get(g.coarseKey),groupPairs=g.pairs.map(p=>{
+    const coarse=(g.coarseOld?oldNodes:newNodesByKey).get(g.coarseKey),groupPairs=g.pairIndices?g.pairIndices.map(index=>pairs[index]):g.pairs.map(p=>{
      const pair=resolvePair(p);
      if(g.type==='stitch')delete pair.refining;
      else if(pair.fine)pair.refining=pair.refining??slots.has(pair.fine.key);
      return pair;
     });
-    if(!coarse||groupPairs.some(p=>!p.fine||!p.coarse))throw new Error('Stale terrain transition group');
+    if(!coarse||groupPairs.some(p=>!p||!p.fine||!p.coarse))throw new Error('Stale terrain transition group');
     return {key:g.key,type:g.type,coarse,pairs:groupPairs,slots:[...new Set(groupPairs.flatMap(p=>[p.fine.slot,p.coarse.slot]))]};
    });
    const byKey=new Map(groups.map(g=>[g.key,g]));

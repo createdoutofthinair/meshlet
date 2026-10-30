@@ -432,7 +432,8 @@ test('worker transition relationships map to the renderer resident slots',async(
  const previous=new Set(old),raw=transitionPairs(old,result.visible);
  const relationships=raw.map(p=>({fineKey:p.fine.key,coarseKey:p.coarse.key,fineOld:previous.has(p.fine),coarseOld:previous.has(p.coarse),originX:p.originX,originY:p.originY,scale:p.scale,refining:p.refining}));
  const groups=transitionGroups(old,result.visible,raw),describe=p=>({fineKey:p.fine.key,coarseKey:p.coarse.key,fineOld:previous.has(p.fine),coarseOld:previous.has(p.coarse),originX:p.originX,originY:p.originY,scale:p.scale,refining:p.refining});
- const groupPlan=groups.map(g=>({key:g.key,type:g.type,coarseKey:g.coarse.key,coarseOld:previous.has(g.coarse),pairs:g.pairs.map(describe)}));
+ const indices=new Map(raw.map((p,i)=>[p,i]));
+ const groupPlan=groups.map(g=>({key:g.key,type:g.type,coarseKey:g.coarse.key,coarseOld:previous.has(g.coarse),...(g.type==='stitch'?{pairs:g.pairs.map(describe)}:{pairIndices:g.pairs.map(p=>indices.get(p))})}));
  const componentPlan=coordinateTransitions(old,result.visible,groups).map(c=>({groupKeys:c.groups.map(g=>g.key),deferredReasons:c.deferredReasons}));
  r.select(camera,1200,{result,relationships,groupPlan,componentPlan,selectionMs:0});assert.ok(r.stage);
  const expected=transitionPairs(old,r.stage.nodes).map(p=>({...p,refining:p.refining??r.stage.slots.has(p.fine.key)}));

@@ -16,6 +16,10 @@ test('worker prepares stitched transition topology for the selected covering tre
   self.onmessage({data:{id:1,key:'test',camera,options:{...options,previousLeaves:first.leaves},previousPatches:first.visible}});
   const result=messages[0],records=[];let checked=0;
   const old=new Set(first.visible);
+  for(const group of result.groupPlan)if(group.type!=='stitch'){
+   assert.ok(group.pairIndices.every(i=>Number.isInteger(i)&&result.relationships[i]));
+   assert.equal(group.pairs,undefined);
+  }
   assert.deepEqual(result.relationships,transitionPairs(first.visible,result.result.visible).map(p=>({fineKey:p.fine.key,coarseKey:p.coarse.key,fineOld:old.has(p.fine),coarseOld:old.has(p.coarse),originX:p.originX,originY:p.originY,scale:p.scale,refining:p.refining})));
   for(const group of transitionGroups(first.visible,result.result.visible))for(const pair of group.pairs){
    if(group.type!=='stitch'&&!pair.fine.stitch&&!pair.coarse.stitch)continue;

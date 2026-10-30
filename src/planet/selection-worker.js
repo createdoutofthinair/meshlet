@@ -16,7 +16,12 @@ self.onmessage=({data})=>{
  const previous=snapshot.previousPatches||[],pairs=transitionPairs(previous,result.visible),oldNodes=new Set(previous);
  const describe=p=>({fineKey:p.fine.key,coarseKey:p.coarse.key,fineOld:oldNodes.has(p.fine),coarseOld:oldNodes.has(p.coarse),originX:p.originX,originY:p.originY,scale:p.scale,refining:p.refining});
  const relationships=pairs.map(describe),groups=transitionGroups(previous,result.visible,pairs);
- const groupPlan=groups.map(g=>({key:g.key,type:g.type,coarseKey:g.coarse.key,coarseOld:oldNodes.has(g.coarse),pairs:g.pairs.map(describe)}));
+ // Ordinary group pairs already appear in relationships. Send indices instead
+ // of cloning their descriptors a second time. Stitch groups have a special
+ // synthesized pair and retain its descriptor.
+ const pairIndices=new Map(pairs.map((pair,index)=>[pair,index]));
+ const groupPlan=groups.map(g=>({key:g.key,type:g.type,coarseKey:g.coarse.key,coarseOld:oldNodes.has(g.coarse),
+  ...(g.type==='stitch'?{pairs:g.pairs.map(describe)}:{pairIndices:g.pairs.map(p=>pairIndices.get(p))})}));
  const componentPlan=coordinateTransitions(previous,result.visible,groups).map(c=>({groupKeys:c.groups.map(g=>g.key),deferredReasons:c.deferredReasons}));
  if(previous.length)for(const group of groups)for(const pair of group.pairs){
   if(group.type!=='stitch'&&!pair.fine.stitch&&!pair.coarse.stitch)continue;
