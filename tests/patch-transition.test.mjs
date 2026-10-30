@@ -132,3 +132,14 @@ test('stitched children request common triangulation even with an unstitched par
  const parent=tile(0,1,0,0,0),children=[0,1,2,3].map(i=>tile(0,2,i%2,i>>1,i+1,i===0?1:0));
  assert.deepEqual(coordinateTransitions([parent],children)[0].deferredReasons,['stitched-child']);
 });
+
+test('precomputed transition pairs and groups retain identical coordination',async()=>{
+ const {transitionPairs,transitionGroups,coordinateTransitions}=await import('../src/planet/patch-transition.js');
+ const {selectPatches}=await import('../src/planet/quadtree.js');const {planetCamera}=await import('../src/planet/camera.js');
+ const options={budget:54,pixelSize:14,includeHidden:true};
+ const previous=selectPatches(planetCamera({altitude:14000,longitude:.8,latitude:.4},960,600),options).visible;
+ const next=selectPatches(planetCamera({altitude:50,longitude:2.2,latitude:-.2},960,600),{...options,previousLeaves:previous}).visible;
+ const pairs=transitionPairs(previous,next),groups=transitionGroups(previous,next,pairs);
+ assert.deepEqual(groups,transitionGroups(previous,next));
+ assert.deepEqual(coordinateTransitions(previous,next,groups),coordinateTransitions(previous,next));
+});

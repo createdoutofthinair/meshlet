@@ -312,7 +312,9 @@ export class PlanetRenderer {
   }
   const matched=new Set(pairs.map(p=>p.refining?p.fine.key:p.coarse.key));
   const uncovered=newNodes.some(n=>!matched.has(n.key));
-  this.stage={components:coordinateTransitions(this.patches,nodes),groups:transitionGroups(this.patches,nodes),result,nodes,slots,signatures,newNodes,todo:newNodes.map(n=>n.slot),normalPending,pairs,selectionMs,state:'building',generation:this.generation,reference:camera,previousEye,nextMeasure:0,uncovered,hasRefinement:pairs.some(p=>p.refining),waitingSince:null,computedTopology:computed?.topology,packedTopology:computed?.packedTopology};
+  // Reuse one ancestry pass for comparison, grouping and coordination.
+  const groups=transitionGroups(this.patches,nodes,pairs),components=coordinateTransitions(this.patches,nodes,groups);
+  this.stage={components,groups,result,nodes,slots,signatures,newNodes,todo:newNodes.map(n=>n.slot),normalPending,pairs,selectionMs,state:'building',generation:this.generation,reference:camera,previousEye,nextMeasure:0,uncovered,hasRefinement:pairs.some(p=>p.refining),waitingSince:null,computedTopology:computed?.topology,packedTopology:computed?.packedTopology};
   this.transition={...this.transition,pending:newNodes.length,waiting:false};
  }
  canMorphTransition(stage){

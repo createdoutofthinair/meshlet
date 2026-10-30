@@ -39,10 +39,10 @@ export function encodeTransitionPairs(pairs,topologySlots=null){
 
 // Group overlapping patches by the actual coarse surface. Stitch-only changes
 // use their own group because they require a topology change at the same LOD.
-export function transitionGroups(previous,next){
+export function transitionGroups(previous,next,pairs=transitionPairs(previous,next)){
  const oldKeys=new Set(previous.map(p=>p.key)),newKeys=new Set(next.map(p=>p.key));
  const groups=new Map();
- for(const p of transitionPairs(previous,next)){
+ for(const p of pairs){
   const type=p.fine.level===p.coarse.level?'stitch':(oldKeys.has(p.fine.key)&&!newKeys.has(p.fine.key)?'merge':'refine');
   const key=type+'/'+p.coarse.key;
   let group=groups.get(key);
@@ -75,8 +75,8 @@ export function encodePatchMorphs(entries,capacity){
 // stitch masks. Connected groups must use a common progress value and commit
 // atomically. Keys already include cube face, so cross-face links need no UV
 // rounding or orientation guesses here.
-export function coordinateTransitions(previous,next){
- const groups=transitionGroups(previous,next),owners=new Map(),parent=groups.map((_,i)=>i);
+export function coordinateTransitions(previous,next,groups=transitionGroups(previous,next)){
+ const owners=new Map(),parent=groups.map((_,i)=>i);
  const root=i=>{while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i];}return i;};
  const join=(a,b)=>{parent[root(a)]=root(b);};
  groups.forEach((group,i)=>{
