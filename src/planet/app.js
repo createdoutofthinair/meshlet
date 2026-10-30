@@ -79,11 +79,13 @@ async function enterWalk({touchdown=false}={}){
 function setMode(mode){
  if(!renderer)return;
  if(mode==='walk'){enterWalk();return;}
+ const previousMode=renderer.cameraState.mode;
  leaveWalk();
+ if(mode==='flight'&&previousMode==='orbit')renderer.cameraState.pitch=1.48;
  renderer.cameraState.mode=mode;el.mode.value=mode;
  if(renderer.cameraState.altitude<MIN_ALT)setAltitude(MIN_ALT);
  if(mode==='flyover'&&renderer.cameraState.altitude>40)setAltitude(15);
- if(mode==='flight'){el['flight-controls'].hidden=false;el['flight-settings'].hidden=false;el['planet-hint'].textContent='W/S FLY FORWARD / BACK · A/D STRAFE · Q/E DESCEND / ASCEND · SHIFT BOOST · DRAG TO LOOK';el['walk-help'].hidden=false;el['walk-help'].textContent='Fly toward the surface to land automatically. Drag to look; Q and E move down and up.';}
+ if(mode==='flight'){el.view.focus({preventScroll:true});el['flight-controls'].hidden=false;el['flight-settings'].hidden=false;el['planet-hint'].textContent='W/S FLY FORWARD / BACK · A/D STRAFE · Q/E DESCEND / ASCEND · SHIFT BOOST · DRAG TO LOOK';el['walk-help'].hidden=false;el['walk-help'].textContent='From orbit, hold W to fly toward the planet. Click the view if keyboard input is not active. Q descends, E ascends; drag or click to look. Landing on dry terrain enters walk mode.';}
  renderer.needsSelection=true;
 }
 function rebuildTerrain(title){
@@ -119,7 +121,8 @@ function advanceFlight(now){
  if(!input.forward&&!input.strafe&&!vertical)return;
  // Speed adapts continuously to clearance, permitting both orbital travel and a controlled approach.
  const surfaceSpeed=Math.max(.005,Math.min(.2,(Number(el['flight-speed'].value)||20)/1000));
- const speed=Math.max(surfaceSpeed,Math.min(1800,Math.max(0,camera.altitude-10)*.45))*(input.fast?3:1);
+ const altitude=Math.max(0,camera.altitude),altitudeBlend=Math.max(0,Math.min(1,(altitude-.1)/1.9));
+ const speed=Math.max(surfaceSpeed,Math.min(1800,altitude*.5*altitudeBlend))*(input.fast?3:1);
  const travel=speed*dt,dir=directionFromCamera(camera);
  const tangentForward=input.forward*Math.cos(camera.pitch);
  const next=walkStep(dir,camera.heading,tangentForward,input.strafe,travel*Math.min(1,Math.hypot(tangentForward,input.strafe)));

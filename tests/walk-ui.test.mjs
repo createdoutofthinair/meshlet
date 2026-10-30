@@ -11,7 +11,7 @@ class MockElement extends EventTarget {
   const classes=new Set(),classList={add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x),toggle:(x,on)=>on?classes.add(x):classes.delete(x)};
   this.classList=classList;this.parentElement={classList};
  }
- focus(){} closest(){return null;} setPointerCapture(){} querySelectorAll(){return [];} setAttribute(key,value){this.attributes[key]=value;} click(){this.dispatchEvent(new Event('click'));}
+ focus(){this.focused=true;} closest(){return null;} setPointerCapture(){} querySelectorAll(){return [];} setAttribute(key,value){this.attributes[key]=value;} click(){this.dispatchEvent(new Event('click'));}
  getContext(){return {setTransform(){},clearRect(){},beginPath(){},moveTo(){},lineTo(){},stroke(){},fillText(){},setLineDash(){}};}
 }
 class MockDocument extends EventTarget {
@@ -116,4 +116,16 @@ test('flight button provides speed control and follows the view above terrain',a
 test('flight touchdown changes to walk at the rendered dry surface',async()=>{
  const element=id=>doc.getElementById(id);element('orbit').click();cameraState.latitude=0;cameraState.longitude=0;cameraState.surfaceHeight=1;cameraState.altitude=.0018;renderer.ocean=true;renderer.sampleTerrain=async direction=>new Float32Array([...(direction||[1,0,0]),1]);renderer.sampleRenderedSurface=async()=>1;
  element('fly').click();cameraState.altitude=.0018;await tick(20000);key('keydown','KeyQ');await tick(20050);await flush();key('keyup','KeyQ');assert.equal(cameraState.mode,'walk');assert.ok(Math.abs(cameraState.altitude-.0017)<1e-9);
+});
+
+
+test('flight from orbit focuses the viewport and W descends toward the planet',async()=>{
+ const element=id=>doc.getElementById(id);element('orbit').click();cameraState.latitude=0;cameraState.longitude=0;cameraState.pitch=0;element('view').focused=false;element('fly').click();
+ assert.equal(element('view').focused,true);assert.ok(cameraState.pitch>1.4);const initial=cameraState.altitude;await tick(30000);key('keydown','KeyW');
+ for(let i=1;i<=700;i++)await tick(30000+i*50);key('keyup','KeyW');assert.ok(cameraState.mode==='walk'||cameraState.altitude<.1,`descent reached ${cameraState.altitude} km from ${initial}`);
+});
+
+test('flight descent remains practical at intermediate altitudes',async()=>{
+ const element=id=>doc.getElementById(id);element('orbit').click();element('fly').click();cameraState.surfaceHeight=0;cameraState.altitude=10;cameraState.pitch=1.48;await tick(80000);key('keydown','KeyW');
+ for(let i=1;i<=100;i++)await tick(80000+i*50);key('keyup','KeyW');assert.ok(cameraState.altitude<3,`descent reached ${cameraState.altitude} km`);
 });
