@@ -82,7 +82,8 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  let ray=normalize(forward+right*uv.x*(params.view.x/params.view.y)*.58+up*uv.y*.58);
  let sun=vec3<f32>(sin(params.cloud.w)*cos(params.sky.y),sin(params.sky.y),cos(params.cloud.w)*cos(params.sky.y));let origin=vec3<f32>(0.0,params.sky.z,0.0);
  let sunElevation=sun.y;let day=atmosphereDaylight(sunElevation);let twilight=atmosphereTwilight(sunElevation);
- var color=atmosphereSky(ray,sun,vec3<f32>(0,1,0),origin.y);
+ var color=vec3<f32>(0.0);
+ if(params.shape.z>.5){color=atmosphereSky(ray,sun,vec3<f32>(0,1,0),origin.y);}
  // The horizon is the intersection of the actual planet sphere.
  let ground=sphereInterval(origin.y,ray,0.0);var groundDistance=1e9;
  let horizonDistance=sqrt(max(1.0,origin.y*(2.0*PLANET_RADIUS+origin.y)));
@@ -93,9 +94,9 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  let groundCoverage=1.0-smoothstep(horizonDirection-edgeWidth,horizonDirection+edgeWidth,ray.y);
  // At sea level the near root is zero. It must occlude downward rays;
  // otherwise they reach the cloud shell on the far side of the planet.
- if(ground.y>0.0 && ground.x>=0.0){groundDistance=ground.x;}
- if(origin.y<=.5 && ray.y<0.0){groundDistance=0.0;}
- let haze=smoothstep(.48,1.0,min(groundDistance,horizonDistance)/horizonDistance);
+ if(params.shape.w>.5 && ground.y>0.0 && ground.x>=0.0){groundDistance=ground.x;}
+ if(params.shape.w>.5 && origin.y<=.5 && ray.y<0.0){groundDistance=0.0;}
+ let haze=smoothstep(.48,1.0,min(groundDistance,horizonDistance)/horizonDistance)*select(0.0,1.0,params.shape.z>.5);
  // The surface is an analytic smooth sphere, shaded using the actual
  // spherical normal at the ray hit rather than a flat horizon fill.
  let hitPoint=origin+ray*max(0.0,groundDistance);
@@ -104,7 +105,7 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  let surfaceLight=.025+.9*direct;
  let groundBase=vec3<f32>(.10,.23,.32)*surfaceLight;
  let groundColor=mix(groundBase,vec3<f32>(.26,.49,.67)*max(.03,day),haze*.52);
- color=mix(color,groundColor,groundCoverage);
+ color=mix(color,groundColor,groundCoverage*select(0.0,1.0,params.shape.w>.5));
  // Limb glow is evaluated from tangent altitude above the spherical ground.
  // This inexpensive single-scattering approximation is visible from orbit.
  let tangentDistance=max(0.0,-(PLANET_RADIUS+origin.y)*ray.y);
@@ -118,7 +119,7 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
   let inner=exp(-tangentHeight/9000.0)*altitudeVisibility*upwardFade;
   let sunSide=.65+.35*max(dot(ray,sun),0.0);
   let limbTint=mix(vec3<f32>(.07,.25,.65),vec3<f32>(.60,.18,.06),twilight*pow(max(dot(ray,sun),0.0),2.0));
-  color+=(limbTint*broad+vec3<f32>(.12,.25,.40)*inner)*sunSide*max(.035,day+twilight*.22)*.72*max(0.0,params.shape.y)*(1.0-groundCoverage*.65);
+  color+=select(0.0,1.0,params.shape.z>.5)*(limbTint*broad+vec3<f32>(.12,.25,.40)*inner)*sunSide*max(.035,day+twilight*.22)*.72*max(0.0,params.shape.y)*(1.0-groundCoverage*.65);
  }
  // Feather the outer cloud-shell silhouette over the pixel footprint.
  // For cameras inside the shell, no limb masking is needed.
@@ -127,7 +128,7 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  let shellEdge=max(.000001,fwidth(ray.y)*2.0);
  let shellCoverage=select(1.0,1.0-smoothstep(shellHorizon-shellEdge,shellHorizon+shellEdge,ray.y),origin.y>8000.0);
  let outer=sphereInterval(origin.y,ray,8000.0);let inner=sphereInterval(origin.y,ray,1500.0);
- if(outer.y>0.0 && outer.y>outer.x){
+ if(params.cloud.x>.001 && params.sky.w>.001 && outer.y>0.0 && outer.y>outer.x){
   var start=max(0.0,outer.x);var end=min(outer.y,groundDistance);
   // A ray can cross the inner sphere: retain the near cloud-shell segment.
   if(inner.y>inner.x){if(inner.x>start){end=min(end,inner.x);}else if(inner.y>start){start=inner.y;}}
@@ -159,7 +160,7 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
    // Blend distant details toward the same blue haze as the planetary limb.
    let aerial=1.0-exp(-max(0.0,start-90000.0)/480000.0);
    let haze=mix(vec3<f32>(.012,.02,.045),mix(vec3<f32>(.25,.44,.62),vec3<f32>(.60,.24,.12),twilight*.6),max(day,twilight*.35));
-   lightAccum=mix(lightAccum,haze*(1.0-transmission),aerial*.65);
+   lightAccum=mix(lightAccum,haze*(1.0-transmission),aerial*.65*select(0.0,1.0,params.shape.z>.5));
    let tangentFade=mix(1.0,smoothstep(0.0,16000.0,end-start),smoothstep(8000.0,12000.0,origin.y));
    let cloudColor=color*transmission+lightAccum;
    color=mix(color,cloudColor,shellCoverage*tangentFade);
