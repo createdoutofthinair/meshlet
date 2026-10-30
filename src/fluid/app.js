@@ -6,7 +6,7 @@ for(const control of [wave,clarity])control.addEventListener('input',()=>documen
 document.querySelector('#pause').addEventListener('click',event=>{paused=!paused;event.currentTarget.textContent=paused?'RESUME':'PAUSE';});
 let resetBalls=()=>{},dropBall=()=>{},stress=null;const stressCount=document.querySelector('#stress-count'),stressInterval=document.querySelector('#stress-interval'),progress=document.querySelector('#stress-progress');
 stressCount.addEventListener('input',()=>document.querySelector('#stress-count-value').textContent=stressCount.value);stressInterval.addEventListener('input',()=>document.querySelector('#stress-interval-value').textContent=Number(stressInterval.value).toFixed(2)+' s');
-document.querySelector('#random-rock').addEventListener('click',()=>{rockSeed.value=Math.floor(Math.random()*100000);objectShape.value='3';stress=null;resetBalls();progress.textContent='0 / 0';});
+document.querySelector('#random-rock').addEventListener('click',()=>{rockSeed.value=Math.floor(Math.random()*100000);if(Number(objectShape.value)<3)objectShape.value='3';stress=null;resetBalls();progress.textContent='0 / 0';});
 rockSeed.addEventListener('change',()=>{rockSeed.value=Math.max(0,Math.min(99999,Math.floor(Number(rockSeed.value)||0)));stress=null;resetBalls();progress.textContent='0 / 0';});
 objectShape.addEventListener('change',()=>{stress=null;resetBalls();progress.textContent='0 / 0';});
 document.querySelector('#stop-stress').addEventListener('click',()=>{stress=null;});

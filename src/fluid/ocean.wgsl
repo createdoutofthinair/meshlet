@@ -30,10 +30,8 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
 }
 // Smooth union of overlapping ellipsoidal lobes forms an irregular rounded
 // test object. The same distance field drives rendering and ball contacts.
-fn roundedObjectField(p:vec3<f32>)->f32{
- // Seeded irregular boulder. A conservative step scale keeps ray marching stable.
- if(params.viewport.z>2.5){
-  let seed=params.eye.w;let q=p-vec3<f32>(0.0,-.08,0.0);
+fn rockField(p:vec3<f32>,seed:f32)->f32{
+  let q=p-vec3<f32>(0.0,-.08,0.0);
   let offset=vec2<f32>(seed*.013,seed*.021);
   let broad=(noise(q.xy*2.8+offset)+noise(q.yz*2.8+offset*1.3)+noise(q.zx*2.8-offset*.7))/3.0;
   let chips=(noise(q.xy*6.0+offset)+noise(q.yz*6.0-offset)+noise(q.zx*6.0+offset*.8))/3.0;
@@ -45,7 +43,28 @@ fn roundedObjectField(p:vec3<f32>)->f32{
   let shape=max(ellipsoid,max(planeA,max(planeB,planeC)))+(broad-.5)*.32+(chips-.5)*.12;
   // Slow enough for the displaced field; shared by intersections and contacts.
   return shape*.27;
+}
+fn rockCenter(i:u32)->vec3<f32>{
+ let centers=array<vec3<f32>,4>(vec3<f32>(-.68,0.0,-.62),vec3<f32>(.68,0.0,-.62),vec3<f32>(-.68,0.0,.62),vec3<f32>(.68,0.0,.62));
+ return centers[i];
+}
+fn nearestRockCenter(p:vec3<f32>)->vec3<f32>{
+ var center=rockCenter(0u);var best=length(p.xz-center.xz);
+ for(var i=1u;i<4u;i++){let c=rockCenter(i);let d=length(p.xz-c.xz);if(d<best){best=d;center=c;}}
+ return center;
+}
+fn roundedObjectField(p:vec3<f32>)->f32{
+ if(params.viewport.z>3.5){
+  var distance=1e6;
+  for(var i=0u;i<4u;i++){
+   let scale=.43+f32(i%3u)*.035;let local=(p-rockCenter(i))/scale;
+   distance=min(distance,rockField(local,params.eye.w+f32(i)*71.0)*scale);
+  }
+  return distance;
  }
+ // Seeded irregular boulder. A conservative step scale keeps ray marching stable.
+ if(params.viewport.z>2.5){return rockField(p,params.eye.w);}
+
  // Upright torus: its open center is visible above and below the waterline.
  if(params.viewport.z>1.5){return length(vec2<f32>(length(p.xy)-.62,p.z))-.24;}
  let a=length((p-vec3<f32>(-.20,-.10,0.0))/vec3<f32>(.78,.90,.62))-.90;
@@ -142,7 +161,7 @@ fn cubeHit(origin:vec3<f32>,direction:vec3<f32>)->f32{
 // March only inside a conservative bounding sphere; all optical rays see
 // the same surface, including reflection and refraction below the water.
 fn roundedObjectHit(origin:vec3<f32>,direction:vec3<f32>)->f32{
- let center=vec3<f32>(0.0,-.05,0.0);let q=origin-center;let b=dot(q,direction);let disc=b*b-dot(q,q)+1.5*1.5;
+ let center=vec3<f32>(0.0,-.05,0.0);let q=origin-center;let b=dot(q,direction);let radius=select(1.5,2.2,params.viewport.z>3.5);let disc=b*b-dot(q,q)+radius*radius;
  if(disc<0.0){return -1.0;}let far= -b+sqrt(disc);var t=max(.001,-b-sqrt(disc));
  for(var i=0u;i<128u;i++){if(t>far){break;}let d=roundedObjectField(origin+direction*t);if(d<.001){return t;}t+=max(.001,d*.8);}
  return -1.0;
@@ -243,7 +262,8 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  // Anchor the film to the cube's mean waterline instead of the oscillating
  // wave height so adhered water does not stretch and bounce with ripples.
  let height=p.y;
- let faceCoord=select(select(p.x,p.z,abs(n.x)>.5),atan2(p.z,p.x)*.45,params.viewport.z>.5);let response=cubeImpactWash(p.xz,n.xz,time);
+ var localPoint=p;if(params.viewport.z>3.5){localPoint=p-nearestRockCenter(p);}
+ let faceCoord=select(select(p.x,p.z,abs(n.x)>.5),atan2(localPoint.z,localPoint.x)*.45,params.viewport.z>.5);let response=cubeImpactWash(p.xz,n.xz,time);
  let side=select(select(1.0,0.0,abs(n.y)>.5),smoothstep(.15,.55,length(n.xz)),params.viewport.z>.5);
  let lowerEdge= -.08+.07*noise(vec2<f32>(faceCoord*9.0,3.7))+.025*noise(vec2<f32>(faceCoord*24.0,8.1));
  let band=smoothstep(lowerEdge-.035,lowerEdge+.035,height)*(1.0-smoothstep(.12,.36,height));
