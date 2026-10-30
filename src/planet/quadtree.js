@@ -2,19 +2,20 @@ import {RADIUS_KM,HEIGHT_LIMIT_KM,PATCH_CELLS,MAX_DEPTH,FACE_BASES,faceCube,face
 
 // Covering leaves include the entire planet. The renderer can request every
 // leaf as a resident patch so transitions never depend on partial visibility.
-function tileAt(leaves,face,u,v,maxDepth) {
+const numericTileKey=(face,level,x,y)=>(face*32+level)*17592186044416+y*4194304+x;
+function tileAt(leaves,face,u,v,maxDepth,index=null) {
  const uu=Math.min(1-Number.EPSILON,Math.max(0,(u+1)/2));
  const vv=Math.min(1-Number.EPSILON,Math.max(0,(v+1)/2));
  // A covering quadtree has no overlapping ancestor leaves. Searching from
  // the root finds the same unique leaf without probing unused deep levels.
  for(let level=0;level<=maxDepth;level++){
   const n=2**level,x=Math.floor(uu*n),y=Math.floor(vv*n);
-  const node=leaves.get(`${face}/${level}/${x}/${y}`);if(node)return node;
+  const node=index?index.get(numericTileKey(face,level,x,y)):leaves.get(`${face}/${level}/${x}/${y}`);if(node)return node;
  }
  return null;
 }
-export function neighbors(leaves,node,edge,maxDepth=MAX_DEPTH) {
- const half=node.span/2,eps=node.span*1e-6,found=new Map();
+export function neighbors(leaves,node,edge,maxDepth=MAX_DEPTH,index=null) {
+ const half=node.span/2,eps=node.span*1e-6,found=[];
  for(const fraction of [-.499,-.25,0,.25,.499]) {
   let u=node.u,v=node.v;
   if(edge===0){u-=half+eps;v+=fraction*node.span;}
@@ -28,11 +29,11 @@ export function neighbors(leaves,node,edge,maxDepth=MAX_DEPTH) {
   // Adjacent samples often land in the same covering leaf. Reuse it only
   // strictly inside its face-space bounds; boundary ties still use tileAt.
   let other;
-  for(const known of found.values())if(known.face===face&&Math.abs(u-known.u)<known.span/2&&Math.abs(v-known.v)<known.span/2){other=known;break;}
-  if(!other)other=tileAt(leaves,face,u,v,maxDepth);
-  if(other && other.key!==node.key)found.set(other.key,other);
+  for(const known of found)if(known.face===face&&Math.abs(u-known.u)<known.span/2&&Math.abs(v-known.v)<known.span/2){other=known;break;}
+  if(!other)other=tileAt(leaves,face,u,v,maxDepth,index);
+  if(other && other.key!==node.key&&!found.some(known=>known.key===other.key))found.push(other);
  }
- return [...found.values()];
+ return found;
 }
 function split(leaves,node,onChild=null){
  leaves.delete(node.key);
@@ -262,12 +263,15 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
   return {unchanged:true,leafCount:leaves.size,deepest:Math.max(...previousLeaves.map(node=>node.level),0)};
  }
  const all=[...leaves.values()];
+ // The selected covering is immutable while its stitch graph is built.
+ // Numeric keys avoid repeatedly allocating path strings for neighbor probes.
+ const index=new Map(all.map(node=>[numericTileKey(node.face,node.level,node.x,node.y),node]));
  const visible=[];
  for(const node of all){
   if(!includeHidden&&!score(node,camera))continue;
   let stitch=0,corners=0;const coarseKeys=[null,null,null,null],edgeKeys=[null,null,null,null],adjacentEdges=[];
   for(let edge=0;edge<4;edge++){
-   const adjacent=neighbors(leaves,node,edge,MAX_DEPTH);adjacentEdges.push(adjacent);
+   const adjacent=neighbors(leaves,node,edge,MAX_DEPTH,index);adjacentEdges.push(adjacent);
    const coarse=adjacent.find(other=>other.level<node.level);
    if(coarse){stitch|=1<<edge;coarseKeys[edge]=coarse.key;edgeKeys[edge]=coarse.key;}
    else{const peer=adjacent.find(other=>other.level===node.level);if(peer)edgeKeys[edge]=peer.key;}
@@ -279,8 +283,8 @@ export function selectPatches(camera,{budget=256,maxDepth=MAX_DEPTH,pixelSize=10
    const sx=corner&1?1:-1,sy=corner&2?1:-1;
    const u=node.u+sx*(half+eps),v=node.v+sy*(half+eps);
    let diagonal;
-   if(Math.abs(u)<1&&Math.abs(v)<1)diagonal=tileAt(leaves,node.face,u,v,MAX_DEPTH);
-   else{const f=directionToFace(faceCube(node.face,u,v));diagonal=tileAt(leaves,f.face,f.u,f.v,MAX_DEPTH);}
+   if(Math.abs(u)<1&&Math.abs(v)<1)diagonal=tileAt(leaves,node.face,u,v,MAX_DEPTH,index);
+   else{const f=directionToFace(faceCube(node.face,u,v));diagonal=tileAt(leaves,f.face,f.u,f.v,MAX_DEPTH,index);}
    if(diagonal && diagonal.level<node.level)corners|=1<<(corner+4);
    const around=[...adjacentEdges[sx<0?0:1],...adjacentEdges[sy<0?2:3]];
    if(diagonal)around.push(diagonal);
