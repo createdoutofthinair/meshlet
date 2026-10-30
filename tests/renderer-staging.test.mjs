@@ -365,3 +365,12 @@ test('active transition reuses its immutable comparison pairs buffer',async()=>{
  r.beginTransition(camera);r.surfaceReads=1;r.frame(2000);await flush();r.frame(2300);await flush();
  assert.equal(writes.length,1);assert.ok(r.stage.comparisonUploaded);
 });
+
+test('stationary morphs reuse their measured GPU endpoint errors',async()=>{
+ const {r,camera}=await preparedRefinement();r.beginTransition(camera);r.surfaceReads=1;
+ let comparisons=0;const create=r.device.createCommandEncoder;
+ r.device.createCommandEncoder=(...args)=>{const encoder=create(...args),begin=encoder.beginComputePass;encoder.beginComputePass=(...params)=>{const pass=begin(...params),set=pass.setPipeline;pass.setPipeline=p=>{if(p===r.transitionPipe)comparisons++;set(p);};return pass;};return encoder;};
+ r.frame(2000);await flush();assert.equal(comparisons,1);
+ r.frame(2500);await flush();r.frame(3000);await flush();assert.equal(comparisons,1);
+ r.cameraState.longitude+=.001;r.frame(3500);await flush();assert.equal(comparisons,2);
+});

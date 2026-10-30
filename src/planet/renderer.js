@@ -556,7 +556,12 @@ export class PlanetRenderer {
   this.stats.visiblePatches=drawPatches.length;
   if(stage?.state==='building')this.pending=stage.todo.splice(0,TRANSITION_BATCH);
   const normals=stage?.state==='building'?[...this.normalPending,...this.pending]:this.normalPending;
-  const morphMeasurement=stage?.state==='transitioning'&&!stage.measurementPending&&now>=(stage.nextMeasure||0);
+  const measuredView=stage?.measurementView;
+  // The endpoint geometry is fixed during a morph. An identical camera and
+  // projection produce the same comparison, regardless of morph progress.
+  const sameMeasuredView=!!measuredView&&camera.width===measuredView.width&&camera.height===measuredView.height&&
+   camera.eye.every((value,i)=>value===measuredView.eye[i])&&camera.vp.every((value,i)=>value===measuredView.vp[i]);
+  const morphMeasurement=stage?.state==='transitioning'&&!stage.measurementPending&&now>=(stage.nextMeasure||0)&&!sameMeasuredView;
   let compare=(stage?.state==='building'&&stage.todo.length===0)||morphMeasurement;
   if(compare&&!this.prepareTransitionTopology(stage)){
    compare=false;stage.state='waiting';stage.nextMeasure=now+200;this.transition={...this.transition,waiting:true};
@@ -667,6 +672,7 @@ export class PlanetRenderer {
     }
     while(this.transitionErrors.size>8192)this.transitionErrors.delete(this.transitionErrors.keys().next().value);
     stage.maxMerge=maxMerge;stage.maxRefine=maxRefine;
+    stage.measurementView={eye:[...camera.eye],vp:[...camera.vp],width:camera.width,height:camera.height};
     if(morphMeasurement){
      // Refresh the error budget at the current view without changing progress.
      // Near-plane crossings must not leave a permanently enormous old estimate.
