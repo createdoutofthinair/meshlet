@@ -58,8 +58,10 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  let q=rotated*.00028+vec3<f32>(seed*.071,seed*.039,seed*.053);
  let base=cloudNoise(q)*.68+cloudNoise(q*2.03+vec3<f32>(12.0,3.0,6.0))*.32;
  let erode=cloudNoise(q*4.1+vec3<f32>(2.0,7.0,4.0));
- let coverage=clamp(params.sky.w+(weather.x-.5)*.85,0.0,1.0);
- let threshold=mix(.78,.27,coverage);
+ // Regional humidity gates broad clear areas and dense weather systems.
+ let humidity=smoothstep(.31,.67,weather.x);
+ let coverage=clamp(params.sky.w*.45+humidity*.72-.18,0.0,1.0);
+ let threshold=mix(.86,.30,coverage);
  return smoothstep(threshold,threshold+.23,base+(erode-.5)*.16*detailWeight)*profile*params.cloud.x*smoothstep(0.0,.08,params.sky.w);
 }
 @fragment fn fragment(input:Screen)->@location(0) vec4<f32>{
@@ -70,7 +72,13 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
  var color=atmosphereSky(ray,sun,vec3<f32>(0,1,0),origin.y);
  // The horizon is the intersection of the actual planet sphere.
  let ground=sphereInterval(origin.y,ray,0.0);var groundDistance=1e9;
- if(ground.y>0.0 && ground.x>0.0){groundDistance=ground.x;color=vec3<f32>(.19,.22,.20);}
+ if(ground.y>0.0 && ground.x>0.0){
+  groundDistance=ground.x;
+  // A simple ocean-colored spherical ground supplies contrast through gaps.
+  let horizonDistance=sqrt(max(1.0,origin.y*(2.0*PLANET_RADIUS+origin.y)));
+  let haze=smoothstep(.20,1.0,groundDistance/horizonDistance);
+  color=mix(vec3<f32>(.045,.12,.19),vec3<f32>(.26,.49,.67),haze*.8);
+ }
  let outer=sphereInterval(origin.y,ray,3300.0);let inner=sphereInterval(origin.y,ray,1500.0);
  if(outer.y>0.0 && outer.y>outer.x){
   var start=max(0.0,outer.x);var end=min(outer.y,groundDistance);
@@ -93,6 +101,16 @@ fn cloudDensity(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32)->f32{
    }
    color=color*transmission+lightAccum;
   }
+ }
+ // Limb glow is evaluated from tangent altitude above the spherical ground.
+ // This inexpensive single-scattering approximation is visible from orbit.
+ let tangentDistance=max(0.0,-(PLANET_RADIUS+origin.y)*ray.y);
+ if(tangentDistance>0.0 && groundDistance>1e8){
+  let tangentHeight=max(0.0,planetAltitude(origin+ray*tangentDistance));
+  let altitudeVisibility=smoothstep(5000.0,60000.0,origin.y);
+  let limb=exp(-tangentHeight/12000.0)*altitudeVisibility;
+  let sunSide=.55+.45*max(dot(ray,sun),0.0);
+  color+=vec3<f32>(.08,.30,.78)*limb*sunSide;
  }
  let mapped=max(color,vec3<f32>(0.0))/(1.0+max(color,vec3<f32>(0.0))*.22);return vec4<f32>(pow(mapped,vec3<f32>(1.0/2.2)),1.0);
 }
