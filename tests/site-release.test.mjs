@@ -31,3 +31,13 @@ test('a clean Pages build retains the preceding committed asset tree',async t=>{
  const shader=await readFile(join(output,'releases',previous,'src','river','geometry.wgsl'),'utf8');
  assert.match(shader,/fn\s+makeRocks\s*\(/);assert.ok((await readFile(join(output,'releases',previous,'river.html'),'utf8')).includes('./src/river/app.js'));
 });
+
+
+test('Pages release includes the river simulation shader used by the renderer',async t=>{
+ const output=await mkdtemp(join(tmpdir(),'meshlet-river-shader-'));t.after(()=>rm(output,{recursive:true,force:true}));
+ const root=resolve(dirname(fileURLToPath(import.meta.url)),'..'),version='e'.repeat(40);
+ await preparePages({root,output,version});
+ const release=join(output,'releases',version,'src','river');
+ assert.match(await readFile(join(release,'renderer.js'),'utf8'),/\.\/simulation\.wgsl/);
+ assert.match(await readFile(join(release,'simulation.wgsl'),'utf8'),/@compute[^]*fn\s+stepFluid/);
+});

@@ -19,7 +19,7 @@ const planet=async name=>read(`src/planet/${name}.wgsl`);
 const [common,core,curve,field,surface]=await Promise.all(['common','terrain-core','river-curve','world-field','terrain-surface'].map(planet));
 const covered={
  'src/planet':new Set(['common','terrain-core','river-curve','world-field','terrain-surface','generate','normal','bounds','cull','render','ocean','lod-error','transition-error','hydrology','regional-hydrology','river-detail','walk-probe']),
- 'src/river':new Set(['shared','select','geometry','animate','render']),
+ 'src/river':new Set(['shared','select','geometry','animate','simulation','render']),
  'src/gpu':new Set(['common','cull','render','projection'])
 };
 for(const [folder,names] of Object.entries(covered))for(const filename of await readdir(join(root,folder))){
@@ -42,7 +42,7 @@ const modules={
  'planet-walk-probe':[common,await planet('walk-probe')]
 };
 const riverShared=await read('src/river/shared.wgsl');
-for(const name of ['select','geometry','animate','render'])modules[`river-${name}`]=[common,name==='select'?riverShared.replace('var<storage,read> reach:','var<storage,read_write> reach:'):riverShared,await read(`src/river/${name}.wgsl`)];
+for(const name of ['select','geometry','animate','simulation','render'])modules[`river-${name}`]=[common,name==='select'?riverShared.replace('var<storage,read> reach:','var<storage,read_write> reach:'):riverShared,await read(`src/river/${name}.wgsl`)];
 modules['river-flow-smoke']=[common,riverShared,await read('src/river/render.wgsl'),await read('tests/river-flow-smoke.wgsl')];
 modules['fluid-lab']=[await read('src/fluid/fluid.wgsl')];
 modules['fluid-surface']=[await read('src/fluid/surface.wgsl')];
