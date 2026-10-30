@@ -32,7 +32,12 @@ fn main(@builtin(global_invocation_id) gid:vec3<u32>) {
  let directionDelta=(delta-center*factorMinusOne)/(centerLength*factor);
  let direction=normalize(center+delta);
  let base=surfaceBase(direction,tile.centerDirection.xyz,tile.centerLow.xyz,directionDelta,frame.counts.z,true);
- let river=riverMasks[slot*1681u+(y*2u)*41u+x*2u];let data=carveRiver(base,river);
+ // Samples below the channel threshold or fully covered by lake water cannot
+ // be carved; skip their river-mask buffer load as well as the calculation.
+ var data=base;
+ if(frame.hydrology.x!=0.0 && base.height>.03 && base.lake<1.0){
+  let river=riverMasks[slot*1681u+(y*2u)*41u+x*2u];data=carveRiver(base,river);
+ }
  let h=clamp(data.height*frame.settings.y,-HEIGHT_LIMIT,HEIGHT_LIMIT);
  let surfaceHeight=select(h,max(h,0.0),frame.settings.z>.5);
  vertices[slot*GRID_COUNT+sample].position=vec4<f32>(directionDelta*frame.settings.x+direction*surfaceHeight,h);
