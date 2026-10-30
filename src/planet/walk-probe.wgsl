@@ -39,15 +39,19 @@ fn main(){
  let moving=morphs.patches[slot].slots.w!=0u && morphs.patches[slot].mapping.w<1.0;
  let start=select(vec2<i32>(probe.cell.yz)-vec2<i32>(1),vec2<i32>(0),moving);
  let end=select(vec2<i32>(probe.cell.yz)+vec2<i32>(1),vec2<i32>(i32(CELLS)-1),moving);
- for(var cy=start.y;cy<=end.y;cy++){for(var cx=start.x;cx<=end.x;cx++){
+ for(var cy=start.y;cy<=end.y;cy++){
+ var previousRightTop=vec3<f32>(0.0);var previousRightBottom=vec3<f32>(0.0);var havePrevious=false;
+ for(var cx=start.x;cx<=end.x;cx++){
   if(cx<0 || cy<0 || cx>=i32(CELLS) || cy>=i32(CELLS)){continue;}
   let cell=vec2<u32>(u32(cx),u32(cy));
   // The two grid triangles share two vertices. Evaluate each corner once,
   // retaining the exact rendered winding and intersection order.
-  let a=displayedPosition(slot,cell,tile.details.z);
+  var a:vec3<f32>;var c:vec3<f32>;
+  if(havePrevious){a=previousRightTop;c=previousRightBottom;}
+  else{a=displayedPosition(slot,cell,tile.details.z);c=displayedPosition(slot,cell+vec2<u32>(0u,1u),tile.details.z);}
   let b=displayedPosition(slot,cell+vec2<u32>(1u,0u),tile.details.z);
-  let c=displayedPosition(slot,cell+vec2<u32>(0u,1u),tile.details.z);
   let d=displayedPosition(slot,cell+vec2<u32>(1u,1u),tile.details.z);
+  previousRightTop=b;previousRightBottom=d;havePrevious=true;
   let first=probeTriangle(a,b,c,origin,ray);
   if(first.y>.5 && (!found || first.x>height)){height=first.x;found=true;}
   let second=probeTriangle(b,d,c,origin,ray);
