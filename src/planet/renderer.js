@@ -206,7 +206,7 @@ export class PlanetRenderer {
  }
  resetPatchCache(){
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
-  this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;this.patchMetadataCache=new WeakMap();this.uploadedPatchEye=null;
+  this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;this.patchMetadataCache=new WeakMap();this.uploadedPatchEye=null;this.preparedPatchState=null;
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
   this.transitionErrors.clear();this.transitionErrorVersion++;this.workerErrorVersion=null;this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
   this.selectionResult=null;this.selectionRequest=null;this.workerSelectionSnapshot=null;this.reconcileSelection=false;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
@@ -592,6 +592,9 @@ export class PlanetRenderer {
   }
   let firstPatch=CAPACITY,lastPatch=-1;
   let patchDirty=!this.uploadedPatchEye||camera.eye.some((value,i)=>value!==this.uploadedPatchEye[i]);
+  const prepared=this.preparedPatchState;
+  const patchStateUnchanged=!patchDirty&&prepared?.patches===this.patches&&prepared?.slots===this.slotByKey&&
+   prepared?.newNodes===(stage?.newNodes??null)&&prepared?.newSlots===(stage?.slots??null);
   const writePatch=(node,slots)=>{
    const i=node.slot*32,cache=this.patchMetadataCache||(this.patchMetadataCache=new WeakMap());
    firstPatch=Math.min(firstPatch,node.slot);lastPatch=Math.max(lastPatch,node.slot);
@@ -609,8 +612,11 @@ export class PlanetRenderer {
    for(let k=0;k<3;k++)this.patchFloats[i+20+k]=node.direction[k]*RADIUS_KM-camera.eye[k];
    this.patchFloats[i+23]=0;
   };
-  for(const node of this.patches)writePatch(node,this.slotByKey);
-  if(stage)for(const node of stage.newNodes)writePatch(node,stage.slots);
+  if(!patchStateUnchanged){
+   for(const node of this.patches)writePatch(node,this.slotByKey);
+   if(stage)for(const node of stage.newNodes)writePatch(node,stage.slots);
+   this.preparedPatchState={patches:this.patches,slots:this.slotByKey,newNodes:stage?.newNodes??null,newSlots:stage?.slots??null};
+  }
   const raw=new ArrayBuffer(224),f=new Float32Array(raw),u=new Uint32Array(raw);
   f.set(camera.vp,0);camera.planes.forEach((p,i)=>f.set(p,16+i*4));
   let sun=normalize([.55,.42,.72]);

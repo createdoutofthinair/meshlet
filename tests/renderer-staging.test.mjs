@@ -441,3 +441,11 @@ test('worker transition relationships map to the renderer resident slots',async(
  const expectedGroups=transitionGroups(old,r.stage.nodes,expected);assert.deepEqual(r.stage.groups,expectedGroups);
  assert.deepEqual(r.stage.components,coordinateTransitions(old,r.stage.nodes,expectedGroups));
 });
+
+test('unchanged patch state avoids per-patch frame preparation',async()=>{
+ const {r}=fakeRenderer();r.frame(1000);await flush();let reads=0;
+ const get=r.patchMetadataCache.get.bind(r.patchMetadataCache);r.patchMetadataCache.get=key=>{reads++;return get(key);};
+ r.frame(1100);await flush();assert.equal(reads,0);
+ r.cameraState.longitude+=.00001;r.frame(1200);await flush();assert.ok(reads>0);
+ r.resetPatchCache();assert.equal(r.preparedPatchState,null);
+});
