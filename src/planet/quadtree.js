@@ -85,16 +85,17 @@ export function intermediateLeaves(previous,target,budget,priority=()=>0){
   for(let level=node.level;level>=0;level--){const scale=2**(node.level-level);if(desired.has(`${node.face}/${level}/${Math.floor(node.x/scale)}/${Math.floor(node.y/scale)}`))return true;}
   return false;
  };
- // Siblings share a parent. Construct its spherical geometry only once,
- // rather than repeating that work for each child in the previous tree.
+ // Most candidate parents cannot merge. Defer constructing spherical tile
+ // geometry until target coverage and all four resident children are known.
  const parents=new Map();for(const n of previous)if(n.level){
   const level=n.level-1,x=Math.floor(n.x/2),y=Math.floor(n.y/2),key=`${n.face}/${level}/${x}/${y}`;
-  if(!parents.has(key))parents.set(key,makeTile(n.face,level,x,y));
+  if(!parents.has(key))parents.set(key,{face:n.face,level,x,y,key});
  }
- for(const p of [...parents.values()].sort((a,b)=>b.level-a.level)){
-  if(!coveredByTarget(p))continue;
-  const keys=[0,1,2,3].map(i=>`${p.face}/${p.level+1}/${p.x*2+i%2}/${p.y*2+(i>>1)}`);
+ for(const candidate of [...parents.values()].sort((a,b)=>b.level-a.level)){
+  if(!coveredByTarget(candidate))continue;
+  const keys=[0,1,2,3].map(i=>`${candidate.face}/${candidate.level+1}/${candidate.x*2+i%2}/${candidate.y*2+(i>>1)}`);
   if(!keys.every(k=>original.has(k)&&leaves.has(k)))continue;
+  const p=makeTile(candidate.face,candidate.level,candidate.x,candidate.y);
   if([0,1,2,3].some(e=>neighbors(leaves,p,e).some(n=>n.level>p.level+1)))continue;
   for(const key of keys)leaves.delete(key);leaves.set(p.key,p);
  }
