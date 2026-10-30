@@ -384,3 +384,12 @@ test('morph progress reuses metadata and uploads only the active slot span',asyn
  assert.equal(r.morphMetadata,metadata);assert.deepEqual(writes,[{offset:Math.min(...slots)*32,size:(Math.max(...slots)-Math.min(...slots)+1)*32}]);
  const f=new Float32Array(r.morphBuffer.data);for(const slot of slots)assert.ok(Math.abs(f[slot*8+7]-.5)<1e-6);
 });
+
+test('cached patch metadata preserves camera-relative updates and resets',async()=>{
+ const {r}=fakeRenderer();r.frame(1000);await flush();const p=r.patches[0],i=p.slot*32;
+ const staticBefore=[...new Uint32Array(r.patchBuffer.data,i*4,20)],relativeBefore=[...new Float32Array(r.patchBuffer.data,(i+20)*4,3)];
+ r.cameraState.longitude+=.00001;r.frame(1050);await flush();
+ assert.deepEqual([...new Uint32Array(r.patchBuffer.data,i*4,20)],staticBefore);
+ assert.notDeepEqual([...new Float32Array(r.patchBuffer.data,(i+20)*4,3)],relativeBefore);
+ const oldCache=r.patchMetadataCache;r.resetPatchCache();assert.notEqual(r.patchMetadataCache,oldCache);
+});

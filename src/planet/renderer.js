@@ -206,7 +206,7 @@ export class PlanetRenderer {
  }
  resetPatchCache(){
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
-  this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;
+  this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;this.patchMetadataCache=new WeakMap();
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
   this.transitionErrors.clear();this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
   this.selectionResult=null;this.selectionRequest=null;this.reconcileSelection=false;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
@@ -579,13 +579,19 @@ export class PlanetRenderer {
    compare=false;stage.state='waiting';stage.nextMeasure=now+200;this.transition={...this.transition,waiting:true};
   }
   const writePatch=(node,slots)=>{
-   const i=node.slot*32,b=FACE_BASES[node.face],cube=faceCube(node.face,node.u,node.v);
-   this.patchFloats.set([...cube,node.span],i);this.patchFloats.set([...b.u,0],i+4);this.patchFloats.set([...b.v,0],i+8);
-   const high=node.direction.map(Math.fround),low=node.direction.map((x,k)=>x-high[k]);
-   this.patchFloats.set([...high,0],i+12);this.patchFloats.set([...low,0],i+16);
-   this.patchFloats.set(node.direction.map((x,k)=>x*RADIUS_KM-camera.eye[k]).concat(0),i+20);
-   this.patchUints.set([node.face,node.level,node.stitch,node.normalStitch],i+24);
-   this.patchUints.set(node.edgeKeys.map(key=>slots.get(key)??0xffffffff),i+28);
+   const i=node.slot*32,cache=this.patchMetadataCache||(this.patchMetadataCache=new WeakMap());
+   if(cache.get(node)!==slots){
+    const b=FACE_BASES[node.face],cube=faceCube(node.face,node.u,node.v);
+    this.patchFloats.set([...cube,node.span],i);this.patchFloats.set([...b.u,0],i+4);this.patchFloats.set([...b.v,0],i+8);
+    const high=node.direction.map(Math.fround),low=node.direction.map((x,k)=>x-high[k]);
+    this.patchFloats.set([...high,0],i+12);this.patchFloats.set([...low,0],i+16);
+    this.patchUints.set([node.face,node.level,node.stitch,node.normalStitch],i+24);
+    this.patchUints.set(node.edgeKeys.map(key=>slots.get(key)??0xffffffff),i+28);cache.set(node,slots);
+   }
+   // Camera-relative coordinates still need double-precision calculation each
+   // frame, even while the patch's other metadata remains unchanged.
+   for(let k=0;k<3;k++)this.patchFloats[i+20+k]=node.direction[k]*RADIUS_KM-camera.eye[k];
+   this.patchFloats[i+23]=0;
   };
   for(const node of this.patches)writePatch(node,this.slotByKey);
   if(stage)for(const node of stage.newNodes)writePatch(node,stage.slots);
