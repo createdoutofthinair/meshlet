@@ -795,8 +795,12 @@ export class PlanetRenderer {
    if(this.timing){const t=new BigUint64Array(data,16,8);const elapsed=(a,b)=>t[b]>=t[a]?Number(t[b]-t[a])/1e6:null;gpuComputeMs=elapsed(0,1);gpuTerrainMs=elapsed(2,3);gpuOceanMs=separateOcean?elapsed(4,5):null;gpuCloudMs=cloudActive?elapsed(6,7):null;gpuRenderMs=gpuTerrainMs==null?null:gpuTerrainMs+(gpuOceanMs??0)+(gpuCloudMs??0);}
    if(generation===this.generation){
     const residuals=new Float32Array(data,80,CAPACITY);
-    for(const {key,slot} of measured){const error=residuals[slot];if(Number.isFinite(error)&&error>=0){if((this.lodErrors.get(key)||0)!==error)this.lodErrorVersion++;this.lodErrors.delete(key);this.lodErrors.set(key,error);}}
-    while(this.lodErrors.size>8192){const key=this.lodErrors.keys().next().value;if(this.lodErrors.get(key)>0)this.lodErrorVersion++;this.lodErrors.delete(key);}
+    for(const {key,slot} of measured){const error=residuals[slot];if(Number.isFinite(error)&&error>=0){
+     const transition=this.transitionErrors.get(key)||0;
+     if(Math.max(this.lodErrors.get(key)||0,transition)!==Math.max(error,transition))this.lodErrorVersion++;
+     this.lodErrors.delete(key);this.lodErrors.set(key,error);
+    }}
+    while(this.lodErrors.size>8192){const key=this.lodErrors.keys().next().value;if((this.lodErrors.get(key)||0)>(this.transitionErrors.get(key)||0))this.lodErrorVersion++;this.lodErrors.delete(key);}
     this.latest={visibleMeshlets,gpuComputeMs,gpuRenderMs,gpuTerrainMs,gpuOceanMs,gpuCloudMs,gpuSampleAt:now,generatedPatchesSample:generatedOnSample};
    }readback.unmap();reusable=true;
   }).catch(e=>{if(generation===this.generation&&!this.deviceLost)this.onError?.(`GPU telemetry: ${e.message}`);}).finally(()=>{if(reusable&&generation===this.generation&&!this.deviceLost)this.telemetryReadback=readback;else readback.destroy();this.pendingRead=false;});}
