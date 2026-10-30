@@ -357,7 +357,20 @@ fn riverAdvectedBubbles(across:f32,z:f32,distance:f32,speed:f32)->f32{
  let pb=vec2<f32>(across+4.7,riverFlowCoordinate(z,b*32.0,speed)+37.0)*4.0;
  return mix(riverBubblePattern(pb,motion[0].y),riverBubblePattern(pa,motion[0].y),weight);
 }
-fn waterFresnel(cosine:f32)->f32{return .02037+(1.0-.02037)*pow(1.0-clamp(cosine,0.0,1.0),5.0);}
+// Exact unpolarized dielectric Fresnel, shared with the optical water study.
+fn waterFresnel(cosine:f32)->f32{
+ let c=clamp(cosine,0.0,1.0);let eta=1.333;let g=sqrt(max(0.0,eta*eta-1.0+c*c));
+ let a=(g-c)/(g+c);let b=(c*(g+c)-1.0)/(c*(g-c)+1.0);
+ return clamp(.5*a*a*(1.0+b*b),0.0,1.0);
+}
+// Fine optical ripples follow the downstream current and are filtered when
+// smaller than a pixel. Their phase is continuous, including when paused.
+fn riverOpticalRipples(across:f32,along:f32,footprint:f32)->vec2<f32>{
+ let mid=1.0-smoothstep(1.0,5.0,footprint);let fine=1.0-smoothstep(.3,1.4,footprint);
+ let a=across*.57+along*1.30;let b=across*1.3-along*.80;let c=across*2.6+along*2.05;
+ return mid*vec2<f32>(.0684*cos(a)+.0715*cos(b),.156*cos(a)-.044*cos(b))+
+        fine*vec2<f32>(.0468*cos(c),.0369*cos(c));
+}
 fn waterTransmittance(path:f32,clarity:f32)->vec3<f32>{return exp(-vec3<f32>(.18,.085,.052)*max(0.0,path)/max(.2,clarity));}
 fn uvFromClip(clip:vec4<f32>)->vec2<f32>{let ndc=clip.xy/max(.00001,clip.w);return vec2<f32>(ndc.x*.5+.5,.5-ndc.y*.5);}
 fn uvEdge(uv:vec2<f32>)->f32{return smoothstep(.0,.035,min(min(uv.x,uv.y),min(1.0-uv.x,1.0-uv.y)));}
@@ -368,7 +381,9 @@ fn viewDepth(depth:f32)->f32{return 5000.0/max(.001,10000.0-depth*9999.5);}
  let flow=normalize(vec3<f32>(tangentSlope,0.0,1.0));let side=normalize(vec3<f32>(1.0,0.0,-tangentSlope));
  let footprint=max(length(dpdx(p)),length(dpdy(p)));let detail=1.0-smoothstep(.55,2.0,footprint);
  // The vertex normal describes the actual displaced mesh; fine ripples are a smaller layer.
- let slopes=riverAdvectedSlopes(across,p.y,motion[0].x,speed,footprint)*riverFrame.optics.y*.22;
+ let movingAlong=riverFlowCoordinate(p.y,motion[0].x,speed);
+ let slopes=(riverAdvectedSlopes(across,p.y,motion[0].x,speed,footprint)*.55+
+             riverOpticalRipples(across,movingAlong,footprint)*.55)*riverFrame.optics.y;
  let n=normalize(normalize(input.normal)-side*slopes.x-flow*slopes.y);
  let view=normalize(riverFrame.cameraDelta.xyz-input.world);let light=normalize(riverFrame.sunSpeed.xyz);let ndv=clamp(dot(n,view),0.0,1.0);let ndl=max(dot(n,light),0.0);
  let depth=riverDepth(q,p.y);let refracted=refract(-view,n,1.0/1.333);
