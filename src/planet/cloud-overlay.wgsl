@@ -88,7 +88,10 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
       shadowStep=i;shadowReady=true;
      }
      let shadow=mix(shadowFrom,shadowTo,clamp(f32(i-shadowStep)/3.0,0.0,1.0));
-     let cloudUp=normalize(vec3<f32>(point.x,PLANET_RADIUS+point.y,point.z));let elevation=dot(cloudUp,sun);
+     // The density sample already computed radial altitude. Reuse its
+     // radius for the normal instead of normalizing the same point again.
+     let radial=vec3<f32>(point.x,PLANET_RADIUS+point.y,point.z);
+     let elevation=dot(radial,sun)/(PLANET_RADIUS+1500.0+height*6500.0);
      let day=atmosphereDaylight(elevation);let twilight=atmosphereTwilight(elevation);
      let cool=mix(vec3<f32>(.018,.025,.05),vec3<f32>(.24,.31,.39),day);
      let warm=mix(vec3<f32>(1.0,.92,.80),vec3<f32>(1.0,.32,.12),twilight*.85);
