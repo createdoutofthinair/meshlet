@@ -303,7 +303,7 @@ export class PlanetRenderer {
   }
   const matched=new Set(pairs.map(p=>p.refining?p.fine.key:p.coarse.key));
   const uncovered=newNodes.some(n=>!matched.has(n.key));
-  this.stage={components:coordinateTransitions(this.patches,nodes),groups:transitionGroups(this.patches,nodes),result,nodes,slots,signatures,newNodes,todo:newNodes.map(n=>n.slot),normalPending,pairs,selectionMs,state:'building',generation:this.generation,reference:camera,previousEye,nextMeasure:0,uncovered,hasRefinement:pairs.some(p=>p.refining),waitingSince:null};
+  this.stage={components:coordinateTransitions(this.patches,nodes),groups:transitionGroups(this.patches,nodes),result,nodes,slots,signatures,newNodes,todo:newNodes.map(n=>n.slot),normalPending,pairs,selectionMs,state:'building',generation:this.generation,reference:camera,previousEye,nextMeasure:0,uncovered,hasRefinement:pairs.some(p=>p.refining),waitingSince:null,computedTopology:computed?.topology};
   this.transition={...this.transition,pending:newNodes.length,waiting:false};
  }
  canMorphTransition(stage){
@@ -314,7 +314,7 @@ export class PlanetRenderer {
   const records=[];
   for(const group of stage.groups)for(const pair of group.pairs){
    if(group.type!=='stitch'&&!pair.fine.stitch&&!pair.coarse.stitch)continue;
-   const coordinates=transitionCoordinates({mask:pair.coarse.stitch,originX:pair.originX,originY:pair.originY,scale:pair.scale},{mask:pair.fine.stitch});
+   const coordinates=stage.computedTopology?.get(pair.fine.key)??transitionCoordinates({mask:pair.coarse.stitch,originX:pair.originX,originY:pair.originY,scale:pair.scale},{mask:pair.fine.stitch});
    records.push({slot:pair.fine.slot,coordinates});
   }
   if(records.length){
@@ -537,7 +537,7 @@ export class PlanetRenderer {
    else{
     const id=(this.selectionSerial=(this.selectionSerial||0)+1),key=[this.generation,this.cameraState.mode,this.budget,this.maxDepth,this.pixelSize,camera.width,camera.height].join('/');
     const options={budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth:this.cameraState.mode==='walk'?22:this.maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.transitionErrors,previousLeaves:this.coveringLeaves};
-    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options});
+    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,previousPatches:this.patches});
    }
   }
   const stage=this.stage;
