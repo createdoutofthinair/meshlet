@@ -21,7 +21,9 @@ fn main(@builtin(global_invocation_id) gid:vec3<u32>,@builtin(local_invocation_i
     var lo=vec3<f32>(1e30);var hi=vec3<f32>(-1e30);
     let delta=patches[m.slots.x].relative.xyz-patches[sharedSlot].relative.xyz;
     for(var i=0u;i<MESHLETS_PER_PATCH;i++){
-     if((m.slots.z&16u)!=0u){let fine=bounds[sharedSlot*MESHLETS_PER_PATCH+i].sphere;lo=min(lo,fine.xyz-vec3<f32>(fine.w));hi=max(hi,fine.xyz+vec3<f32>(fine.w));}
+     // A retained stitch-only morph uses the same slot for both endpoints;
+     // its parent union already contains every fine bound.
+     if((m.slots.z&16u)!=0u && m.slots.x!=sharedSlot){let fine=bounds[sharedSlot*MESHLETS_PER_PATCH+i].sphere;lo=min(lo,fine.xyz-vec3<f32>(fine.w));hi=max(hi,fine.xyz+vec3<f32>(fine.w));}
      let parent=bounds[m.slots.x*MESHLETS_PER_PATCH+i].sphere;let center=parent.xyz+delta;
      lo=min(lo,center-vec3<f32>(parent.w));hi=max(hi,center+vec3<f32>(parent.w));
     }

@@ -35,3 +35,12 @@ test('shared patch union encloses every meshlet endpoint, including overlay boun
   }
  }
 });
+
+test('self-slot stitch overlay needs only one copy of each bound',()=>{
+ const spheres=Array.from({length:16},(_,i)=>[i*.13,Math.sin(i)*.2,Math.cos(i)*.1,.15]);
+ for(const meshlet of spheres){
+  const once=enclosure(meshlet,spheres,[0,0,0]);
+  const twice=enclosure(meshlet,[...spheres,...spheres],[0,0,0]);
+  assert.deepEqual(once,twice);
+ }
+});
