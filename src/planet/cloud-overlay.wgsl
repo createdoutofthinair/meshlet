@@ -22,19 +22,32 @@
   var start=max(0.0,outer.x);var end=min(outer.y,limit);
   if(inner.y>inner.x){if(inner.x>start){end=min(end,inner.x);}else if(inner.y>start){start=inner.y;}}
   if(end>start){
-   let steps=u32(max(8.0,mix(40.0,72.0,smoothstep(12000.0,100000.0,end-start))*params.atmosphere.w));
+   // Long, grazing rays need smaller steps than short vertical views.
+   let span=end-start;
+   let targetSteps=max(mix(48.0,96.0,smoothstep(12000.0,100000.0,span)),span/1800.0);
+   let steps=u32(max(16.0,min(144.0,targetSteps)*params.atmosphere.w));
    let stepSize=(end-start)/f32(steps);let weather=weatherField(origin+ray*((start+end)*.5));
    let footprint=max(stepSize,(start+end)*.58/params.view.y);
    let detail=1.0-smoothstep(900.0,7000.0,footprint);
    let orbital=smoothstep(80000.0,600000.0,origin.y);
-   let jitter=cloudHash(vec3<f32>(floor(input.pos.xy),1.0));
-   var shadow=1.0;var shadowReady=false;
+   // Small stable subpixel jitter breaks aligned slices without covering the
+   // entire cloud in high-contrast per-pixel noise.
+   let jitter=.5+(cloudHash(vec3<f32>(floor(input.pos.xy),1.0))-.5)*.24;
+   var shadowFrom=1.0;var shadowTo=1.0;var shadowReady=false;var shadowStep=0u;
    for(var i=0u;i<steps;i++){
     if(transmission<.02){break;}
     let point=origin+ray*(start+(f32(i)+jitter)*stepSize);let density=cloudDensity(point,weather,detail);
     if(density>.001){
      let alpha=1.0-exp(-density*stepSize*mix(.0018,.0009,orbital));
-     if(!shadowReady || i%3u==0u){shadow=exp(-cloudDensity(point+sun*mix(420.0,1600.0,orbital),weather,detail)*mix(1.15,2.0,orbital));shadowReady=true;}
+     // Sample lighting less often, but interpolate rather than holding the
+     // previous value in visible bands across three marching slices.
+     if(!shadowReady || i>=shadowStep+3u){
+      if(!shadowReady){shadowFrom=exp(-cloudDensity(point+sun*mix(420.0,1600.0,orbital),weather,detail)*mix(1.15,2.0,orbital));}else{shadowFrom=shadowTo;}
+      let ahead=point+ray*(stepSize*3.0);
+      shadowTo=exp(-cloudDensity(ahead+sun*mix(420.0,1600.0,orbital),weather,detail)*mix(1.15,2.0,orbital));
+      shadowStep=i;shadowReady=true;
+     }
+     let shadow=mix(shadowFrom,shadowTo,clamp(f32(i-shadowStep)/3.0,0.0,1.0));
      let cloudUp=normalize(vec3<f32>(point.x,PLANET_RADIUS+point.y,point.z));let elevation=dot(cloudUp,sun);
      let day=atmosphereDaylight(elevation);let twilight=atmosphereTwilight(elevation);
      let phase=.55+.45*pow(max(dot(ray,sun),0.0),6.0);
