@@ -264,11 +264,12 @@ export class PlanetRenderer {
    this.canvas.width=w;this.canvas.height=h;this.depth?.destroy();this.waterDepth?.destroy();
    this.depth=this.device.createTexture({label:'Planet reverse-Z depth',size:[w,h],format:'depth32float',usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.TEXTURE_BINDING});
    this.waterDepth=this.device.createTexture({label:'Terrain depth and lake coverage',size:[w,h],format:'r32float',usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.TEXTURE_BINDING});
+   this.depthView=this.depth.createView();this.waterDepthView=this.waterDepth.createView();
    this.oceanBind=this.device.createBindGroup({layout:this.oceanLayout,entries:[
     ...[[0,this.uniform],[5,this.plates],[7,this.world],[8,this.worldDirections],[10,this.worldFaces],[11,this.oceanView]].map(([binding,buffer])=>({binding,resource:{buffer}})),
-    {binding:12,resource:this.waterDepth.createView()}
+    {binding:12,resource:this.waterDepthView}
    ]});
-   this.cloudBind=this.device.createBindGroup({layout:this.cloudPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.cloudUniform}},{binding:1,resource:this.depth.createView()}]});
+   this.cloudBind=this.device.createBindGroup({layout:this.cloudPipe.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.cloudUniform}},{binding:1,resource:this.depthView}]});
    this.needsSelection=true;
   }
  }
@@ -725,11 +726,11 @@ export class PlanetRenderer {
   dispatch(this.boundsPipe,this.boundsBind,this.pending.length*MESHLETS);
   if(compare&&stage.pairs.length){cp.setPipeline(this.transitionPipe);cp.setBindGroup(0,this.transitionBind);cp.dispatchWorkgroups(stage.pairs.length);}
   dispatch(this.cullPipe,this.cullBind,drawPatches.length*MESHLETS);cp.end();
-  const colorView=this.context.getCurrentTexture().createView(),depthView=this.depth.createView();
+  const colorView=this.context.getCurrentTexture().createView(),depthView=this.depthView;
   const cloudActive=!!this.cloudPipe&&!this.lodColors&&!this.patchColors&&!this.meshletColors&&!this.wireframe&&!this.patchLines&&!this.meshletLines;
   const descriptor={colorAttachments:[
    {view:colorView,clearValue:{r:.006,g:.009,b:.016,a:1},loadOp:'clear',storeOp:'store'},
-   {view:this.waterDepth.createView(),clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}
+   {view:this.waterDepthView,clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}
   ],depthStencilAttachment:{view:depthView,depthClearValue:0,depthLoadOp:'clear',depthStoreOp:separateOcean||cloudActive?'store':'discard'}};
   if(sample&&this.timing)descriptor.timestampWrites={querySet:this.queries,beginningOfPassWriteIndex:2,endOfPassWriteIndex:3};
   const pass=encoder.beginRenderPass(descriptor);pass.setPipeline(this.renderPipe);pass.setBindGroup(0,this.renderBind);pass.drawIndirect(this.indirect,0);pass.end();
