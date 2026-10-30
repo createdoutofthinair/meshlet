@@ -469,3 +469,21 @@ test('surface probes dispatch the regular or overlay pipeline for the displayed 
  r.stage={state:'transitioning'};r.topologySlots=new Set([patch.slot]);await r.sampleRenderedSurface(patch.direction);assert.equal(seen.at(-1),'overlay-probe');
  r.topologySlots=new Set();await r.sampleRenderedSurface(patch.direction);assert.equal(seen.at(-1),'regular-probe');
 });
+
+test('point probe readbacks are reused and invalidated by a terrain reset',async()=>{
+ const {r}=fakeRenderer();r.probeInput=r.device.createBuffer({size:16});r.sampleBuffer=r.device.createBuffer({size:16});r.pointPipe={};r.pointBind={};
+ let created=0,destroyed=0;const create=r.device.createBuffer;
+ r.device.createBuffer=options=>{const b=create(options);if(options.size===16){created++;b.destroy=()=>{destroyed++;};}return b;};
+ await r.sampleTerrain([1,0,0]);await r.sampleTerrain([0,1,0]);assert.equal(created,1);assert.equal(r.probeReadbacks.length,1);
+ r.resetPatchCache();assert.equal(destroyed,1);assert.equal(r.probeReadbacks.length,0);
+ await r.sampleTerrain([1,0,0]);assert.equal(created,2);
+});
+
+test('concurrent probes use separate readbacks and stale readbacks are destroyed',async()=>{
+ const {r}=fakeRenderer();r.probeInput=r.device.createBuffer({size:16});r.sampleBuffer=r.device.createBuffer({size:16});r.pointPipe={};r.pointBind={};
+ const resolve=[],created=[];const create=r.device.createBuffer;
+ r.device.createBuffer=options=>{const b=create(options);if(options.size===16){b.mapAsync=()=>new Promise(done=>resolve.push(done));b.destroyed=false;b.destroy=()=>{b.destroyed=true;};created.push(b);}return b;};
+ const a=r.sampleTerrain([1,0,0]),b=r.sampleTerrain([0,1,0]);assert.equal(created.length,2);assert.notEqual(created[0],created[1]);
+ r.resetPatchCache();resolve.forEach(done=>done());assert.equal(await a,null);assert.equal(await b,null);
+ assert.ok(created.every(buffer=>buffer.destroyed));assert.equal(r.probeReadbacks.length,0);
+});

@@ -40,6 +40,7 @@ export class PlanetRenderer {
   this.retiredSlots=new Set();this.transitionErrors=new Map();this.transitionErrorVersion=0;this.workerErrorVersion=null;this.transitionCommitId=0;this.lastTransitionCommit=null;this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
   this.transitionTargetPixels=TRANSITION_TARGET_PIXELS;
   this.lastSample=0;this.pendingRead=false;this.generation=0;this.surfaceRevision=0;this.inFlight=0;this.probePending=false;this.lastProbeKey='';this.lastProbeTime=0;this.stats={leaves:0,visiblePatches:0,deepest:0,selectionMs:0,generated:0};
+  this.probeReadbacks=[];
   this.hydrologySeed=null;
   this.regionSeed=null;this.regions=new Map();this.regionFree=Array.from({length:REGION_CAPACITY},(_,i)=>REGION_CAPACITY-1-i);
   this.simulateRegionsForAnalysis=false;
@@ -206,6 +207,7 @@ export class PlanetRenderer {
   this.surfaceRevision++;
  }
  resetPatchCache(){
+  for(const buffer of this.probeReadbacks||[])buffer.destroy();this.probeReadbacks=[];
   this.slotByKey.clear();this.stitchByKey.clear();this.free=Array.from({length:CAPACITY},(_,i)=>CAPACITY-1-i);this.pending=[];this.normalPending=[];this.patches=[];
   this.lodErrors.clear();this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;this.patchMetadataCache=new WeakMap();this.uploadedPatchEye=null;this.preparedPatchState=null;
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
@@ -467,6 +469,14 @@ export class PlanetRenderer {
   const distance=Math.hypot(...camera.eye.map((x,i)=>x-s.eye[i]));
   return distance>=.00075||dot(camera.forward,s.forward)<Math.cos(5*Math.PI/180);
  }
+ acquireProbeReadback(size){
+  if(size===16&&this.probeReadbacks.length)return this.probeReadbacks.pop();
+  return this.device.createBuffer({size,usage:BUFFER.COPY_DST|BUFFER.MAP_READ});
+ }
+ releaseProbeReadback(buffer,size,generation,reusable){
+  if(reusable&&size===16&&!this.deviceLost&&generation===this.generation&&this.probeReadbacks.length<2)this.probeReadbacks.push(buffer);
+  else buffer.destroy();
+ }
  async sampleTerrain(direction=null,kind='terrain'){
   if(this.deviceLost)throw new Error('WebGPU device is lost. Reload to retry.');
   const generation=this.generation;
@@ -476,13 +486,13 @@ export class PlanetRenderer {
   d.queue.writeBuffer(this.uniform,184,new Uint32Array([this.seed>>>0]));
   d.queue.writeBuffer(this.uniform,208,new Float32Array([this.erosion,this.rivers?1:0,this.regional?1:0,0]));this.ensureHydrology();
   if(direction)d.queue.writeBuffer(this.probeInput,0,new Float32Array([...direction,0]));
-  const readback=d.createBuffer({size,usage:BUFFER.COPY_DST|BUFFER.MAP_READ}),encoder=d.createCommandEncoder();
+  const readback=this.acquireProbeReadback(size),encoder=d.createCommandEncoder();let reusable=false;
   const pipe=kind==='rivers'?this.riverPipe:kind==='valleys'?this.valleyPipe:this.highlandsPipe,bind=kind==='rivers'?this.riverBind:kind==='valleys'?this.valleyBind:this.highlandsBind;
   const pass=encoder.beginComputePass();pass.setPipeline(all?pipe:this.pointPipe);pass.setBindGroup(0,all?bind:this.pointBind);pass.dispatchWorkgroups(all?Math.ceil(count/64):1);pass.end();
   encoder.copyBufferToBuffer(this.sampleBuffer,0,readback,0,size);d.queue.submit([encoder.finish()]);
-  try{await readback.mapAsync(GPUMapMode.READ);const data=new Float32Array(readback.getMappedRange().slice(0));readback.unmap();return generation===this.generation?data:null;}
+  try{await readback.mapAsync(GPUMapMode.READ);const data=new Float32Array(readback.getMappedRange().slice(0));readback.unmap();reusable=true;return generation===this.generation?data:null;}
   catch(error){if(this.deviceLost||generation!==this.generation)return null;throw error;}
-  finally{readback.destroy();}
+  finally{this.releaseProbeReadback(readback,size,generation,reusable);}
  }
  async findHighlands(){
   const generation=this.generation,data=await this.sampleTerrain();if(generation!==this.generation)return null;
@@ -516,13 +526,13 @@ export class PlanetRenderer {
   const raw=new ArrayBuffer(48),floats=new Float32Array(raw),uints=new Uint32Array(raw);
   floats.set([...origin,reference,...direction,0]);uints.set([patch.slot,cell(face.u,patch.u),cell(face.v,patch.v),0],8);
   const d=this.device;d.queue.writeBuffer(this.walkProbeInput,0,raw);
-  const readback=d.createBuffer({size:16,usage:BUFFER.COPY_DST|BUFFER.MAP_READ}),encoder=d.createCommandEncoder({label:'Walkable terrain probe'});
+  const readback=this.acquireProbeReadback(16),encoder=d.createCommandEncoder({label:'Walkable terrain probe'});let reusable=false;
   const overlay=this.stage?.state==='transitioning'&&this.topologySlots?.has(patch.slot);
   const pass=encoder.beginComputePass();pass.setPipeline(overlay?this.walkProbePipe:(this.walkRegularPipe||this.walkProbePipe));pass.setBindGroup(0,overlay?this.walkProbeBind:(this.walkRegularBind||this.walkProbeBind));pass.dispatchWorkgroups(1);pass.end();
   encoder.copyBufferToBuffer(this.walkProbeResult,0,readback,0,16);d.queue.submit([encoder.finish()]);this.surfaceReads=(this.surfaceReads||0)+1;
-  try{await readback.mapAsync(GPUMapMode.READ);const values=new Float32Array(readback.getMappedRange().slice(0));readback.unmap();return generation===this.generation&&revision===this.surfaceRevision&&values[1]>.5?values[0]:null;}
+  try{await readback.mapAsync(GPUMapMode.READ);const values=new Float32Array(readback.getMappedRange().slice(0));readback.unmap();reusable=true;return generation===this.generation&&revision===this.surfaceRevision&&values[1]>.5?values[0]:null;}
   catch(error){if(this.deviceLost||generation!==this.generation)return null;throw error;}
-  finally{readback.destroy();this.surfaceReads--;}
+  finally{this.releaseProbeReadback(readback,16,generation,reusable);this.surfaceReads--;}
  }
  requestSurface(camera,now){
   if(this.cameraState.mode==='walk'||this.cameraState.mode==='flight')return;
