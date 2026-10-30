@@ -35,3 +35,15 @@ test('coarse cloud bound cannot reject a sample with positive density',()=>{
   }
  }
 });
+
+test('planet coarse-octave bound never rejects a sample above the density threshold',()=>{
+ for(let t=0;t<=40;t++)for(let a=0;a<=40;a++)for(let k=0;k<=40;k++){
+  const detail=t/40,first=a/40,threshold=.3+.56*k/40,lower=threshold-.04*(1-detail);
+  const upper=(first*.7+.30002)*(1-detail)+1.08002*detail;
+  if(upper<=lower)for(const second of [0,.5,1])for(const fine of [0,.5,1])for(const erosion of [0,.5,1]){
+   const coarse=first*.7+second*.3;
+   const sample=coarse*(1-detail)+fine*detail+(erosion-.5)*.16*detail;
+   assert.ok(sample<=lower+1e-12);
+  }
+ }
+});

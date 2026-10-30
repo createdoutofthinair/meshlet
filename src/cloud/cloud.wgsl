@@ -82,11 +82,11 @@ fn cloudDensityWithTerms(p:vec3<f32>,detailWeight:f32,height:f32,terms:CloudWeat
  let global=vec3<f32>(p.x,PLANET_RADIUS+p.y,p.z);
  let rotated=vec3<f32>(global.x*terms.windCos+global.z*terms.windSin,global.y,-global.x*terms.windSin+global.z*terms.windCos);
  let q=rotated*terms.scale+terms.seedOffset;
+ let threshold=terms.threshold;
+ let lower=threshold;
  // At full detail the coarse field has zero contribution to the mix.
  var coarse=0.0;
  if(detailWeight<1.0){coarse=cloudNoise(q*.16+vec3<f32>(8.0,14.0,3.0));}
- let threshold=terms.threshold;
- let lower=threshold;
  // Both fine octaves are bounded by 1 and erosion adds at most .08.
  // A clear coarse sample can therefore skip all remaining noise evaluation.
  if(coarse*(1.0-detailWeight)+1.08002*detailWeight<=lower){return 0.0;}
