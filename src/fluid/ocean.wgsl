@@ -28,6 +28,18 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
  ring=clamp(ring,-.15,.15);
  return baseWave(p,time,dist)+ring;
 }
+// Smooth union of overlapping ellipsoidal lobes forms an irregular rounded
+// test object. The same distance field drives rendering and ball contacts.
+fn roundedObjectField(p:vec3<f32>)->f32{
+ let a=length((p-vec3<f32>(-.20,-.10,0.0))/vec3<f32>(.78,.90,.62))-.90;
+ let b=length((p-vec3<f32>(.38,.03,.07))/vec3<f32>(.55,.70,.58))-.78;
+ let c=length((p-vec3<f32>(-.08,.32,-.30))/vec3<f32>(.58,.55,.51))-.72;
+ let k=.24;let h=clamp(.5+.5*(b-a)/k,0.0,1.0);let ab=mix(b,a,h)-k*h*(1.0-h);
+ let j=clamp(.5+.5*(c-ab)/k,0.0,1.0);return (mix(c,ab,j)-k*j*(1.0-j))*.51;
+}
+fn roundedObjectNormal(p:vec3<f32>)->vec3<f32>{
+ let e=.002;return normalize(vec3<f32>(roundedObjectField(p+vec3<f32>(e,0,0))-roundedObjectField(p-vec3<f32>(e,0,0)),roundedObjectField(p+vec3<f32>(0,e,0))-roundedObjectField(p-vec3<f32>(0,e,0)),roundedObjectField(p+vec3<f32>(0,0,e))-roundedObjectField(p-vec3<f32>(0,0,e))));
+}
 // The bounded test bodies fit in one invocation: pair resolution is deterministic and
 // never reads another invocation's partially updated state.
 @compute @workgroup_size(1) fn updateBalls(){
@@ -45,6 +57,9 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
  for(var iteration=0u;iteration<4u;iteration++){
   for(var i=0u;i<30u;i++){
    var ball=balls[i];let r=ball.position.w;if(r<=0.0){continue;}let lo=vec3<f32>(-.65,-.95,-.65);let hi=vec3<f32>(.65,.75,.65);
+   if(params.viewport.z>.5){
+    let d=roundedObjectField(ball.position.xyz);if(d<r){let normal=roundedObjectNormal(ball.position.xyz);ball.position=vec4<f32>(ball.position.xyz+normal*(r-d),r);let vn=dot(ball.velocity.xyz,normal);if(vn<0.0){ball.velocity=vec4<f32>(ball.velocity.xyz-normal*vn*1.15,0.0);}}
+   }else{
    let closest=clamp(ball.position.xyz,lo,hi);let delta=ball.position.xyz-closest;let d=length(delta);
    if(d<r){
     var normal=vec3<f32>(1.0,0.0,0.0);var penetration=r-d;
@@ -57,6 +72,7 @@ fn wave(p:vec2<f32>,time:f32,dist:f32)->f32{
     }
     ball.position=vec4<f32>(ball.position.xyz+normal*penetration,r);
     let vn=dot(ball.velocity.xyz,normal);if(vn<0.0){ball.velocity=vec4<f32>(ball.velocity.xyz-normal*vn*1.15,0.0);}
+   }
    }
    balls[i]=ball;
    for(var j=i+1u;j<30u;j++){
@@ -105,6 +121,14 @@ fn cubeHit(origin:vec3<f32>,direction:vec3<f32>)->f32{
  let a=(vec3<f32>(-.65,-.95,-.65)-origin)/safe;let b=(vec3<f32>(.65,.75,.65)-origin)/safe;
  let near=min(a,b);let far=max(a,b);let enter=max(near.x,max(near.y,near.z));let leave=min(far.x,min(far.y,far.z));
  if(leave<max(enter,0.0)){return -1.0;}return select(leave,enter,enter>0.0);
+}
+// March only inside a conservative bounding sphere; all optical rays see
+// the same surface, including reflection and refraction below the water.
+fn roundedObjectHit(origin:vec3<f32>,direction:vec3<f32>)->f32{
+ let center=vec3<f32>(0.0,-.05,0.0);let q=origin-center;let b=dot(q,direction);let disc=b*b-dot(q,q)+1.5*1.5;
+ if(disc<0.0){return -1.0;}let far= -b+sqrt(disc);var t=max(.001,-b-sqrt(disc));
+ for(var i=0u;i<96u;i++){if(t>far){break;}let d=roundedObjectField(origin+direction*t);if(d<.001){return t;}t+=max(.001,d*.8);}
+ return -1.0;
 }
 // Ripples travel from each actual impact to the cube, then the wash fades.
 fn cubeImpactWash(position:vec2<f32>,faceNormal:vec2<f32>,time:f32)->f32{
@@ -156,10 +180,11 @@ fn foamBreakup(uv:vec2<f32>)->f32{
 fn cubeColor(p:vec3<f32>)->vec3<f32>{
  let q=abs(p-vec3<f32>(0.0,-.1,0.0))/vec3<f32>(.65,.85,.65);var n=vec3<f32>(0.0,0.0,sign(p.z));
  if(q.x>q.y&&q.x>q.z){n=vec3<f32>(sign(p.x),0.0,0.0);}else if(q.y>q.z){n=vec3<f32>(0.0,sign(p.y+.1),0.0);}
+ if(params.viewport.z>.5){n=roundedObjectNormal(p);}
  let light=normalize(vec3<f32>(-.35,.65,.55));let lit=.22+.78*max(dot(n,light),0.0);
  // A subtle checker makes the underwater refraction distinguishable from
  // the reflected upper part without changing the cube's silhouette.
- let coord=select(select(p.xy,p.zy,abs(n.x)>.5),p.xz,abs(n.y)>.5);
+ let coord=select(select(select(p.xy,p.zy,abs(n.x)>.5),p.xz,abs(n.y)>.5),vec2<f32>(atan2(p.z,p.x)*.45,p.y),params.viewport.z>.5);
  let tiles=floor((coord.x+3.0)*4.0)+floor((coord.y+3.0)*4.0);
  let pattern=select(.68,1.0,fract(tiles*.5)<.25);
  var color=vec3<f32>(.80,.48,.23)*lit*pattern;
@@ -169,8 +194,8 @@ fn cubeColor(p:vec3<f32>)->vec3<f32>{
  // Anchor the film to the cube's mean waterline instead of the oscillating
  // wave height so adhered water does not stretch and bounce with ripples.
  let height=p.y;
- let faceCoord=select(p.x,p.z,abs(n.x)>.5);let response=cubeImpactWash(p.xz,n.xz,time);
- let side=select(1.0,0.0,abs(n.y)>.5);let band=smoothstep(-.025,.02,height)*(1.0-smoothstep(.10,.30,height));
+ let faceCoord=select(select(p.x,p.z,abs(n.x)>.5),atan2(p.z,p.x)*.45,params.viewport.z>.5);let response=cubeImpactWash(p.xz,n.xz,time);
+ let side=select(select(1.0,0.0,abs(n.y)>.5),smoothstep(.15,.55,length(n.xz)),params.viewport.z>.5);let band=smoothstep(-.025,.02,height)*(1.0-smoothstep(.10,.30,height));
  let breakup=noise(vec2<f32>(faceCoord*18.0,p.y*18.0));
  let drain=cubeFoamDrain(p.xz,n.xz,height,faceCoord,time);
  let film=clamp((band*.30*response+drain*.53)*side,0.0,.68);
@@ -215,7 +240,7 @@ fn foamOptics(water:vec3<f32>,reflected:vec3<f32>,normal:vec3<f32>,coverage:f32,
 }
 struct ObjectHit {distance:f32,color:vec3<f32>,opacity:f32};
 fn objectHit(origin:vec3<f32>,direction:vec3<f32>,includeCrown:bool)->ObjectHit{
- var distance=cubeHit(origin,direction);var color=vec3<f32>(0.0);var opacity=1.0;
+ var distance=cubeHit(origin,direction);if(params.viewport.z>.5){distance=roundedObjectHit(origin,direction);}var color=vec3<f32>(0.0);var opacity=1.0;
  if(distance>0.0){color=cubeColor(origin+direction*distance);}
  for(var i=0u;i<30u;i++){
   let ball=balls[i];if(ball.position.w<=0.0){continue;}let delta=origin-ball.position.xyz;let b=dot(delta,direction);let discriminant=b*b-dot(delta,delta)+ball.position.w*ball.position.w;
@@ -315,12 +340,13 @@ fn display(value:vec3<f32>)->vec4<f32>{return vec4<f32>(pow(max(value,vec3<f32>(
  let scatter=pow(max(dot(ray,sun),0.0),5.0)*.07*(1.0-cosView);let f=fresnel(cosView);
  var color=mix(transmitted,reflection,f)+vec3<f32>(1.0,.91,.72)*spec+vec3<f32>(.05,.3,.24)*scatter;
  // Foam gathers where waves meet the cube and thins outward.
- let cubeDistance=max(abs(point.x),abs(point.z))-.65;
+ let cubeDistance=select(max(abs(point.x),abs(point.z))-.65,roundedObjectField(vec3<f32>(point.x,0.0,point.z)),params.viewport.z>.5);
  if(cubeDistance>=0.0 && cubeDistance<.55){
   let near=1.0-smoothstep(.05,.50,cubeDistance);
   let uv=point.xz*8.0+vec2<f32>(time*.55,-time*.3);
   let texture=noise(uv)*.52+noise(uv*2.6+vec2<f32>(4.8,2.3))*.30+noise(uv*6.0+vec2<f32>(8.0,5.0))*.18;
-  let face=select(vec2<f32>(0.0,sign(point.z)),vec2<f32>(sign(point.x),0.0),abs(point.x)>abs(point.z));
+  var face=select(vec2<f32>(0.0,sign(point.z)),vec2<f32>(sign(point.x),0.0),abs(point.x)>abs(point.z));
+  if(params.viewport.z>.5){let n=roundedObjectNormal(vec3<f32>(point.x,0.0,point.z));face=normalize(n.xz+vec2<f32>(.00001));}
   let response=cubeImpactWash(point.xz,face,time);
   color=foamOptics(color,reflection,normal,near*smoothstep(.38,.71,texture)*.72*response,f);
  }
