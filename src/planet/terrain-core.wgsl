@@ -84,8 +84,11 @@ fn terrainBase(direction:vec3<f32>,seed:u32)->TerrainBase {
  let bias=mix(biasB,biasA,.5+.5*smoothstep(0.0,.18,first-second));
  let continent=noise3(d*2.5,seed+31u)*.58+noise3(d*5.4,seed+37u)*.29+noise3(d*11.7,seed+41u)*.13+bias*.24+.035;
  let land=smoothstep(-.15,.13,continent);
- let plain=.16+max(0.0,continent)*1.5+noise3(d*28.0,seed+43u)*.20;
- let basin=-3.7+noise3(d*16.0,seed+47u)*.55;
+ // Endpoints of the land blend are exact: the unused component cannot
+ // affect terrain or coastline, so avoid its noise evaluation there.
+ var plain=0.0;var basin=0.0;
+ if(land>0.0){plain=.16+max(0.0,continent)*1.5+noise3(d*28.0,seed+43u)*.20;}
+ if(land<1.0){basin=-3.7+noise3(d*16.0,seed+47u)*.55;}
  let mountainZone=clamp(boundary*.82+smoothstep(.08,.35,continent)*.34,0.0,1.0);
  return TerrainBase(d,warp,land,plain,basin,land*mountainZone);
 }
