@@ -70,9 +70,15 @@ function buildTopology(from={},to={},coordinatesOnly=false){
   for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)cells[y*16+x].push(j);
  }
  for(let i=0;i<old.length;i++){
-  const [x0,y0,x1,y1]=cellRange(old[i].box),candidates=[];
-  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)for(const j of cells[y*16+x])if(marks[j]!==i+1){marks[j]=i+1;candidates.push(j);}
-  candidates.sort((a,b)=>a-b);
+  const [x0,y0,x1,y1]=cellRange(old[i].box);let candidates;
+  if(x0===x1&&y0===y1){
+   // A cell's entries are already unique and in target-triangle order.
+   candidates=cells[y0*16+x0];
+  }else{
+   candidates=[];
+   for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)for(const j of cells[y*16+x])if(marks[j]!==i+1){marks[j]=i+1;candidates.push(j);}
+   candidates.sort((a,b)=>a-b);
+  }
   for(const j of candidates){
   const a=old[i],b=next[j];
   if(a.box[0]>=b.box[2]||a.box[2]<=b.box[0]||a.box[1]>=b.box[3]||a.box[3]<=b.box[1])continue;
