@@ -17,7 +17,8 @@ fn at(slot:u32,point:vec2<u32>,mask:u32)->vec3<f32>{
 fn sampleSurfaceVertex(slot:u32,coord:vec2<f32>,mask:u32)->PlanetVertex{
  let q=clamp(coord,vec2<f32>(0.0),vec2<f32>(f32(CELLS)));
  let integer=vec2<u32>(round(q));
- if(all(q==vec2<f32>(integer)) && all(stitchCoord(integer,mask)==integer)){
+ // An unstitched patch cannot move any integer grid coordinate.
+ if(all(q==vec2<f32>(integer)) && (mask==0u || all(stitchCoord(integer,mask)==integer))){
   return vertices[slot*GRID_COUNT+(integer.y+2u)*GRID+integer.x+2u];
  }
  let base=vec2<i32>(min(floor(q),vec2<f32>(f32(CELLS-1u))));
