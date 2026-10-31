@@ -167,3 +167,12 @@ test('terrain detail control updates selection and rejects invalid targets',()=>
  renderer.needsSelection=false;select.value='0';select.dispatchEvent(new Event('change'));
  assert.equal(renderer.pixelSize,3);assert.equal(renderer.needsSelection,false);
 });
+
+test('fine material detail can be toggled independently of terrain LOD',()=>{
+ const toggle=doc.getElementById('terrain-material-detail');
+ const previousBudget=renderer.budget;
+ toggle.checked=false;toggle.dispatchEvent(new Event('change'));
+ assert.equal(renderer.terrainMaterialDetail,false);assert.equal(renderer.budget,previousBudget);
+ toggle.checked=true;toggle.dispatchEvent(new Event('change'));
+ assert.equal(renderer.terrainMaterialDetail,true);
+});

@@ -5,7 +5,7 @@ const makeRenderer=()=>({seed:7,timing:true,adapter:{info:{vendor:'test'}},camer
 test('records a session independently with camera changes and non-duplicated GPU samples',()=>{
  const r=makeRenderer(),rec=new StatisticsRecorder();rec.start(100,r);rec.record(100,16,2,r);r.cameraState.mode='walk';r.cameraState.altitude=.0017;rec.record(200,20,3,r);rec.record(350,30,4,r);
  assert.equal(rec.samples.length,2);assert.equal(rec.samples[0].gpuCloudAtmosphereMs,3);assert.equal(rec.samples[1].gpuCloudAtmosphereMs,null);assert.equal(rec.samples[1].framePeakMs,30);assert.equal(rec.samples[1].camera.mode,'walk');
- const result=rec.stop(500);assert.equal(result.recordedMs,400);assert.equal(result.metadata.seed,7);assert.equal(rec.active,false);
+ const result=rec.stop(500);assert.equal(result.recordedMs,400);assert.equal(result.metadata.seed,7);assert.equal(result.samples[0].settings.terrainMaterialDetail,true);assert.equal(rec.active,false);
 });
 test('reports missing GPU timestamps and caps long sessions',()=>{
  const r=makeRenderer();r.timing=false;const rec=new StatisticsRecorder(1);rec.start(0,r);rec.record(0,20,1,r);rec.record(250,21,1,r);assert.equal(rec.active,false);const result=rec.stop(250);assert.equal(result.truncated,true);assert.equal(result.metadata.gpuTimestampQueries,false);assert.equal(result.samples[0].gpuTerrainMs,null);

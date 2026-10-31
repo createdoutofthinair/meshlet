@@ -166,15 +166,17 @@ fn fs(in:Output)->TerrainPixel {
  // Reuse procedural mineral height for a bounded local cavity cue. It is
  // material-scale occlusion only; it does not cast terrain shadows.
  var materialOcclusion=1.0;
+ var materialRoughnessVariation=0.0;
  // A single filtered mineral band adds subtle variation without an expensive
  // extra normal-noise evaluation at every close-up pixel.
- if(land && water<.1 && (frame.counts.w&2u)==0u && footprint<.004){
+ if(land && water<.1 && (frame.counts.w&4098u)==0u && footprint<.004){
   let visibleHeight=select(in.height,max(in.height,0.0),frame.settings.z>.5);
   let elevation=visibleHeight/frame.settings.x;
   let detailDelta=(in.detailOffset-in.detailHigh*elevation)/(1.0+elevation);
   let medium=localNoise(in.detailHigh,in.detailLow,detailDelta,1048576.0,frame.counts.z+1709u);
   let mediumFilter=1.0-smoothstep(.001,.004,footprint);
   let variation=medium*.075*mediumFilter;
+  materialRoughnessVariation=medium*.045*mediumFilter*(1.0-snowCover);
   base=max(vec3<f32>(0.0),base*(1.0+variation)+vec3<f32>(.012,.005,-.008)*medium*mediumFilter);
   // Fine mineral variation fades out before its projected footprint aliases.
   // Both bands use the same high/low world coordinates across patch edges.
@@ -193,7 +195,7 @@ fn fs(in:Output)->TerrainPixel {
  }
  // Terrain is predominantly dielectric. Keep the specular response broad and
  // energy bounded; snow and exposed rock have different surface roughness.
- let roughness=clamp(.68*exposedWeight+.90*talusWeight+.84*sandWeight+.92*soilWeight+.78*snowCover,.35,1.0);
+ let roughness=clamp(.68*exposedWeight+.90*talusWeight+.84*sandWeight+.92*soilWeight+.78*snowCover+materialRoughnessVariation,.35,1.0);
  let view=normalize(-in.relative);
  // The local horizon blocks direct sunlight at night; sky fill fades more
  // slowly to retain twilight. This is horizon lighting, not terrain shadows.
