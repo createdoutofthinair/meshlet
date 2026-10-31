@@ -18,7 +18,13 @@ function clip(polygon,a,b){
   if(pin)out.push(p);
   if(pin!==qin){const t=dp/(dp-dq);out.push([p[0]+t*(q[0]-p[0]),p[1]+t*(q[1]-p[1])]);}
  }
- return out.filter((p,i)=>{const q=out[(i+out.length-1)%out.length];return Math.hypot(p[0]-q[0],p[1]-q[1])>EPS;});
+ if(!out.length)return out;
+ let previous=out[out.length-1],write=0;
+ for(let i=0;i<out.length;i++){
+  const point=out[i];if(Math.hypot(point[0]-previous[0],point[1]-previous[1])>EPS)out[write++]=point;
+  previous=point;
+ }
+ out.length=write;return out;
 }
 function triangles({mask=0,originX=0,originY=0,scale=1}={}){
  if(!Number.isInteger(mask)||mask<0||mask>15||![originX,originY,scale].every(Number.isFinite)||scale<=0||scale>1||originX<0||originY<0||originX+16*scale>16+EPS||originY+16*scale>16+EPS)throw new Error('Invalid transition surface mapping');
