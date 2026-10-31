@@ -641,3 +641,12 @@ test('coalesced point probes are all invalidated by a terrain reset',async()=>{
  const a=r.sampleTerrain([1,0,0]),b=r.sampleTerrain([1,0,0]);r.resetPatchCache();release();
  assert.deepEqual(await Promise.all([a,b]),[null,null]);assert.equal(r.terrainPointInFlight.size,0);
 });
+
+test('crossing the near-surface flight threshold invalidates the selection settings',()=>{
+ const {r}=fakeRenderer();
+ r.cameraState.mode='flight';
+ const far={clearance:.051,width:1280,height:720};
+ r.selectionState={mode:'flight',budget:r.budget,maxDepth:r.maxDepth,pixelSize:r.pixelSize,width:far.width,height:far.height,generation:r.generation};
+ assert.equal(r.selectionSettingsChanged(far),false);
+ assert.equal(r.selectionSettingsChanged({...far,clearance:.049}),true);
+});

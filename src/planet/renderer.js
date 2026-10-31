@@ -13,6 +13,12 @@ const BUFFER=globalThis.GPUBufferUsage;
 // their replacements are generated and measured.
 const CAPACITY=1024,GRID=21,VERTEX_BYTES=48,MESHLETS=16,PATCH_BYTES=128;
 const TRANSITION_BATCH=12,TRANSITION_TARGET_PIXELS=.5;
+// Near-ground flight can prepare the same finest levels used for walking.
+// The height is clearance above the sampled surface, in kilometres.
+export function terrainSelectionDepth(mode,clearance,maxDepth){
+ const near=mode==='walk'||((mode==='flight'||mode==='flyover')&&Number.isFinite(clearance)&&clearance<.05);
+ return near?Math.max(Number.isFinite(maxDepth)?maxDepth:0,22):maxDepth;
+}
 const REGION_LOOKUP_OFFSET=24578*(48+17*16+4);
 const REGION_VALUES_OFFSET=Math.ceil((REGION_LOOKUP_OFFSET+REGION_LOOKUPS*4)/16)*16;
 const WORLD_BYTES=REGION_VALUES_OFFSET+REGION_CAPACITY*REGION_SAMPLES*16;
@@ -295,7 +301,7 @@ export class PlanetRenderer {
  }
  select(camera,now,computed=null){
   const start=performance.now();
-  const maxDepth=this.cameraState.mode==='walk'?22:this.maxDepth;
+  const maxDepth=terrainSelectionDepth(this.cameraState.mode,camera.clearance,this.maxDepth);
   const result=computed?.result??selectPatches(camera,{budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth,pixelSize:this.pixelSize,previousSplits:this.previousSplits,errorEstimates:this.selectionErrorEstimates().values,previousLeaves:this.coveringLeaves});
   const wantedSignatures=computed?.signatures??transitionSignatures(result.visible);
   // Reserve the whole replacement set before touching the free list. Partial
@@ -459,7 +465,7 @@ export class PlanetRenderer {
   this.stage=null;this.surfaceRevision++;this.needsSelection=true;this.reconcileSelection=true;this.lastSelection=now;this.transition={...this.transition,pending:0,waiting:false,capacityDeferred:false,morphProgress:null,retainedParents:0,reselectionPending:false};
  }
  selectionSettingsChanged(camera){
-  const s=this.selectionState,maxDepth=this.cameraState.mode==='walk'?22:this.maxDepth;
+  const s=this.selectionState,maxDepth=terrainSelectionDepth(this.cameraState.mode,camera.clearance,this.maxDepth);
   return !s||s.mode!==this.cameraState.mode||s.budget!==this.budget||s.maxDepth!==maxDepth||s.pixelSize!==this.pixelSize||s.width!==camera.width||s.height!==camera.height||s.generation!==this.generation;
  }
  invalidateSelection(camera){
@@ -617,7 +623,7 @@ export class PlanetRenderer {
   if(this.stage?.state==='waiting'&&now>=this.stage.nextMeasure){this.stage.state='building';this.transition={...this.transition,waiting:false};}
   if(this.selectionResult){
    const ready=this.selectionResult;this.selectionResult=null;
-   const current=[this.generation,this.cameraState.mode,this.budget,this.maxDepth,this.pixelSize,camera.width,camera.height].join('/');
+   const current=[this.generation,this.cameraState.mode,this.budget,terrainSelectionDepth(this.cameraState.mode,camera.clearance,this.maxDepth),this.pixelSize,camera.width,camera.height].join('/');
    const movement=Math.hypot(...camera.eye.map((x,i)=>x-ready.camera.eye[i]));
    if(ready.snapshotMissing){this.workerSelectionSnapshot=null;this.workerCoveringResultId=null;this.needsSelection=true;}
    else if(!this.stage&&current===ready.key&&movement<=Math.max(.05,ready.camera.clearance*.7)&&dot(camera.forward,ready.camera.forward)>=Math.cos(20*Math.PI/180)&&
@@ -629,7 +635,7 @@ export class PlanetRenderer {
     }
     if(ready.result?.compactLeaves){ready.result.leaves=ready.result.visible;delete ready.result.compactLeaves;}
     if(ready.unchanged){
-     const maxDepth=this.cameraState.mode==='walk'?22:this.maxDepth;
+     const maxDepth=terrainSelectionDepth(this.cameraState.mode,camera.clearance,this.maxDepth);
      this.selectionState={eye:[...ready.camera.eye],forward:[...ready.camera.forward],mode:this.cameraState.mode,budget:this.budget,maxDepth,pixelSize:this.pixelSize,width:ready.camera.width,height:ready.camera.height,generation:this.generation};
      this.lastSelection=now;this.needsSelection=false;this.reconcileSelection=false;
      this.stats={...this.stats,leaves:ready.leafCount,deepest:ready.deepest,selectionMs:ready.selectionMs,generated:0,normalUpdates:0,reusedNormalUpdates:0};
@@ -639,10 +645,10 @@ export class PlanetRenderer {
   if(this.shouldSelect(camera,now)){
    if(!this.selectionWorker)this.select(camera,now);
    else{
-    const id=(this.selectionSerial=(this.selectionSerial||0)+1),key=[this.generation,this.cameraState.mode,this.budget,this.maxDepth,this.pixelSize,camera.width,camera.height].join('/');
+    const id=(this.selectionSerial=(this.selectionSerial||0)+1),key=[this.generation,this.cameraState.mode,this.budget,terrainSelectionDepth(this.cameraState.mode,camera.clearance,this.maxDepth),this.pixelSize,camera.width,camera.height].join('/');
     const cached=this.workerSelectionSnapshot;
     const snapshotPresent=!cached||cached.patches!==this.patches||cached.leaves!==this.coveringLeaves||cached.splits!==this.previousSplits;
-    const options={budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth:this.cameraState.mode==='walk'?22:this.maxDepth,pixelSize:this.pixelSize};
+    const options={budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth:terrainSelectionDepth(this.cameraState.mode,camera.clearance,this.maxDepth),pixelSize:this.pixelSize};
     const snapshotReuseId=snapshotPresent&&this.workerCoveringResultId!=null&&this.workerCoveringResultId===this.workerOfferedResultId?this.workerCoveringResultId:null;
     let deriveLeaves=false;
     if(snapshotPresent){

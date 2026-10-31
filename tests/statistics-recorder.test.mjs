@@ -17,8 +17,8 @@ test('records each actual LOD commit once with refinement and merge errors',()=>
 });
 
 test('records measured endpoint errors separately from estimated morph displacement',()=>{
- const r=makeRenderer(),rec=new StatisticsRecorder();r.transition={pixels:8,morphProgress:.25,estimatedStepPixels:.5,estimatedEndpointPixels:12,errorLimited:true,retainedParents:4,reselectionPending:true};r.stage={state:'transitioning'};
+ const r=makeRenderer(),rec=new StatisticsRecorder();r.selectionState={maxDepth:22};r.transition={pixels:8,morphProgress:.25,estimatedStepPixels:.5,estimatedEndpointPixels:12,errorLimited:true,retainedParents:4,reselectionPending:true};r.stage={state:'transitioning'};
  rec.start(0,r);rec.record(0,16,1,r);const sample=rec.stop(1).samples[0];
- assert.equal(sample.lodErrorPixels,8);assert.equal(sample.estimatedMorphStepPixels,.5);assert.equal(sample.estimatedEndpointPixels,12);
+ assert.equal(sample.selectionMaxDepth,22);assert.equal(sample.lodErrorPixels,8);assert.equal(sample.estimatedMorphStepPixels,.5);assert.equal(sample.estimatedEndpointPixels,12);
  assert.equal(sample.morphProgress,.25);assert.equal(sample.morphErrorLimited,true);assert.equal(sample.reselectionPending,true);assert.equal(sample.transitionState,'transitioning');
 });

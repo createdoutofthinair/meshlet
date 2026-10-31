@@ -87,3 +87,12 @@ test('walking crosses a cube-face edge without changing the step length',()=>{
  assert.ok(Math.abs(distance(start,next)-.0007)<1e-9);
  assert.notEqual(Math.abs(start[0])>Math.abs(start[2]),Math.abs(next[0])>Math.abs(next[2]));
 });
+
+test('near-surface flight permits walking detail before touchdown',async()=>{
+ const {terrainSelectionDepth}=await import('../src/planet/renderer.js');
+ assert.equal(terrainSelectionDepth('flight',.049,20),22);
+ assert.equal(terrainSelectionDepth('flyover',.049,20),22);
+ assert.equal(terrainSelectionDepth('flight',.05,20),20);
+ assert.equal(terrainSelectionDepth('walk',.0017,20),22);
+ assert.equal(terrainSelectionDepth('orbit',.0017,20),20);
+});
