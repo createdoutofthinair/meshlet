@@ -50,8 +50,11 @@ fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->
  var q=vec2<f32>(coord);
  if(overlay){
   q=morphs.coordinates[range.x+vertex];coord=vec2<u32>(round(q));
-  let first=range.x+vertex-vertex%3u;
-  a=morphs.coordinates[first];b=morphs.coordinates[first+1u];c=morphs.coordinates[first+2u];
+  // Triangle corners are needed only for patch/meshlet edge overlays.
+  if((frame.counts.w&264u)!=0u){
+   let first=range.x+vertex-vertex%3u;
+   a=morphs.coordinates[first];b=morphs.coordinates[first+1u];c=morphs.coordinates[first+2u];
+  }
  }
  var vert=vertices[slot*GRID_COUNT+(coord.y+2u)*GRID+coord.x+2u];
  var relative:vec3<f32>;
