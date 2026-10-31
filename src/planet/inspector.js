@@ -41,6 +41,7 @@ export class PlanetInspector {
  applyOverlays(){
   const e=this.el,r=this.getRenderer();if(!r)return;const mode=e['inspect-color'].value;
   r.lodColors=mode==='lod';r.patchColors=mode==='patch';r.meshletColors=mode==='meshlet';
+  r.terrainDebugMode=({normal:1,geometric:2,material:3,roughness:4})[mode]??0;
   r.patchLines=e['inspect-patch-lines'].checked;r.meshletLines=e['inspect-meshlet-lines'].checked;r.wireframe=e['inspect-wireframe'].checked;
   const opacity=Math.max(0,Math.min(100,Number(e['inspect-opacity'].value)||0));r.debugOpacity=opacity/100;e['inspect-opacity-value'].textContent=`${opacity}%`;
   const active=mode!=='none'||r.patchLines||r.meshletLines||r.wireframe;

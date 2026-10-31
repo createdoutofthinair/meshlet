@@ -32,7 +32,7 @@ export class PlanetRenderer {
  constructor(canvas,adapter,device,context,timing,onError){
   Object.assign(this,{canvas,adapter,device,context,timing,onError});this.format=navigator.gpu.getPreferredCanvasFormat();
   this.cameraState={longitude:.8,latitude:.4,altitude:14000,surfaceHeight:0,mode:'flight',heading:.45,pitch:1.48};
-  this.seed=918273;this.relief=1;this.valleys=1;this.erosion=1;this.regional=true;this.rivers=true;this.biomes=true;this.ocean=true;this.followSun=true;this.culling=true;this.lodColors=false;this.patchColors=false;this.meshletColors=false;this.wireframe=false;this.patchLines=false;this.meshletLines=false;this.debugOpacity=.75;
+  this.terrainDebugMode=0;this.seed=918273;this.relief=1;this.valleys=1;this.erosion=1;this.regional=true;this.rivers=true;this.biomes=true;this.ocean=true;this.followSun=true;this.culling=true;this.lodColors=false;this.patchColors=false;this.meshletColors=false;this.wireframe=false;this.patchLines=false;this.meshletLines=false;this.debugOpacity=.75;
   this.budget=384;this.pixelSize=6;this.resolution=1;this.maxDepth=20;
   this.patchBytes=new ArrayBuffer(CAPACITY*PATCH_BYTES);this.patchFloats=new Float32Array(this.patchBytes);this.patchUints=new Uint32Array(this.patchBytes);
   this.frameUniformData=new ArrayBuffer(224);this.frameUniformFloats=new Float32Array(this.frameUniformData);this.frameUniformUints=new Uint32Array(this.frameUniformData);
@@ -719,8 +719,8 @@ export class PlanetRenderer {
    sun=normalize(add(add(scale(north,Math.cos(az)*Math.cos(alt)),scale(east,Math.sin(az)*Math.cos(alt))),scale(camera.radial,Math.sin(alt))));
   }
   f.set([...sun,0],36);f.set([RADIUS_KM,this.relief,this.ocean?1:0,this.valleys],40);
-  const separateOcean=this.ocean&&!this.lodColors&&!this.patchColors&&!this.meshletColors&&!this.wireframe&&!this.patchLines&&!this.meshletLines;
-  const flags=(this.culling?1:0)|(this.lodColors?2:0)|(this.wireframe?4:0)|(this.patchLines?8:0)|(this.biomes?16:0)|(separateOcean?32:0)|(this.patchColors?64:0)|(this.meshletColors?128:0)|(this.meshletLines?256:0);
+  const separateOcean=this.ocean&&!this.lodColors&&!this.patchColors&&!this.meshletColors&&!this.terrainDebugMode&&!this.wireframe&&!this.patchLines&&!this.meshletLines;
+  const flags=(this.culling?1:0)|(this.lodColors?2:0)|(this.wireframe?4:0)|(this.patchLines?8:0)|(this.biomes?16:0)|(separateOcean?32:0)|(this.patchColors?64:0)|(this.meshletColors?128:0)|(this.meshletLines?256:0)|((this.terrainDebugMode&7)<<9);
   u.set([drawPatches.length,this.pending.length,this.seed>>>0,flags],44);
   u.set([normals.length,this.regionPending.length,camera.width,camera.height],48);
   f.set([this.erosion,this.rivers?1:0,this.regional?1:0,this.debugOpacity],52);
@@ -779,7 +779,7 @@ export class PlanetRenderer {
   if(compare&&stage.pairs.length){cp.setPipeline(this.transitionPipe);cp.setBindGroup(0,this.transitionBind);cp.dispatchWorkgroups(stage.pairs.length);}
   dispatch(this.cullPipe,this.cullBind,drawPatches.length*MESHLETS);cp.end();
   const colorView=this.context.getCurrentTexture().createView(),depthView=this.depthView;
-  const cloudActive=!!this.cloudPipe&&!this.lodColors&&!this.patchColors&&!this.meshletColors&&!this.wireframe&&!this.patchLines&&!this.meshletLines;
+  const cloudActive=!!this.cloudPipe&&!this.lodColors&&!this.patchColors&&!this.meshletColors&&!this.terrainDebugMode&&!this.wireframe&&!this.patchLines&&!this.meshletLines;
   const descriptor={colorAttachments:[
    {view:colorView,clearValue:{r:.006,g:.009,b:.016,a:1},loadOp:'clear',storeOp:'store'},
    {view:this.waterDepthView,clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}

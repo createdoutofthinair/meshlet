@@ -81,6 +81,9 @@ test('inspector opens, controls real renderer overlays and can pause its graph',
  element('inspect-open').dispatchEvent(new Event('click'));assert.equal(element('planet-inspector').hidden,false);assert.equal(element('inspect-open').attributes['aria-expanded'],'true');
  element('inspect-color').value='lod';change('inspect-color');assert.equal(renderer.lodColors,true);assert.equal(renderer.patchColors,false);
  element('inspect-color').value='meshlet';change('inspect-color');assert.equal(renderer.meshletColors,true);assert.equal(renderer.lodColors,false);
+ element('inspect-color').value='normal';change('inspect-color');assert.equal(renderer.terrainDebugMode,1);assert.equal(renderer.meshletColors,false);
+ element('inspect-color').value='roughness';change('inspect-color');assert.equal(renderer.terrainDebugMode,4);
+ element('inspect-color').value='meshlet';change('inspect-color');assert.equal(renderer.terrainDebugMode,0);
  element('inspect-patch-lines').checked=true;change('inspect-patch-lines');element('inspect-meshlet-lines').checked=true;change('inspect-meshlet-lines');
  assert.equal(renderer.patchLines,true);assert.equal(renderer.meshletLines,true);
  element('inspect-opacity').value='40';element('inspect-opacity').dispatchEvent(new Event('input'));assert.equal(renderer.debugOpacity,.4);

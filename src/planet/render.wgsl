@@ -101,6 +101,13 @@ fn fs(in:Output)->TerrainPixel {
  let coastWidth=max(.00001,fwidth(coast.x)*.55);
  let pixelKm=max(length(dpdx(in.direction)),length(dpdy(in.direction)))*6371.0;
  let footprint=max(length(dpdx(in.relative)),length(dpdy(in.relative)));
+ // Screen-space triangle normal is useful for inspecting mesh detail and seams.
+ // Derivatives must be taken before the conditional sea discard.
+ var geometricNormal=radial;
+ if(((frame.counts.w>>9u)&7u)==2u){
+  geometricNormal=normalize(cross(dpdx(in.relative),dpdy(in.relative)));
+  if(dot(geometricNormal,radial)<0.0){geometricNormal=-geometricNormal;}
+ }
  // The analytic ocean pass will replace these fragments. Discard after the
  // derivatives needed by the remaining terrain, before material shading.
  if(separateSea){discard;}
@@ -198,6 +205,11 @@ fn fs(in:Output)->TerrainPixel {
  if((frame.counts.w&2u)!=0u){debugColor=levelColor(in.level);hasColor=true;}
  if((frame.counts.w&64u)!=0u){debugColor=identityColor(in.debugIds.x);hasColor=true;}
  if((frame.counts.w&128u)!=0u){debugColor=identityColor(in.debugIds.y);hasColor=true;}
+ let terrainDebug=(frame.counts.w>>9u)&7u;
+ if(terrainDebug==1u){debugColor=n*.5+vec3<f32>(.5);hasColor=true;}
+ if(terrainDebug==2u){debugColor=geometricNormal*.5+vec3<f32>(.5);hasColor=true;}
+ if(terrainDebug==3u){debugColor=vec3<f32>(rockWeight,snowCover,max(0.0,1.0-rockWeight-snowCover));hasColor=true;}
+ if(terrainDebug==4u){debugColor=vec3<f32>(roughness);hasColor=true;}
  if(hasColor){color=mix(color,debugColor,clamp(frame.hydrology.w,0.0,1.0));}
  if((frame.counts.w&268u)!=0u){
   let edge=vec3<f32>(1.0)-smoothstep(vec3<f32>(.55),vec3<f32>(1.7),in.bary/max(fwidth(in.bary),vec3<f32>(.00001)));
