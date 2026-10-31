@@ -118,8 +118,8 @@ export function coordinateTransitions(previous,next,groups=transitionGroups(prev
 }
 
 export function transitionSignatures(nodes,previous=null){
- const wantedNodes=new Map(nodes.map(p=>[p.key,p]));
- const previousNodes=previous?new Map(previous.nodes.map(p=>[p.key,p])):null;
+ const wantedNodes=new Map();for(const node of nodes)wantedNodes.set(node.key,node);
+ const previousNodes=previous?new Map():null;if(previousNodes)for(const node of previous.nodes)previousNodes.set(node.key,node);
  const equalKeys=(a,b)=>a.length===b.length&&a.every((key,i)=>key===b[i]);
  const ownerStability=new Map();
  const stableOwner=key=>{
@@ -163,5 +163,5 @@ export function transitionSignatures(nodes,previous=null){
    }
    return hash>>>0;
   };
- return new Map(nodes.map(node=>[node.key,signatureFor(node)]));
+ const signatures=new Map();for(const node of nodes)signatures.set(node.key,signatureFor(node));return signatures;
 }
