@@ -26,7 +26,10 @@ function clip(polygon,a,b){
  if(!out.length)return out;
  let previous=out[out.length-1],write=0;
  for(let i=0;i<out.length;i++){
-  const point=out[i];if(Math.hypot(point[0]-previous[0],point[1]-previous[1])>EPS)out[write++]=point;
+  const point=out[i],dx=point[0]-previous[0],dy=point[1]-previous[1];
+  // Exact duplicates and clearly separated points need no square root. Keep
+  // hypot for the tiny boundary region to preserve the original tolerance.
+  if((dx!==0||dy!==0)&&(Math.abs(dx)>EPS||Math.abs(dy)>EPS||Math.hypot(dx,dy)>EPS))out[write++]=point;
   previous=point;
  }
  out.length=write;return out;
