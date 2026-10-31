@@ -80,6 +80,8 @@ test('GPU render timing covers the cloud pass and disabled clouds retain sky',as
  assert.equal(renderPasses[0].timestampWrites.beginningOfPassWriteIndex,2);assert.equal(renderPasses[0].timestampWrites.endOfPassWriteIndex,3);assert.equal(renderPasses[1].timestampWrites.beginningOfPassWriteIndex,4);assert.equal(renderPasses[2].timestampWrites.endOfPassWriteIndex,7);assert.equal(renderPasses[1].depthStencilAttachment.depthStoreOp,'store','final ocean depth is retained for atmospheric compositing');
  assert.equal(new Float32Array(r.cloudUniform.data)[7],0);
  const cloud=new Float32Array(r.cloudUniform.data),frame=new Float32Array(r.uniform.data);
+ const seed=r.seed%10000;for(const [offset,factor] of [[2,.071],[3,.039],[4,.053]])assert.equal(cloud[offset],Math.fround(Math.fround(seed)*Math.fround(factor)));
+ assert.equal(cloud[9],Math.fround(Math.fround(.00028)/Math.max(.5,Math.fround(r.cloudSize??2))));
  for(const [axis,offset] of [[0,20],[1,16],[2,24]]){
   const expected=frame[36]*cloud[offset]+frame[37]*cloud[offset+1]+frame[38]*cloud[offset+2];
   assert.ok(Math.abs(cloud[40+axis]-expected)<1e-6,'cloud sun uses the local tangent basis');

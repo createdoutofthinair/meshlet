@@ -723,7 +723,9 @@ export class PlanetRenderer {
   if(this.cloudWeatherSeed!==weatherSeed){this.cloudWeatherSeed=weatherSeed;this.cloudWeatherAxis=normalize([.08+Math.sin(weatherSeed*.07)*.08,.99,.07+Math.cos(weatherSeed*.09)*.08]);}
   const weatherAxis=this.cloudWeatherAxis;
   const cloudSun=[dot(sun,east),dot(sun,camera.radial),dot(sun,north)];
-  const cloudData=this.cloudUniformData;cloudData.set([camera.width,camera.height,0,0,this.cloudWindDistance,Math.cos(windAngle),camera.altitude*1000,this.clouds===false?0:(this.cloudCoverage??.72),this.cloudDensity??1,1,weatherSeed,Math.sin(windAngle),this.cloudSize??2,...weatherAxis],0);cloudData.set([...camera.radial,0,...east,0,...north,0,...camera.forward,camera.tanX,...camera.right,camera.tanY,...camera.up,camera.near,...cloudSun,separateOcean?1:0],16);cloudData.set([this.skyStrength??1,this.mieStrength??1,this.haloStrength??1,this.cloudQuality??.8],44);if(this.cloudUniform)d.queue.writeBuffer(this.cloudUniform,0,cloudData);
+  const seedOffset=[.071,.039,.053].map(value=>Math.fround(Math.fround(weatherSeed)*Math.fround(value)));
+  const cloudScale=Math.fround(Math.fround(.00028)/Math.max(.5,Math.fround(this.cloudSize??2)));
+  const cloudData=this.cloudUniformData;cloudData.set([camera.width,camera.height,seedOffset[0],seedOffset[1],seedOffset[2],Math.cos(windAngle),camera.altitude*1000,this.clouds===false?0:(this.cloudCoverage??.72),this.cloudDensity??1,cloudScale,weatherSeed,Math.sin(windAngle),this.cloudSize??2,...weatherAxis],0);cloudData.set([...camera.radial,0,...east,0,...north,0,...camera.forward,camera.tanX,...camera.right,camera.tanY,...camera.up,camera.near,...cloudSun,separateOcean?1:0],16);cloudData.set([this.skyStrength??1,this.mieStrength??1,this.haloStrength??1,this.cloudQuality??.8],44);if(this.cloudUniform)d.queue.writeBuffer(this.cloudUniform,0,cloudData);
   d.queue.writeBuffer(this.uniform,0,raw);
   if(patchDirty&&lastPatch>=firstPatch){
    const offset=firstPatch*PATCH_BYTES,size=(lastPatch-firstPatch+1)*PATCH_BYTES;
