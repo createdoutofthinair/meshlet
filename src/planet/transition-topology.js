@@ -91,15 +91,20 @@ function buildTopology(from={},to={},coordinatesOnly=false){
 }
 export function buildTransitionTopology(from={},to={}){return buildTopology(from,to);}
 
-// The same few stitch/window combinations recur across many patches. Retain
-// only upload coordinates, with a fixed LRU limit independent of world travel.
-const coordinateCache=new Map();
+// Stitch/window combinations recur across patches. Bound both entry count and
+// bytes so revisiting a broader set avoids churn without unbounded growth.
+const coordinateCache=new Map(),COORDINATE_CACHE_ENTRIES=256,COORDINATE_CACHE_BYTES=8*1024*1024;
+let coordinateCacheBytes=0;
 export function transitionCoordinates(from,to){
  const key=JSON.stringify([from,to].map(({mask=0,originX=0,originY=0,scale=1})=>[mask,originX,originY,scale]));
  let coordinates=coordinateCache.get(key);
- if(coordinates)coordinateCache.delete(key);
+ if(coordinates){coordinateCache.delete(key);coordinateCacheBytes-=coordinates.byteLength;}
  else coordinates=buildTopology(from,to,true);
- coordinateCache.set(key,coordinates);
- if(coordinateCache.size>64)coordinateCache.delete(coordinateCache.keys().next().value);
+ if(coordinates.byteLength<=COORDINATE_CACHE_BYTES){
+  coordinateCache.set(key,coordinates);coordinateCacheBytes+=coordinates.byteLength;
+  while(coordinateCache.size>COORDINATE_CACHE_ENTRIES||coordinateCacheBytes>COORDINATE_CACHE_BYTES){
+   const oldest=coordinateCache.keys().next().value;coordinateCacheBytes-=coordinateCache.get(oldest).byteLength;coordinateCache.delete(oldest);
+  }
+ }
  return coordinates;
 }

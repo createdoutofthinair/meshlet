@@ -74,3 +74,15 @@ test('public topology arrays cannot mutate cached internal triangle grids',async
  publicMesh.fromTriangles[0][0][0]=999;
  assert.deepEqual(transitionCoordinates(from,second),buildTransitionTopology(from,second).coordinates);
 });
+
+test('coordinate cache retains a broader working set and evicts its oldest entry',async()=>{
+ const {transitionCoordinates}=await import('../src/planet/transition-topology.js');
+ const from={mask:0,originX:0,originY:0,scale:.5},to={mask:0};
+ const first=transitionCoordinates(from,to);
+ for(let a=0;a<5;a++)for(let b=0;b<16;b++)transitionCoordinates({mask:a},{mask:b});
+ assert.equal(transitionCoordinates(from,to),first,'80 other mappings should fit');
+ for(let a=0;a<16;a++)for(let b=0;b<16;b++)transitionCoordinates({mask:a},{mask:b});
+ const rebuilt=transitionCoordinates(from,to);
+ assert.notEqual(rebuilt,first,'entry count remains bounded');
+ assert.deepEqual(rebuilt,first);
+});
