@@ -15,8 +15,8 @@ fn carveRiver(base:SurfaceData,river:vec2<f32>)->SurfaceData{
  return SurfaceData(h,base.lake,base.humidity);
 }
 fn detailedTerrain(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32)->f32{
- let base=surfaceBase(direction,high,low,delta,seed,true);var river=vec2<f32>(0.0);
- if(base.height>.03 && frame.hydrology.x>0.0){let s=worldSample(direction);if(hasRivers(s)){let r=riverAt(direction,s);river=vec2<f32>(r.mask,r.discharge);}}
+ let sample=worldSample(direction);let base=surfaceBaseWithWorld(direction,high,low,delta,seed,true,sample);var river=vec2<f32>(0.0);
+ if(base.height>.03 && frame.hydrology.x>0.0 && hasRivers(sample)){let r=riverAt(direction,sample);river=vec2<f32>(r.mask,r.discharge);}
  return carveRiver(base,river).height;
 }
 @compute @workgroup_size(64)
