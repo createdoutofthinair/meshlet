@@ -148,8 +148,13 @@ fn fs(in:Output)->TerrainPixel {
  let groundWeight=max(0.0,remaining-talusWeight);
  let sandWeight=groundWeight*(1.0-smoothstep(.25,.5,humidity))*(1.0-smoothstep(.02,.12,slope));
  let soilWeight=max(0.0,groundWeight-sandWeight);
+ // Geographic variation becomes sub-pixel from far away. Fade it by the
+ // surface footprint and skip the noise lookup once it cannot contribute.
+ let geologyFilter=1.0-smoothstep(5.0,20.0,pixelKm);
  var geology=0.0;
- if(land && exposedWeight+talusWeight>0.0){geology=noise3(radial*180.0,frame.counts.z+1777u);}
+ if(land && exposedWeight+talusWeight>0.0 && geologyFilter>0.0){
+  geology=noise3(radial*180.0,frame.counts.z+1777u)*geologyFilter;
+ }
  let rock=vec3<f32>(.34,.34,.32)*(1.0+.12*geology)+vec3<f32>(.018,.004,-.014)*geology;
  let talus=vec3<f32>(.31,.29,.25)*(1.0+.08*geology);
  let sand=vec3<f32>(.42,.34,.22);
