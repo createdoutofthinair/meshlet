@@ -44,7 +44,8 @@ export function neighbors(leaves,node,edge,maxDepth=MAX_DEPTH,index=null) {
   // strictly inside its face-space bounds; boundary ties still use tileAt.
   let other;
   for(const known of found)if(known.face===face&&Math.abs(u-known.u)<known.span/2&&Math.abs(v-known.v)<known.span/2){other=known;break;}
-  if(!other)other=tileAt(leaves,face,u,v,maxDepth,index,node.level);
+  if(other)continue;
+  other=tileAt(leaves,face,u,v,maxDepth,index,node.level);
   if(other && other.key!==node.key&&!found.some(known=>known.key===other.key))found.push(other);
  }
  return found;
