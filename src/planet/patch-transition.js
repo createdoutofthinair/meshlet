@@ -121,19 +121,25 @@ export function transitionSignatures(nodes,previous=null){
  const wantedNodes=new Map(nodes.map(p=>[p.key,p]));
  const previousNodes=previous?new Map(previous.nodes.map(p=>[p.key,p])):null;
  const equalKeys=(a,b)=>a.length===b.length&&a.every((key,i)=>key===b[i]);
+ const ownerStability=new Map();
+ const stableOwner=key=>{
+  const known=ownerStability.get(key);if(known!==undefined)return known;
+  const a=previousNodes.get(key),b=wantedNodes.get(key);let stable=!!a===!!b;
+  if(stable&&a){
+   stable=a.normalStitch===b.normalStitch&&equalKeys(a.edgeKeys,b.edgeKeys);
+   if(stable)for(const peer of b.edgeKeys)if(previousNodes.has(peer)!==wantedNodes.has(peer)){stable=false;break;}
+  }
+  ownerStability.set(key,stable);return stable;
+ };
  const reusable=node=>{
   if(!previousNodes||!previous.signatures.has(node.key))return false;
   const old=previousNodes.get(node.key);
   if(!old||old.normalStitch!==node.normalStitch||!equalKeys(old.edgeKeys,node.edgeKeys)||old.cornerKeys.length!==node.cornerKeys.length)return false;
   for(let i=0;i<node.cornerKeys.length;i++)if(!equalKeys(old.cornerKeys[i],node.cornerKeys[i]))return false;
   for(const key of node.edgeKeys){const a=previousNodes.get(key),b=wantedNodes.get(key);if(!!a!==!!b||(a&&a.normalStitch!==b.normalStitch))return false;}
-  for(const corner of node.cornerKeys)for(const key of [node.key,...corner]){
-   const a=previousNodes.get(key),b=wantedNodes.get(key);
-   if(!!a!==!!b)return false;
-   if(a){
-    if(a.normalStitch!==b.normalStitch||!equalKeys(a.edgeKeys,b.edgeKeys))return false;
-    for(const peer of b.edgeKeys)if(previousNodes.has(peer)!==wantedNodes.has(peer))return false;
-   }
+  for(const corner of node.cornerKeys){
+   if(!stableOwner(node.key))return false;
+   for(const key of corner)if(!stableOwner(key))return false;
   }
   return true;
  };

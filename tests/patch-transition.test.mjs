@@ -21,6 +21,20 @@ test('cached stitch signatures match a full rebuild as adjacency changes',async(
  const modified=structuredClone(before.visible);
  modified[0].normalStitch^=1;modified[0].edgeKeys[0]=null;
  assert.deepEqual(transitionSignatures(modified,previous),transitionSignatures(modified));
+ let state=12345;const random=n=>(state=(Math.imul(state,1664525)+1013904223)>>>0)%n;
+ for(let iteration=0;iteration<40;iteration++){
+  const nodes=structuredClone(before.visible);
+  for(let change=0;change<5;change++){
+   const node=nodes[random(nodes.length)];
+   switch(random(4)){
+    case 0:node.normalStitch^=1<<random(8);break;
+    case 1:node.edgeKeys[random(4)]=random(2)?null:nodes[random(nodes.length)].key;break;
+    case 2:node.cornerKeys[random(4)].push(nodes[random(nodes.length)].key);break;
+    case 3:if(nodes.length>1)nodes.splice(random(nodes.length),1);
+   }
+  }
+  assert.deepEqual(transitionSignatures(nodes,previous),transitionSignatures(nodes));
+ }
 });
 
 test('transition comparisons pair actual parent and child in both directions',()=>{
