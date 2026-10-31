@@ -137,8 +137,8 @@ export function transitionSignatures(nodes,previous=null){
   if(!old||old.normalStitch!==node.normalStitch||!equalKeys(old.edgeKeys,node.edgeKeys)||old.cornerKeys.length!==node.cornerKeys.length)return false;
   for(let i=0;i<node.cornerKeys.length;i++)if(!equalKeys(old.cornerKeys[i],node.cornerKeys[i]))return false;
   for(const key of node.edgeKeys){const a=previousNodes.get(key),b=wantedNodes.get(key);if(!!a!==!!b||(a&&a.normalStitch!==b.normalStitch))return false;}
+  if(node.cornerKeys.length&&!stableOwner(node.key))return false;
   for(const corner of node.cornerKeys){
-   if(!stableOwner(node.key))return false;
    for(const key of corner)if(!stableOwner(key))return false;
   }
   return true;
