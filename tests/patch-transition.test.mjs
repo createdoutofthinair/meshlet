@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {makeTile} from '../src/planet/planet-math.js';
-import {transitionPairs,encodeTransitionPairs} from '../src/planet/patch-transition.js';
+import {transitionPairs,encodeTransitionPairs,transitionSignatures} from '../src/planet/patch-transition.js';
 const tile=(face,level,x,y,slot,stitch=0)=>({...makeTile(face,level,x,y),slot,stitch});
+
+test('terrain stitch signatures retain unsigned 32-bit results',()=>{
+ const nodes=[{key:'0/22/4194303/1',normalStitch:1,edgeKeys:[null,null,null,null],cornerKeys:[[],[],[],[]]}];
+ assert.equal(transitionSignatures(nodes).get(nodes[0].key),3796864848);
+});
 
 test('transition comparisons pair actual parent and child in both directions',()=>{
  const parent=tile(1,2,1,2,5,2),children=[tile(1,3,2,4,10,1),tile(1,3,3,4,11),tile(1,3,2,5,12),tile(1,3,3,5,13)];

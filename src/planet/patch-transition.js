@@ -122,7 +122,9 @@ export function transitionSignatures(nodes){
   // A changed stitch graph may alter geometry even for a retained patch.
  const signatureFor=node=>{
    let hash=(2166136261^node.normalStitch)>>>0;
-   const mixKey=key=>{for(let i=0;i<key.length;i++)hash=Math.imul(hash^key.charCodeAt(i),16777619)>>>0;};
+   // Math.imul and xor already preserve the same 32-bit pattern; convert to
+   // unsigned once at the end rather than for every character of every key.
+   const mixKey=key=>{for(let i=0;i<key.length;i++)hash=Math.imul(hash^key.charCodeAt(i),16777619);};
    for(const key of node.edgeKeys){
     const other=wantedNodes.get(key);if(!other){hash=Math.imul(hash^0xff,16777619)>>>0;continue;}
     mixKey(key);hash=Math.imul(hash^other.normalStitch,16777619)>>>0;
@@ -134,7 +136,7 @@ export function transitionSignatures(nodes){
      for(const peer of other.edgeKeys)if(owners.has(peer)&&wantedNodes.has(peer))mixKey(peer);
     }
    }
-   return hash;
+   return hash>>>0;
   };
  return new Map(nodes.map(node=>[node.key,signatureFor(node)]));
 }
