@@ -25,7 +25,12 @@ test('worker prepares stitched transition topology for the selected covering tre
    if(group.type!=='stitch'&&!pair.fine.stitch&&!pair.coarse.stitch)continue;
    records.push({slot:checked,coordinates:buildTransitionTopology({mask:pair.coarse.stitch,originX:pair.originX,originY:pair.originY,scale:pair.scale},{mask:pair.fine.stitch}).coordinates});assert.equal(result.packedTopology.keys[checked],pair.fine.key);checked++;
   }
-  assert.ok(checked>0);const expected=packTransitionTopology(records);assert.deepEqual(result.packedTopology.ranges,expected.ranges.subarray(0,checked*32));assert.deepEqual(result.packedTopology.coordinates,expected.coordinates);
+  assert.ok(checked>0);const expected=packTransitionTopology(records);
+  for(let slot=0;slot<checked;slot++)for(let bucket=0;bucket<16;bucket++){
+   const k=slot*32+bucket*2,actualStart=result.packedTopology.ranges[k],expectedStart=expected.ranges[k],count=expected.ranges[k+1];
+   assert.equal(result.packedTopology.ranges[k+1],count);
+   assert.deepEqual(result.packedTopology.coordinates.subarray(actualStart*2,(actualStart+count)*2),expected.coordinates.subarray(expectedStart*2,(expectedStart+count)*2));
+  }
   const errors=new Map([[first.visible[0].key,7]]);
   self.onmessage({data:{id:2,key:'test',camera,options,errorEstimates:errors}});
   self.onmessage({data:{id:3,key:'test',camera,options,errorEstimates:null}});

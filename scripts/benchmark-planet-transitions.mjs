@@ -20,6 +20,12 @@ for(let i=0;i<runs;i++){const start=performance.now();packTransitionTopology(rec
 durations.sort((a,b)=>a-b);
 const percentile=p=>durations[Math.min(durations.length-1,Math.ceil(p*durations.length)-1)].toFixed(3);
 console.log(`64 shared patch layouts: p50=${percentile(.5)} ms p95=${percentile(.95)} ms`);
+const expandedBytes=packTransitionTopology(records,undefined,cache,records.length).coordinates.byteLength;
+durations.length=0;
+for(let i=0;i<runs;i++){const start=performance.now();packTransitionTopology(records,undefined,cache,records.length,true);durations.push(performance.now()-start);}
+durations.sort((a,b)=>a-b);
+const sharedBytes=packTransitionTopology(records,undefined,cache,records.length,true).coordinates.byteLength;
+console.log(`64 shared patch layouts with deduplication: p50=${percentile(.5)} ms p95=${percentile(.95)} ms bytes=${sharedBytes}/${expandedBytes}`);
 
 // Exercise the same changing-surface selection and topology preparation used
 // by the worker, without browser scheduling or structured-clone costs.

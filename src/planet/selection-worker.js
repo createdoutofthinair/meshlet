@@ -69,7 +69,7 @@ self.onmessage=({data})=>{
  // Temporary indices are remapped to resident GPU slots by the renderer.
  // Transfer packed buffers without detaching the worker's topology cache.
  const keys=[...topology.keys()];let packed=null;
- try{if(keys.length)packed=packTransitionTopology(keys.map((key,slot)=>({slot,coordinates:topology.get(key)})),undefined,topologyLayouts,keys.length);}
+ try{if(keys.length)packed=packTransitionTopology(keys.map((key,slot)=>({slot,coordinates:topology.get(key)})),undefined,topologyLayouts,keys.length,true);}
  catch(error){if(!error.message.includes('capacity exceeded'))throw error;}
  const transfers=packed?[packed.ranges.buffer,packed.coordinates.buffer]:[];
  // Keep the untransferred selection so a subsequently committed result can

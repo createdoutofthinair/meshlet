@@ -40,6 +40,17 @@ test('shared topology coordinates produce the same packed result as independent 
  assert.deepEqual(packTransitionTopology(shared,undefined,cache),cached);
 });
 
+test('optional packing shares identical immutable coordinate buffers across slots',()=>{
+ const coordinates=buildTransitionTopology({mask:3,originX:8,originY:0,scale:.5},{mask:6}).coordinates;
+ const records=[{slot:0,coordinates},{slot:1,coordinates},{slot:2,coordinates:coordinates.slice()}];
+ const packed=packTransitionTopology(records,undefined,null,3,true);
+ assert.equal(packed.coordinates.length,coordinates.length*2);
+ assert.deepEqual(packed.ranges.slice(0,32),packed.ranges.slice(32,64));
+ assert.notDeepEqual(packed.ranges.slice(0,32),packed.ranges.slice(64,96));
+ assert.equal(packed.slots.size,3);
+ assert.throws(()=>packTransitionTopology(records,coordinates.length/2, null,3,true),/capacity/);
+});
+
 test('first and last meshlet ranges delimit each contiguous overlay',()=>{
  const records=[
   {slot:11,coordinates:new Float32Array()},

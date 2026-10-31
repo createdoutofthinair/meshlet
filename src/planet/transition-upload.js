@@ -6,9 +6,9 @@ export const MORPH_BUFFER_BYTES=MORPH_COORD_OFFSET+MORPH_COORD_CAPACITY*8;
 
 // Each bucket contains complete triangles. Ranges count vertices, not floats.
 // A caller may provide a cache only when coordinate arrays remain immutable.
-export function packTransitionTopology(records,capacity=MORPH_COORD_CAPACITY,layoutCache=null,rangeCapacity=MORPH_CAPACITY){
+export function packTransitionTopology(records,capacity=MORPH_COORD_CAPACITY,layoutCache=null,rangeCapacity=MORPH_CAPACITY,deduplicate=false){
  if(!Number.isInteger(rangeCapacity)||rangeCapacity<0||rangeCapacity>MORPH_CAPACITY)throw new Error('Invalid topology range capacity');
- const ranges=new Uint32Array(rangeCapacity*16*2),slots=new Set(),prepared=[],layouts=layoutCache||new WeakMap();let vertexCount=96,totalFloats=0;
+ const ranges=new Uint32Array(rangeCapacity*16*2),slots=new Set(),prepared=[],layouts=layoutCache||new WeakMap(),offsetsByCoordinates=deduplicate?new WeakMap():null;let vertexCount=96,totalFloats=0;
  for(const {slot,coordinates} of records){
   if(!Number.isInteger(slot)||slot<0||slot>=rangeCapacity||slots.has(slot))throw new Error('Invalid topology slot');
   if(coordinates.length%6)throw new Error('Incomplete topology triangle');slots.add(slot);
@@ -34,18 +34,18 @@ export function packTransitionTopology(records,capacity=MORPH_COORD_CAPACITY,lay
    }
    layout={counts,packed};layouts.set(coordinates,layout);
   }
-  totalFloats+=coordinates.length;if(totalFloats/2>capacity)throw new Error('Transition topology capacity exceeded');
-  prepared.push({slot,coordinates,...layout});
+  let base=offsetsByCoordinates?.get(coordinates),write=base===undefined;
+  if(write){base=totalFloats;totalFloats+=coordinates.length;if(totalFloats/2>capacity)throw new Error('Transition topology capacity exceeded');offsetsByCoordinates?.set(coordinates,base);}
+  prepared.push({slot,base,write,...layout});
  }
- const data=new Float32Array(totalFloats);let base=0;
+ const data=new Float32Array(totalFloats);
  for(const record of prepared){
-  let cursor=base;
+  let cursor=record.base;
   for(let i=0;i<16;i++){
    ranges[(record.slot*16+i)*2]=cursor/2;ranges[(record.slot*16+i)*2+1]=record.counts[i]/2;
    vertexCount=Math.max(vertexCount,record.counts[i]/2);cursor+=record.counts[i];
   }
-  data.set(record.packed,base);
-  base=cursor;
+  if(record.write)data.set(record.packed,record.base);
  }
  return {ranges,coordinates:data,slots,vertexCount};
 }
