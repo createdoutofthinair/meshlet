@@ -46,7 +46,7 @@ function triangles({mask=0,originX=0,originY=0,scale=1}={}){
  }
  return result;
 }
-export function buildTransitionTopology(from={},to={}){
+function buildTopology(from={},to={},coordinatesOnly=false){
  const old=triangles(from),next=triangles(to),coordinates=[],sources=[];
  const edges=[[[0,0],[16,0]],[[16,0],[16,16]],[[16,16],[0,16]],[[0,16],[0,0]]];
  // Intersections outside the 16x16 patch are clipped away. Index the target
@@ -70,12 +70,15 @@ export function buildTransitionTopology(from={},to={}){
   for(const [p,q] of edges)if(polygon.length)polygon=clip(polygon,p,q);
   for(let k=1;k+1<polygon.length;k++){
    const a=polygon[0],b=polygon[k],c=polygon[k+1];if(cross(a,b,c)<=EPS)continue;
-   coordinates.push(a[0],a[1],b[0],b[1],c[0],c[1]);sources.push(i,j);
+   coordinates.push(a[0],a[1],b[0],b[1],c[0],c[1]);if(!coordinatesOnly)sources.push(i,j);
   }
   }
  }
- return {coordinates:new Float32Array(coordinates),sources:new Uint32Array(sources),fromTriangles:old.map(t=>t.points),toTriangles:next.map(t=>t.points),triangleCount:sources.length/2};
+ const packed=new Float32Array(coordinates);
+ if(coordinatesOnly)return packed;
+ return {coordinates:packed,sources:new Uint32Array(sources),fromTriangles:old.map(t=>t.points),toTriangles:next.map(t=>t.points),triangleCount:sources.length/2};
 }
+export function buildTransitionTopology(from={},to={}){return buildTopology(from,to);}
 
 // The same few stitch/window combinations recur across many patches. Retain
 // only upload coordinates, with a fixed LRU limit independent of world travel.
@@ -84,7 +87,7 @@ export function transitionCoordinates(from,to){
  const key=JSON.stringify([from,to].map(({mask=0,originX=0,originY=0,scale=1})=>[mask,originX,originY,scale]));
  let coordinates=coordinateCache.get(key);
  if(coordinates)coordinateCache.delete(key);
- else coordinates=buildTransitionTopology(from,to).coordinates;
+ else coordinates=buildTopology(from,to,true);
  coordinateCache.set(key,coordinates);
  if(coordinateCache.size>64)coordinateCache.delete(coordinateCache.keys().next().value);
  return coordinates;
