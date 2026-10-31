@@ -26,6 +26,10 @@ test('spatial candidate lookup preserves skipped-level and fractional windows',(
   verify({mask,originX:16*(1-scale),originY:0,scale},{mask:(mask+5)%16});
  }
 });
+test('source triangle enumeration retains stitched boundary-touching cells',()=>{
+ const mesh=buildTransitionTopology({mask:1,originX:0,originY:0,scale:.5},{mask:6});
+ assert.ok(mesh.fromTriangles.some(triangle=>JSON.stringify(triangle)===JSON.stringify([[0,16],[2,18],[0,20]])));
+});
 test('invalid surface mappings are rejected',()=>{
  for(const mapping of [{scale:0},{scale:NaN},{originX:16,scale:.5},{mask:16}])assert.throws(()=>buildTransitionTopology(mapping),/mapping/);
 });

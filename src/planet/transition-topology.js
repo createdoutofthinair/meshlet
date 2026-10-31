@@ -35,7 +35,11 @@ function triangles({mask=0,originX=0,originY=0,scale=1}={}){
  if(!Number.isInteger(mask)||mask<0||mask>15||![originX,originY,scale].every(Number.isFinite)||scale<=0||scale>1||originX<0||originY<0||originX+16*scale>16+EPS||originY+16*scale>16+EPS)throw new Error('Invalid transition surface mapping');
  const result=[];
  const point=(x,y)=>{const [u,v]=stitched([x,y],mask);return [(u-originX)/scale,(v-originY)/scale];};
- for(let y=0;y<16;y++)for(let x=0;x<16;x++){
+ // The mapped patch window covers only this part of the source grid. Expand
+ // by one cell for collapsed edge vertices and boundary-touching triangles.
+ const x0=Math.max(0,Math.floor(originX)-1),y0=Math.max(0,Math.floor(originY)-1);
+ const x1=Math.min(15,Math.ceil(originX+16*scale)+1),y1=Math.min(15,Math.ceil(originY+16*scale)+1);
+ for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
   const p0=point(x,y),p1=point(x+1,y),p2=point(x,y+1),p3=point(x+1,y+1);
   for(const p of [[p0,p1,p2],[p1,p3,p2]]){
    if(cross(...p)<=EPS)continue;
