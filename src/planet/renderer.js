@@ -187,7 +187,7 @@ export class PlanetRenderer {
    }
    if(slots.size!==ids.size)throw new Error('Prepared topology does not match selection');
    packed={ranges,slots,coordinates:prepacked.coordinates,vertexCount:prepacked.vertexCount};
-  }else packed=packTransitionTopology(records);
+  }else packed=packTransitionTopology(records,undefined,null,undefined,true);
   // Only slots marked as overlays in morph metadata read their ranges. Old
   // inactive ranges can remain untouched, avoiding a full 128 KiB upload.
   if(lastSlot>=firstSlot){

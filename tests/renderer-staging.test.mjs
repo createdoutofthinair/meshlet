@@ -427,6 +427,17 @@ test('worker-packed topology is remapped to resident GPU slots without repacking
  assert.throws(()=>r.uploadTransitionTopology([{key:'a',slot:1024}],{keys:['a'],...packed}),/Invalid topology slot/);
 });
 
+test('renderer fallback uploads shared transition geometry once',async()=>{
+ const {r}=fakeRenderer();const {MORPH_RANGE_OFFSET,MORPH_COORD_OFFSET}=await import('../src/planet/transition-upload.js');
+ const coordinates=new Float32Array([0,0,1,0,0,1]),writes=[],write=r.device.queue.writeBuffer;
+ r.device.queue.writeBuffer=(target,offset,data)=>{writes.push({offset,size:data.byteLength});write(target,offset,data);};
+ r.uploadTransitionTopology([{slot:7,coordinates},{slot:23,coordinates}]);
+ const range=new Uint32Array(r.morphBuffer.data,MORPH_RANGE_OFFSET,1024*32);
+ assert.deepEqual(range.slice(7*32,8*32),range.slice(23*32,24*32));
+ assert.equal(writes.find(item=>item.offset===MORPH_COORD_OFFSET).size,coordinates.byteLength);
+ assert.deepEqual(new Float32Array(r.morphBuffer.data,MORPH_COORD_OFFSET,coordinates.length),coordinates);
+});
+
 test('stable frames avoid redundant active-slot uploads and rebuild after reset',async()=>{
  const {r}=fakeRenderer(),writes=[],write=r.device.queue.writeBuffer;
  r.device.queue.writeBuffer=(target,offset,source)=>{if(target===r.activeBuffer)writes.push([...new Uint32Array(source.buffer,source.byteOffset,source.byteLength/4)]);write(target,offset,source);};
