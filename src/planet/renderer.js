@@ -316,7 +316,7 @@ export class PlanetRenderer {
    slots.set(node.key,slot);signatures.set(node.key,signature);
    // Reuse the staged instance after commit so its cached GPU metadata is
    // still valid, and avoid creating a second copy for the generation queue.
-   const resident={...node,slot};if(isNew)newNodes.push(resident);return resident;
+   const resident=!isNew&&node.slot===slot?node:{...node,slot};if(isNew)newNodes.push(resident);return resident;
   });
   const selectionMs=(computed?.selectionMs??0)+performance.now()-start;
   const previousEye=this.selectionState?.eye;
@@ -682,15 +682,20 @@ export class PlanetRenderer {
   const writePatch=(node,slots)=>{
    const i=node.slot*32,cache=this.patchMetadataCache||(this.patchMetadataCache=new WeakMap());
    firstPatch=Math.min(firstPatch,node.slot);lastPatch=Math.max(lastPatch,node.slot);
-   if(cache.get(node)!==slots){
+   const cachedSlots=cache.get(node);
+   // A new covering gets a new Map even when this patch and its neighboring
+   // GPU slots are unchanged. Its static metadata is then still valid.
+   const sameEdges=cachedSlots===slots||!!cachedSlots&&node.edgeKeys.every(key=>(cachedSlots.get(key)??0xffffffff)===(slots.get(key)??0xffffffff));
+   if(!sameEdges){
     patchDirty=true;
     const b=FACE_BASES[node.face],cube=faceCube(node.face,node.u,node.v);
     this.patchFloats.set([...cube,node.span],i);this.patchFloats.set([...b.u,0],i+4);this.patchFloats.set([...b.v,0],i+8);
     const high=node.direction.map(Math.fround),low=node.direction.map((x,k)=>x-high[k]);
     this.patchFloats.set([...high,0],i+12);this.patchFloats.set([...low,0],i+16);
     this.patchUints.set([node.face,node.level,node.stitch,node.normalStitch],i+24);
-    this.patchUints.set(node.edgeKeys.map(key=>slots.get(key)??0xffffffff),i+28);cache.set(node,slots);
+    this.patchUints.set(node.edgeKeys.map(key=>slots.get(key)??0xffffffff),i+28);
    }
+   if(cachedSlots!==slots)cache.set(node,slots);
    // Camera-relative coordinates still need double-precision calculation each
    // frame, even while the patch's other metadata remains unchanged.
    for(let k=0;k<3;k++)this.patchFloats[i+20+k]=node.direction[k]*RADIUS_KM-camera.eye[k];

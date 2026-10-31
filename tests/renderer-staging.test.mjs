@@ -484,6 +484,36 @@ test('cached patch metadata preserves camera-relative updates and resets',async(
  const oldCache=r.patchMetadataCache;r.resetPatchCache();assert.notEqual(r.patchMetadataCache,oldCache);
 });
 
+test('patch metadata survives equivalent slot maps and refreshes changed neighbors',async()=>{
+ const {r}=fakeRenderer();r.frame(1000);await flush();
+ const node=r.patches.find(p=>p.edgeKeys.some(key=>r.slotByKey.has(key)));
+ const edge=node.edgeKeys.findIndex(key=>r.slotByKey.has(key)),key=node.edgeKeys[edge];
+ let writes=0;const set=r.patchUints.set.bind(r.patchUints);r.patchUints.set=(...args)=>{writes++;return set(...args);};
+ r.slotByKey=new Map(r.slotByKey);r.preparedPatchState=null;r.frame(1100);await flush();
+ assert.equal(writes,0,'equivalent slot maps preserve static metadata');
+ const changed=new Map(r.slotByKey);changed.set(key,999);r.slotByKey=changed;r.preparedPatchState=null;
+ r.frame(1200);await flush();assert.ok(writes>0);
+ assert.equal(new Uint32Array(r.patchBuffer.data)[node.slot*32+28+edge],999);
+});
+
+test('transition staging retains unchanged delta patch instances',async()=>{
+ const {r}=fakeRenderer();r.frame(1000);await flush();
+ const {planetCamera}=await import('../src/planet/camera.js'),{selectPatches}=await import('../src/planet/quadtree.js');
+ const {transitionSignatures}=await import('../src/planet/patch-transition.js');
+ const camera=planetCamera({...r.cameraState,altitude:500},960,600);
+ const result=selectPatches(camera,{budget:r.budget,maxDepth:r.maxDepth,pixelSize:r.pixelSize,includeHidden:true,previousLeaves:r.coveringLeaves,previousSplits:r.previousSplits});
+ const old=new Map(r.patches.map(node=>[node.key,node]));let reused=null;
+ result.visible=result.visible.map(node=>{
+  const prior=old.get(node.key);
+  if(prior&&node.stitch===prior.stitch&&node.normalStitch===prior.normalStitch&&JSON.stringify(node.edgeKeys)===JSON.stringify(prior.edgeKeys)&&JSON.stringify(node.cornerKeys)===JSON.stringify(prior.cornerKeys)){
+   reused??=prior;return prior;
+  }
+  return node;
+ });
+ assert.ok(reused);r.select(camera,1200,{result,signatures:transitionSignatures(result.visible),selectionMs:0});
+ assert.ok(r.stage);assert.equal(r.stage.nodes.find(node=>node.key===reused.key),reused);
+});
+
 test('patch uploads cover resident slot span and skip unchanged camera frames',async()=>{
  const {r}=fakeRenderer(),writes=[],write=r.device.queue.writeBuffer;
  r.device.queue.writeBuffer=(target,offset,source)=>{if(target===r.patchBuffer)writes.push({offset,size:source.byteLength});write(target,offset,source);};
