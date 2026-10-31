@@ -23,10 +23,15 @@ fn main(@builtin(workgroup_id) group:vec3<u32>,@builtin(local_invocation_index) 
  workgroupBarrier();
  let start=sampleRange.x;let count=sampleRange.y;
  for(var i=lane;i<count;i+=64u){
-  var q:vec2<f32>;
-  if(overlay){q=morphs.coordinates[start+i];}
-  else{q=vec2<f32>(stitchCoord(vec2<u32>(i%17u,i/17u),p.slots.z));}
-  let child=parentSurface(p.slots.x,q,p.slots.z);
+  var q:vec2<f32>;var child:vec3<f32>;
+  if(overlay){
+   q=morphs.coordinates[start+i];child=parentSurface(p.slots.x,q,p.slots.z);
+  }else{
+   // These samples are already integer grid vertices after stitching. Read
+   // their position directly instead of reclassifying them as surface queries.
+   let coord=stitchCoord(vec2<u32>(i%17u,i/17u),p.slots.z);q=vec2<f32>(coord);
+   child=patches[p.slots.x].relative.xyz+vertices[p.slots.x*GRID_COUNT+(coord.y+2u)*GRID+coord.x+2u].position.xyz;
+  }
   let parent=parentSurface(p.slots.y,p.mapping.xy+q*p.mapping.z,p.slots.w);
   let worldDelta=child-parent;maxWorld=max(maxWorld,dot(worldDelta,worldDelta));
   let a=frame.viewProjection*vec4<f32>(child,1.0);let b=frame.viewProjection*vec4<f32>(parent,1.0);
