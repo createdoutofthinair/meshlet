@@ -9,6 +9,7 @@
     "start": "node scripts/serve.mjs",
     "build:wasm": "node wasm/build-bounds.mjs",
     "test": "node --test tests/*.test.mjs",
+    "benchmark:planet": "node scripts/benchmark-planet-selection.mjs && node scripts/benchmark-planet-transitions.mjs",
     "check": "npm run build:wasm && npm run check:syntax && npm run check:wgsl && npm test",
     "check:syntax": "node scripts/check-syntax.mjs",
     "check:wgsl": "node --no-warnings scripts/check-wgsl.mjs"
