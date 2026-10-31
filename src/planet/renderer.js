@@ -310,11 +310,13 @@ export class PlanetRenderer {
   const nodes=result.visible.map(node=>{
    const signature=wantedSignatures.get(node.key);
    if(signature===undefined)throw new Error('Missing terrain stitch signature');
-   let slot=this.slotByKey.get(node.key);
-   if(slot===undefined){slot=this.free.pop();if(slot===undefined)throw new Error('Planet patch staging cache exhausted.');newNodes.push({...node,slot});normalPending.push(slot);}
+   let slot=this.slotByKey.get(node.key),isNew=false;
+   if(slot===undefined){slot=this.free.pop();if(slot===undefined)throw new Error('Planet patch staging cache exhausted.');isNew=true;normalPending.push(slot);}
    else if(this.stitchByKey.get(node.key)!==signature)topologyChanges++;
    slots.set(node.key,slot);signatures.set(node.key,signature);
-   return {...node,slot};
+   // Reuse the staged instance after commit so its cached GPU metadata is
+   // still valid, and avoid creating a second copy for the generation queue.
+   const resident={...node,slot};if(isNew)newNodes.push(resident);return resident;
   });
   const selectionMs=(computed?.selectionMs??0)+performance.now()-start;
   const previousEye=this.selectionState?.eye;

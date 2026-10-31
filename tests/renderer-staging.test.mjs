@@ -234,6 +234,8 @@ test('actual camera-driven selection starts a complete resident morph without mi
  for(let i=0;i<100&&r.stage?.state!=='transitioning';i++){r.frame(1400+i*150);await flush();}
  assert.equal(r.stage?.state,'transitioning');assert.equal(r.stage.uncovered,false);
  assert.ok(r.stage.components.every(c=>!c.deferredReasons.includes('incomplete-children')));
+ assert.ok(r.stage.newNodes.length>0);
+ for(const node of r.stage.newNodes){assert.ok(r.stage.nodes.includes(node));assert.equal(r.patchMetadataCache.get(node),r.stage.slots);}
  const slots=[...new Uint32Array(r.activeBuffer.data,0,r.stage.drawNodes.length)];
  assert.deepEqual(slots,r.stage.drawNodes.map(p=>p.slot));assert.equal(new Set(slots).size,slots.length);
  for(const group of r.stage.groups)for(const slot of group.slots)assert.ok(!r.free.includes(slot));
