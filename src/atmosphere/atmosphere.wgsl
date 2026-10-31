@@ -16,8 +16,13 @@ fn atmosphereSky(direction:vec3<f32>,sunDirection:vec3<f32>,upDirection:vec3<f32
  let base=mix(vec3<f32>(.13,.27,.45),vec3<f32>(.48,.58,.64),horizon);
  let warm=vec3<f32>(1.0,.30,.075)*(twilight*.28+day*.035)*min(2.0,atmosphereMiePhase(mu))*density;
  let dip=sqrt(2.0*max(0.0,altitude)/6371000.0);let discVisible=smoothstep(-.015,.015,sunElevation+dip);
- let sunTint=mix(vec3<f32>(1.0,.32,.09),vec3<f32>(1.0,.83,.60),smoothstep(.0,.3,sunElevation));
- let sun=sunTint*pow(max(mu,0.0),420.0)*1.5*discVisible;
+ var sun=vec3<f32>(0.0);
+ // Below the horizon, or in the opposite half of the sky, the solar disc
+ // contributes exactly zero. Avoid its high-power evaluation in those pixels.
+ if(discVisible>0.0 && mu>0.0){
+  let sunTint=mix(vec3<f32>(1.0,.32,.09),vec3<f32>(1.0,.83,.60),smoothstep(.0,.3,sunElevation));
+  sun=sunTint*pow(mu,420.0)*1.5*discVisible;
+ }
  let skyLight=mix(vec3<f32>(.008,.012,.025),base*(.85+.15*rayleigh),day);
  return skyLight*density+warm+sun;
 }
