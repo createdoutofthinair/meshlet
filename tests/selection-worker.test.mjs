@@ -95,3 +95,28 @@ test('worker can derive covering leaves from a complete patch snapshot',async()=
   assert.deepEqual(messages[0].result.visible,expected.visible);
  }finally{delete globalThis.self;}
 });
+
+test('a committed worker result can be reused as a snapshot without cloning patches',async()=>{
+ const messages=[];globalThis.self={postMessage:value=>messages.push(structuredClone(value))};
+ try{
+  await import('../src/planet/selection-worker.js?reuse-result-test');
+  const options={budget:54,pixelSize:14,includeHidden:true};
+  const firstCamera=planetCamera({altitude:14000,longitude:.8,latitude:.4},960,600);
+  const secondCamera=planetCamera({altitude:50,longitude:2.2,latitude:-.2},960,600);
+  self.onmessage({data:{id:1,key:'test',camera:firstCamera,options,compactLeaves:true}});
+  const first=messages[0].result;
+  self.onmessage({data:{id:2,key:'test',camera:secondCamera,options,snapshotPresent:true,snapshotReuseId:1}});
+  const reused=messages[1];
+  await import('../src/planet/selection-worker.js?full-result-snapshot-test');
+  self.onmessage({data:{id:3,key:'test',camera:secondCamera,options:{...options,previousSplits:first.splits},previousPatches:first.visible,snapshotPresent:true,deriveLeaves:true}});
+  const full=messages[2];
+  assert.deepEqual(reused.result,full.result);
+  assert.deepEqual(reused.relationships,full.relationships);
+  assert.deepEqual(reused.groupPlan,full.groupPlan);
+  assert.deepEqual(reused.componentPlan,full.componentPlan);
+  assert.deepEqual(reused.signatures,full.signatures);
+  assert.deepEqual(reused.packedTopology,full.packedTopology);
+  self.onmessage({data:{id:4,key:'test',camera:secondCamera,options,snapshotPresent:true,snapshotReuseId:999}});
+  assert.equal(messages[3].snapshotMissing,true);
+ }finally{delete globalThis.self;}
+});

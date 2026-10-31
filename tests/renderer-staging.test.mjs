@@ -345,6 +345,25 @@ test('renderer restores a compact worker covering from its visible nodes',async(
  }finally{if(old===undefined)delete globalThis.Worker;else globalThis.Worker=old;}
 });
 
+test('renderer reuses a committed worker snapshot and retries if it was evicted',async()=>{
+ const old=globalThis.Worker;let worker;
+ globalThis.Worker=class {constructor(){worker=this;}postMessage(message){this.message=message;}terminate(){}};
+ try{
+  const {r}=fakeRenderer();r.frame(1000);await flush();
+  const first=worker.message,{selectPatches}=await import('../src/planet/quadtree.js');
+  const result=selectPatches(first.camera,first.options);result.leaves=null;result.compactLeaves=true;
+  worker.onmessage({data:{...first,result,selectionMs:1}});r.frame(1200);await flush();
+  assert.equal(r.workerCoveringResultId,first.id);
+  r.reconcileSelection=true;r.needsSelection=true;r.lastSelection=0;r.frame(1400);await flush();
+  const reuse=worker.message;assert.equal(reuse.snapshotReuseId,first.id);assert.equal(reuse.previousPatches,null);
+  assert.equal(reuse.options.previousSplits,undefined);
+  worker.onmessage({data:{id:reuse.id,key:reuse.key,camera:reuse.camera,snapshotMissing:true}});
+  r.frame(1600);await flush();
+  const retry=worker.message;assert.equal(retry.snapshotReuseId,null);assert.ok(retry.previousPatches.length);
+  assert.ok(retry.options.previousSplits instanceof Set);
+ }finally{if(old===undefined)delete globalThis.Worker;else globalThis.Worker=old;}
+});
+
 test('flight selection waits for meaningful camera movement but continues pending LOD reconciliation',async()=>{
  const {r}=fakeRenderer();r.frame(1000);await flush();
  const {planetCamera}=await import('../src/planet/camera.js');const camera=planetCamera(r.cameraState,960,600);

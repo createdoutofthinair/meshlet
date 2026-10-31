@@ -61,3 +61,8 @@ for(let i=0;i<runs;i++){
 for(const [label,times] of [['request copy',inputTimes],['response copy and transfer',outputTimes]]){
  times.sort((a,b)=>a-b);console.log(`${label}: p50=${times[Math.ceil(times.length*.5)-1].toFixed(3)} ms p95=${times[Math.ceil(times.length*.95)-1].toFixed(3)} ms`);
 }
+const reuseRequest={...cloneRequest,options:{...options},previousPatches:null,snapshotReuseId:1};
+const reuseTimes=[];
+for(let i=0;i<runs;i++){const start=performance.now();structuredClone(reuseRequest);reuseTimes.push(performance.now()-start);}
+reuseTimes.sort((a,b)=>a-b);
+console.log(`reused snapshot request copy: p50=${reuseTimes[Math.ceil(reuseTimes.length*.5)-1].toFixed(3)} ms p95=${reuseTimes[Math.ceil(reuseTimes.length*.95)-1].toFixed(3)} ms`);

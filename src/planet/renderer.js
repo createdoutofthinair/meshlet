@@ -49,7 +49,7 @@ export class PlanetRenderer {
   this.simulateRegionsForAnalysis=false;
   if(typeof Worker!=='undefined'){
    this.selectionWorker=new Worker(new URL('./selection-worker.js',import.meta.url),{type:'module'});
-   this.selectionWorker.onmessage=e=>{if(this.selectionRequest?.id===e.data.id){this.selectionRequest=null;this.selectionResult=e.data;}};
+   this.selectionWorker.onmessage=e=>{if(e.data.result)this.workerOfferedResultId=e.data.id;if(this.selectionRequest?.id===e.data.id){this.selectionRequest=null;this.selectionResult=e.data;}};
    this.selectionWorker.onerror=e=>{this.selectionWorker?.terminate();this.selectionWorker=null;this.selectionRequest=null;this.needsSelection=true;this.onError?.(`Terrain selection worker: ${e.message}`);};
   }
   this.regionLookup=new Uint32Array(REGION_LOOKUPS);this.regionLookup.fill(0xffffffff);
@@ -228,7 +228,7 @@ export class PlanetRenderer {
   this.lodErrors.clear();this.lodErrorVersion++;this.selectionErrorCache=null;this.retiredSlots=new Set();this.displayedPatches=null;this.coveringLeaves=null;this.topologySlots=null;this.morphVertexCount=96;this.uploadedActiveSlots=null;this.morphMetadata=null;this.patchMetadataCache=new WeakMap();this.uploadedPatchEye=null;this.preparedPatchState=null;
   if(this.morphBuffer&&!this.deviceLost)this.device.queue.writeBuffer(this.morphBuffer,0,encodePatchMorphs([],CAPACITY));
   this.transitionErrors.clear();this.transitionErrorVersion++;this.workerErrorVersion=null;this.stage=null;this.transition={pixels:null,pending:0,overTarget:false,waiting:false};
-  this.selectionResult=null;this.selectionRequest=null;this.workerSelectionSnapshot=null;this.terrainPointCache=null;this.terrainPointInFlight.clear();this.reconcileSelection=false;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
+  this.selectionResult=null;this.selectionRequest=null;this.workerSelectionSnapshot=null;this.workerOfferedResultId=null;this.workerCoveringResultId=null;this.terrainPointCache=null;this.terrainPointInFlight.clear();this.reconcileSelection=false;this.needsSelection=true;this.generation++;this.surfaceRevision++;this.lastProbeKey='';this.lastFrameEye=null;this.selectionState=null;this.previousSplits=null;
   this.latest={visibleMeshlets:null,gpuComputeMs:null,gpuRenderMs:null};
  }
  handleDeviceLoss(info){
@@ -322,6 +322,7 @@ export class PlanetRenderer {
   this.lastSelection=now;this.needsSelection=false;this.reconcileSelection=false;
   if(!this.patches.length){
    this.slotByKey=slots;this.stitchByKey=signatures;this.patches=nodes;this.previousSplits=result.splits;this.coveringLeaves=result.leaves;
+   this.workerCoveringResultId=computed?.id??null;
    this.pending=newNodes.map(n=>n.slot);this.normalPending=normalPending;
    this.stats={leaves:result.leaves.length,visiblePatches:nodes.length,deepest:result.deepest,selectionMs,generated:newNodes.length,normalUpdates:normalPending.length,reusedNormalUpdates:normalPending.length-newNodes.length};
    return;
@@ -361,7 +362,7 @@ export class PlanetRenderer {
     return {groups:componentGroups,slots:[...new Set(componentGroups.flatMap(g=>g.slots))],deferredReasons:c.deferredReasons};
    });
   }else{groups=transitionGroups(this.patches,nodes,pairs);components=coordinateTransitions(this.patches,nodes,groups);}
-  this.stage={components,groups,result,nodes,slots,signatures,newNodes,todo:newNodes.map(n=>n.slot),normalPending,pairs,selectionMs,state:'building',generation:this.generation,reference:camera,previousEye,nextMeasure:0,uncovered,hasRefinement:pairs.some(p=>p.refining),waitingSince:null,computedTopology:computed?.topology,packedTopology:computed?.packedTopology};
+  this.stage={components,groups,result,nodes,slots,signatures,newNodes,todo:newNodes.map(n=>n.slot),normalPending,pairs,selectionMs,state:'building',generation:this.generation,reference:camera,previousEye,nextMeasure:0,uncovered,hasRefinement:pairs.some(p=>p.refining),waitingSince:null,computedTopology:computed?.topology,packedTopology:computed?.packedTopology,workerResultId:computed?.id??null};
   this.transition={...this.transition,pending:newNodes.length,waiting:false};
  }
  canMorphTransition(stage){
@@ -448,6 +449,7 @@ export class PlanetRenderer {
   this.retireSlots([...this.slotByKey].filter(([key])=>!stage.slots.has(key)).map(([,slot])=>slot));
   this.lastTransitionCommit={id:++this.transitionCommitId,at:now,pairs:stage.pairs.length,refinements:stage.pairs.filter(p=>p.refining).length,merges:stage.pairs.filter(p=>!p.refining).length,maxRefinementPixels:stage.maxRefine??null,maxMergePixels:stage.maxMerge??null,maxPixels:this.transition.pixels,uncovered:stage.uncovered};
   this.slotByKey=stage.slots;this.stitchByKey=stage.signatures;this.patches=stage.nodes;this.previousSplits=stage.result.splits;this.coveringLeaves=stage.result.leaves;
+  this.workerCoveringResultId=stage.workerResultId;
   // New patches were shaded while staged; world-space normals do not depend
   // on which neighboring LOD is currently selected.
   this.normalPending=[];
@@ -616,7 +618,8 @@ export class PlanetRenderer {
    if(ready.result?.compactLeaves){ready.result.leaves=ready.result.visible;delete ready.result.compactLeaves;}
    const current=[this.generation,this.cameraState.mode,this.budget,this.maxDepth,this.pixelSize,camera.width,camera.height].join('/');
    const movement=Math.hypot(...camera.eye.map((x,i)=>x-ready.camera.eye[i]));
-   if(!this.stage&&current===ready.key&&movement<=Math.max(.05,ready.camera.clearance*.7)&&dot(camera.forward,ready.camera.forward)>=Math.cos(20*Math.PI/180)){
+   if(ready.snapshotMissing){this.workerSelectionSnapshot=null;this.workerCoveringResultId=null;this.needsSelection=true;}
+   else if(!this.stage&&current===ready.key&&movement<=Math.max(.05,ready.camera.clearance*.7)&&dot(camera.forward,ready.camera.forward)>=Math.cos(20*Math.PI/180)){
     if(ready.unchanged){
      const maxDepth=this.cameraState.mode==='walk'?22:this.maxDepth;
      this.selectionState={eye:[...ready.camera.eye],forward:[...ready.camera.forward],mode:this.cameraState.mode,budget:this.budget,maxDepth,pixelSize:this.pixelSize,width:ready.camera.width,height:ready.camera.height,generation:this.generation};
@@ -632,17 +635,20 @@ export class PlanetRenderer {
     const cached=this.workerSelectionSnapshot;
     const snapshotPresent=!cached||cached.patches!==this.patches||cached.leaves!==this.coveringLeaves||cached.splits!==this.previousSplits;
     const options={budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth:this.cameraState.mode==='walk'?22:this.maxDepth,pixelSize:this.pixelSize};
+    const snapshotReuseId=snapshotPresent&&this.workerCoveringResultId!=null&&this.workerCoveringResultId===this.workerOfferedResultId?this.workerCoveringResultId:null;
     let deriveLeaves=false;
     if(snapshotPresent){
-     options.previousSplits=this.previousSplits;
-     deriveLeaves=!!this.coveringLeaves&&this.patches.length===this.coveringLeaves.length&&this.patches.every((p,i)=>p.key===this.coveringLeaves[i].key);
-     if(!deriveLeaves)options.previousLeaves=this.coveringLeaves;
+     if(snapshotReuseId==null){
+      options.previousSplits=this.previousSplits;
+      deriveLeaves=!!this.coveringLeaves&&this.patches.length===this.coveringLeaves.length&&this.patches.every((p,i)=>p.key===this.coveringLeaves[i].key);
+      if(!deriveLeaves)options.previousLeaves=this.coveringLeaves;
+     }
      this.workerSelectionSnapshot={patches:this.patches,leaves:this.coveringLeaves,splits:this.previousSplits};
     }
     const errors=this.selectionErrorEstimates();
     const errorEstimates=this.workerErrorVersion===errors.version?null:errors.values;
     this.workerErrorVersion=errors.version;
-    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,errorEstimates,snapshotPresent,deriveLeaves,allowUnchanged:true,compactLeaves:true,previousPatches:snapshotPresent?this.patches:null});
+    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,errorEstimates,snapshotPresent,snapshotReuseId,deriveLeaves,allowUnchanged:true,compactLeaves:true,previousPatches:snapshotPresent&&snapshotReuseId==null?this.patches:null});
    }
   }
   const stage=this.stage;

@@ -5,13 +5,19 @@ import {packTransitionTopology} from './transition-upload.js';
 let cachedErrors=new Map();
 let cachedSelection={previousLeaves:null,previousSplits:null,previousPatches:[]};
 let lastSignatures=null;
+let offeredSelection=null;
 // transitionCoordinates returns immutable cached arrays; weak keys allow
 // evicted coordinate arrays and their layouts to be collected together.
 const topologyLayouts=new WeakMap();
 self.onmessage=({data})=>{
  const start=performance.now();
  if(data.errorEstimates!=null)cachedErrors=data.errorEstimates;
- if(data.snapshotPresent===true)cachedSelection={previousLeaves:data.deriveLeaves?data.previousPatches:data.options.previousLeaves,previousSplits:data.options.previousSplits,previousPatches:data.previousPatches,signatures:null};
+ if(data.snapshotPresent===true){
+  if(data.snapshotReuseId!=null){
+   if(offeredSelection?.id!==data.snapshotReuseId){self.postMessage({id:data.id,key:data.key,camera:data.camera,snapshotMissing:true});return;}
+   cachedSelection={...offeredSelection.snapshot};
+  }else cachedSelection={previousLeaves:data.deriveLeaves?data.previousPatches:data.options.previousLeaves,previousSplits:data.options.previousSplits,previousPatches:data.previousPatches,signatures:null};
+ }
  const snapshot=data.snapshotPresent===true||data.snapshotPresent===false?cachedSelection:{previousLeaves:data.options.previousLeaves,previousSplits:data.options.previousSplits,previousPatches:data.previousPatches};
  const result=selectPatches(data.camera,{...data.options,previousLeaves:snapshot.previousLeaves,previousSplits:snapshot.previousSplits,errorEstimates:data.errorEstimates??data.options.errorEstimates??cachedErrors,unchangedPatches:data.allowUnchanged?snapshot.previousPatches:null});
  if(result.unchanged){
@@ -59,9 +65,13 @@ self.onmessage=({data})=>{
  try{if(keys.length)packed=packTransitionTopology(keys.map((key,slot)=>({slot,coordinates:topology.get(key)})),undefined,topologyLayouts,keys.length);}
  catch(error){if(!error.message.includes('capacity exceeded'))throw error;}
  const transfers=packed?[packed.ranges.buffer,packed.coordinates.buffer]:[];
+ // Keep the untransferred selection so a subsequently committed result can
+ // become the next snapshot without cloning its entire patch graph back.
+ const compactCover=!!data.compactLeaves&&!!data.options.includeHidden&&result.leaves.length===result.visible.length;
+ offeredSelection={id:data.id,snapshot:{previousLeaves:compactCover?result.visible:result.leaves,previousSplits:result.splits,previousPatches:result.visible,signatures}};
  // A complete resident covering has the same ordered nodes in both arrays.
  // The renderer can reconstruct leaves from visible nodes after cloning,
  // avoiding a second copy of every patch's geometry metadata.
- if(data.compactLeaves&&data.options.includeHidden&&result.leaves.length===result.visible.length){result.leaves=null;result.compactLeaves=true;}
+ if(compactCover){result.leaves=null;result.compactLeaves=true;}
  self.postMessage({id:data.id,key:data.key,camera:data.camera,result,relationships,groupPlan,componentPlan,signatures,topology:packed?null:topology,packedTopology:packed?{keys,ranges:packed.ranges,coordinates:packed.coordinates,vertexCount:packed.vertexCount}:null,selectionMs:performance.now()-start},transfers);
 };
