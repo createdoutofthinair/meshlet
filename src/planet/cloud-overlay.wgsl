@@ -24,7 +24,9 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
  let uv=vec2<f32>(input.pos.x/params.view.x*2.0-1.0,1.0-input.pos.y/params.view.y*2.0);
  let worldRay=normalize(params.forward.xyz+params.right.xyz*uv.x*params.forward.w+params.up.xyz*uv.y*params.right.w);
  let ray=vec3<f32>(dot(worldRay,params.east.xyz),dot(worldRay,params.radial.xyz),dot(worldRay,params.north.xyz));
- let sun=vec3<f32>(dot(params.sun.xyz,params.east.xyz),dot(params.sun.xyz,params.radial.xyz),dot(params.sun.xyz,params.north.xyz));
+ // The renderer transforms this frame-constant direction into the local
+ // tangent basis once instead of repeating three dot products per pixel.
+ let sun=params.sun.xyz;
  let origin=vec3<f32>(0.0,params.sky.z,0.0);
  // The final depth includes terrain and any ocean pixel that survived its
  // coast test. An analytic sea hit alone does not mean a pixel was drawn.

@@ -79,6 +79,11 @@ test('GPU render timing covers the cloud pass and disabled clouds retain sky',as
  r.frame(1000);await flush();assert.equal(renderPasses.length,3);
  assert.equal(renderPasses[0].timestampWrites.beginningOfPassWriteIndex,2);assert.equal(renderPasses[0].timestampWrites.endOfPassWriteIndex,3);assert.equal(renderPasses[1].timestampWrites.beginningOfPassWriteIndex,4);assert.equal(renderPasses[2].timestampWrites.endOfPassWriteIndex,7);assert.equal(renderPasses[1].depthStencilAttachment.depthStoreOp,'store','final ocean depth is retained for atmospheric compositing');
  assert.equal(new Float32Array(r.cloudUniform.data)[7],0);
+ const cloud=new Float32Array(r.cloudUniform.data),frame=new Float32Array(r.uniform.data);
+ for(const [axis,offset] of [[0,20],[1,16],[2,24]]){
+  const expected=frame[36]*cloud[offset]+frame[37]*cloud[offset+1]+frame[38]*cloud[offset+2];
+  assert.ok(Math.abs(cloud[40+axis]-expected)<1e-6,'cloud sun uses the local tangent basis');
+ }
 });
 
 test('surface readback is discarded when displayed patch selection changes',async()=>{
