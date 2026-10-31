@@ -689,13 +689,13 @@ export class PlanetRenderer {
   }
   const raw=this.frameUniformData,f=this.frameUniformFloats,u=this.frameUniformUints;
   f.set(camera.vp,0);camera.planes.forEach((p,i)=>f.set(p,16+i*4));
+  const east=normalize([camera.radial[2],0,-camera.radial[0]]),north=normalize([camera.radial[1]*east[2],camera.radial[2]*east[0]-camera.radial[0]*east[2],-camera.radial[1]*east[0]]);
   let sun=normalize([.55,.42,.72]);
   if(this.followSun){
    const low=this.cameraState.mode==='flyover'||this.cameraState.mode==='walk';
    sun=normalize(add(add(scale(camera.radial,low ? .32 : .72),scale(camera.right,low ? .9 : .55)),scale(camera.up,low ? .22 : .25)));
   }
   else if(this.sunAzimuth!=null){
-   const east=normalize([camera.radial[2],0,-camera.radial[0]]),north=normalize([camera.radial[1]*east[2],camera.radial[2]*east[0]-camera.radial[0]*east[2],-camera.radial[1]*east[0]]);
    const az=this.sunAzimuth*Math.PI/180,alt=this.sunElevation*Math.PI/180;
    sun=normalize(add(add(scale(north,Math.cos(az)*Math.cos(alt)),scale(east,Math.sin(az)*Math.cos(alt))),scale(camera.radial,Math.sin(alt))));
   }
@@ -706,7 +706,6 @@ export class PlanetRenderer {
   u.set([normals.length,this.regionPending.length,camera.width,camera.height],48);
   f.set([this.erosion,this.rivers?1:0,this.regional?1:0,this.debugOpacity],52);
   const d=this.device;
-  const east=normalize([camera.radial[2],0,-camera.radial[0]]),north=normalize([camera.radial[1]*east[2],camera.radial[2]*east[0]-camera.radial[0]*east[2],-camera.radial[1]*east[0]]);
   this.cloudWindDistance=(this.cloudWindDistance??0)+Math.max(0,Math.min(.25,(now-(this.cloudLastTime??now))*.001))*(this.cloudSpeed??8);this.cloudLastTime=now;
   const weatherSeed=this.seed%10000,windAngle=this.cloudWindDistance/6371000;
   if(this.cloudWeatherSeed!==weatherSeed){this.cloudWeatherSeed=weatherSeed;this.cloudWeatherAxis=normalize([.08+Math.sin(weatherSeed*.07)*.08,.99,.07+Math.cos(weatherSeed*.09)*.08]);}
