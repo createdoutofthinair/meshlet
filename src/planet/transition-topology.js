@@ -76,6 +76,14 @@ function buildTopology(from={},to={},coordinatesOnly=false){
   for(const j of candidates){
   const a=old[i],b=next[j];
   if(a.box[0]>=b.box[2]||a.box[2]<=b.box[0]||a.box[1]>=b.box[3]||a.box[3]<=b.box[1])continue;
+  // Most triangles away from stitched edges coincide exactly. They are
+  // already inside both surfaces and need no polygon clipping.
+  if(a.box[0]>=0&&a.box[1]>=0&&a.box[2]<=16&&a.box[3]<=16&&
+   a.points[0][0]===b.points[0][0]&&a.points[0][1]===b.points[0][1]&&
+   a.points[1][0]===b.points[1][0]&&a.points[1][1]===b.points[1][1]&&
+   a.points[2][0]===b.points[2][0]&&a.points[2][1]===b.points[2][1]){
+   for(const point of a.points)coordinates.push(point[0],point[1]);if(!coordinatesOnly)sources.push(i,j);continue;
+  }
   let polygon=a.points;
   for(let e=0;e<3&&polygon.length;e++)polygon=clip(polygon,b.points[e],b.points[(e+1)%3]);
   for(const [p,q] of edges)if(polygon.length)polygon=clip(polygon,p,q);
