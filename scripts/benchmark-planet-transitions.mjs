@@ -23,7 +23,7 @@ console.log(`64 shared patch layouts: p50=${percentile(.5)} ms p95=${percentile(
 
 // Exercise the same changing-surface selection and topology preparation used
 // by the worker, without browser scheduling or structured-clone costs.
-globalThis.self={postMessage(){}};
+let response=null;globalThis.self={postMessage(message){response=message;}};
 await import('../src/planet/selection-worker.js');
 const options={budget:384,pixelSize:6,includeHidden:true};
 const before=selectPatches(planetCamera({mode:'walk',altitude:.0017,longitude:.8,latitude:.4,pitch:.2},1280,720),options);
@@ -34,3 +34,17 @@ durations.length=0;
 for(let i=0;i<runs;i++){const start=performance.now();self.onmessage(request);durations.push(performance.now()-start);}
 durations.sort((a,b)=>a-b);
 console.log(`changing surface worker: p50=${percentile(.5)} ms p95=${percentile(.95)} ms`);
+
+// Simulate changing selections through a descent. This applies each result
+// immediately and therefore does not model renderer morph timing or GPU work.
+let current=selectPatches(planetCamera({mode:'flyover',altitude:50,longitude:.8,latitude:.4,pitch:.2},1280,720),options);
+durations.length=0;let unchanged=0;
+for(let i=0;i<runs;i++){
+ const t=i/Math.max(1,runs-1),altitude=50*Math.pow(.01/50,t);
+ const descentCamera=planetCamera({mode:'flyover',altitude,longitude:.8+t*.0005,latitude:.4,pitch:.2},1280,720);
+ const data={id:i,key:'descent',camera:descentCamera,options:{...options,previousLeaves:current.leaves,previousSplits:current.splits},previousPatches:current.visible,snapshotPresent:true,allowUnchanged:true};
+ response=null;const start=performance.now();self.onmessage({data});durations.push(performance.now()-start);
+ if(response.unchanged)unchanged++;else current=response.result;
+}
+durations.sort((a,b)=>a-b);
+console.log(`synthetic descent worker: p50=${percentile(.5)} ms p95=${percentile(.95)} ms unchanged=${unchanged}/${runs}`);

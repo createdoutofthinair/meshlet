@@ -174,6 +174,7 @@ export class PlanetRenderer {
  uploadTransitionTopology(records,prepacked=null){
   let packed;
   if(prepacked){
+   if(prepacked.ranges.length!==prepacked.keys.length*32)throw new Error('Invalid prepared topology ranges');
    const ranges=new Uint32Array(1024*16*2),slots=new Set(),ids=new Map(prepacked.keys.map((key,index)=>[key,index]));
    for(const record of records){
     const index=ids.get(record.key);if(index===undefined||slots.has(record.slot))throw new Error('Invalid prepared topology');
