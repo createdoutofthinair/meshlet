@@ -2,8 +2,9 @@
 // patch or an ancestor/descendant on the same cube face; no geometric search
 // or rounded spherical coordinates are needed.
 function ancestorIn(map,node){
- let x=node.x,y=node.y;
- for(let level=node.level;level>=0;level--){
+ // Callers have already checked that the node itself is absent.
+ let x=Math.floor(node.x/2),y=Math.floor(node.y/2);
+ for(let level=node.level-1;level>=0;level--){
   const key=`${node.face}/${level}/${x}/${y}`;
   const ancestor=map.get(key);if(ancestor)return ancestor;
   x=Math.floor(x/2);y=Math.floor(y/2);
