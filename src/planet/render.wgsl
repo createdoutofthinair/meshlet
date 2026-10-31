@@ -163,6 +163,9 @@ fn fs(in:Output)->TerrainPixel {
   let seaColor=mix(deep,ocean,smoothstep(-4.0,0.0,min(coast.y,0.0)));
   base=mix(base,seaColor,seaCoverage);
  }
+ // Reuse procedural mineral height for a bounded local cavity cue. It is
+ // material-scale occlusion only; it does not cast terrain shadows.
+ var materialOcclusion=1.0;
  // A single filtered mineral band adds subtle variation without an expensive
  // extra normal-noise evaluation at every close-up pixel.
  if(land && water<.1 && (frame.counts.w&2u)==0u && footprint<.004){
@@ -181,6 +184,7 @@ fn fs(in:Output)->TerrainPixel {
    let grainFilter=1.0-smoothstep(.00004,.00015,footprint);
    let exposed=smoothstep(.006,.12,slope)*(1.0-snowCover);
    base*=1.0+grain*mix(.035,.065,exposed)*grainFilter;
+   materialOcclusion=1.0-max(0.0,-grain)*.12*grainFilter*(1.0-water);
    // The analytic gradient adds sub-mesh shading without changing the
    // actual height, so walking and LOD transitions keep the same surface.
    let tangentGradient=grainData.yzw-n*dot(n,grainData.yzw);
@@ -190,7 +194,13 @@ fn fs(in:Output)->TerrainPixel {
  // Terrain is predominantly dielectric. Keep the specular response broad and
  // energy bounded; snow and exposed rock have different surface roughness.
  let roughness=clamp(.68*exposedWeight+.90*talusWeight+.84*sandWeight+.92*soilWeight+.78*snowCover,.35,1.0);
- let view=normalize(-in.relative);let diffuse=max(dot(n,light),0.0);
+ let view=normalize(-in.relative);
+ // The local horizon blocks direct sunlight at night; sky fill fades more
+ // slowly to retain twilight. This is horizon lighting, not terrain shadows.
+ let sunHeight=dot(radial,light);
+ let sunVisibility=smoothstep(-.005,.015,sunHeight);
+ let daylight=smoothstep(-.12,.06,sunHeight);
+ let diffuse=max(dot(n,light),0.0)*sunVisibility;
  let ndotv=max(dot(n,view),.001);let halfVector=light+view;
  var specular=0.0;
  if(diffuse>0.0 && dot(halfVector,halfVector)>.000001){
@@ -203,10 +213,10 @@ fn fs(in:Output)->TerrainPixel {
   let fresnel=.04+.96*pow(1.0-vdoth,5.0);
   specular=distribution*geometry*fresnel/(4.0*ndotv);
  }
- let sky=.22+.10*max(dot(n,radial),0.0);
- let occlusion=1.0-in.cavity*(1.0-oceanFlatness)*.30;
+ let sky=.015+(.22+.10*max(dot(n,radial),0.0))*daylight;
+ let occlusion=(1.0-in.cavity*(1.0-oceanFlatness)*.30)*materialOcclusion;
  var color=(base*(sky+diffuse*.91)+vec3<f32>(specular))*occlusion;let rim=pow(1.0-clamp(dot(radial,view),0.0,1.0),4.0)*.055;
- color+=vec3<f32>(.10,.38,.58)*rim;
+ color+=vec3<f32>(.10,.38,.58)*rim*daylight;
  // Compress highlights before display encoding so bright snow keeps
  // shading detail instead of clipping against the canvas's white limit.
  color=color/(vec3<f32>(1.0)+color*.28);
@@ -220,6 +230,7 @@ fn fs(in:Output)->TerrainPixel {
  if(terrainDebug==2u){debugColor=geometricNormal*.5+vec3<f32>(.5);hasColor=true;}
  if(terrainDebug==3u){debugColor=vec3<f32>(exposedWeight,snowCover,max(0.0,1.0-exposedWeight-snowCover));hasColor=true;}
  if(terrainDebug==4u){debugColor=vec3<f32>(roughness);hasColor=true;}
+ if(terrainDebug==5u){debugColor=vec3<f32>(diffuse,sky,specular);hasColor=true;}
  if(hasColor){color=mix(color,debugColor,clamp(frame.hydrology.w,0.0,1.0));}
  if((frame.counts.w&268u)!=0u){
   let edge=vec3<f32>(1.0)-smoothstep(vec3<f32>(.55),vec3<f32>(1.7),in.bary/max(fwidth(in.bary),vec3<f32>(.00001)));

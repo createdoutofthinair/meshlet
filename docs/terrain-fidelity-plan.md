@@ -28,7 +28,8 @@ A rocky mountain reference scene should retain credible lighting, material and s
 
 - Plan recorded on `terrain-optimizations`.
 - Initial terrain lighting uses a bounded roughness-dependent dielectric sun response, with different roughness for rock and snow. The procedural color shader has a filtered fine mineral band. These are initial changes, not completion of the lighting or material milestones.
-- Inspector now exposes shading normals, geometric normals, material weights and roughness.
+- Inspector now exposes shading normals, geometric normals, material weights, roughness and lighting components.
+- Terrain direct and sky lighting now respond to the local planetary horizon; a filtered material-scale cavity cue reuses existing noise. These are not terrain-cast shadows and need visual validation.
 - Procedural rock, talus, sand, soil and snow now blend their color and roughness using slope, humidity and snow coverage. Geographic bedrock variation and footprint-filtered fine shading normals are implemented. These are procedural approximations; authored material assets and geological placement remain to be built.
 - A terrain detail target is available in Performance; walking supports LOD 22, and flight within 50 m can now select the same depth before touchdown. Selection changes use the existing transition system and selected patch budget; real-device checks remain required. A single ground-level selection exhausted 384 patches at all tested targets (2, 3, 6 and 10 pixels), so a lower target alone does not guarantee more detail. This was not a GPU or visual benchmark.
 - Recordings now include viewport, camera heading and pitch, LOD settings and p99 analysis for comparisons. Fixed-scene captures and repeatable trajectories remain outstanding.

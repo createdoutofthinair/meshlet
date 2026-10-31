@@ -83,6 +83,7 @@ test('inspector opens, controls real renderer overlays and can pause its graph',
  element('inspect-color').value='meshlet';change('inspect-color');assert.equal(renderer.meshletColors,true);assert.equal(renderer.lodColors,false);
  element('inspect-color').value='normal';change('inspect-color');assert.equal(renderer.terrainDebugMode,1);assert.equal(renderer.meshletColors,false);
  element('inspect-color').value='roughness';change('inspect-color');assert.equal(renderer.terrainDebugMode,4);
+ element('inspect-color').value='lighting';change('inspect-color');assert.equal(renderer.terrainDebugMode,5);assert.match(element('inspect-overlay-note').textContent,/red = direct sunlight/);
  element('inspect-color').value='meshlet';change('inspect-color');assert.equal(renderer.terrainDebugMode,0);
  element('inspect-patch-lines').checked=true;change('inspect-patch-lines');element('inspect-meshlet-lines').checked=true;change('inspect-meshlet-lines');
  assert.equal(renderer.patchLines,true);assert.equal(renderer.meshletLines,true);
