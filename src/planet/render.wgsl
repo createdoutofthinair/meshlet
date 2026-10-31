@@ -134,31 +134,28 @@ fn fs(in:Output)->TerrainPixel {
  if(oceanFlatness>0.0){n=normalize(mix(n,radial,oceanFlatness));}
  let slope=1.0-clamp(dot(n,radial),0.0,1.0);
  let deep=vec3<f32>(0.012,0.055,0.092);let ocean=vec3<f32>(0.025,0.17,0.23);
- let lowland=vec3<f32>(0.25,0.31,0.20);let upland=vec3<f32>(0.30,0.28,0.22);
- let rock=vec3<f32>(0.34,0.34,0.32);let snow=vec3<f32>(0.66,0.71,0.72);
- let rockWeight=smoothstep(.006,.12,slope);
- let talus=smoothstep(.025,.09,slope)*(1.0-smoothstep(.16,.32,slope));
+ // Blend physical material properties with weights that sum to one. Snow
+ // settles on shallow slopes; steep rock and dry exposed soil remain visible.
+ let rockSlope=smoothstep(.018,.18,slope);
  let temperature=clamp(1.0-abs(radial.y)*1.1-max(0.0,h)*.075,0.0,1.0);
- var base=mix(lowland,upland,smoothstep(.4,2.2,h));
- if((frame.counts.w&16u)!=0u){
-  let humidity=clamp(in.surface.y,0.0,1.0);
-  let arid=vec3<f32>(.42,.34,.22);let temperate=vec3<f32>(.22,.31,.17);let cool=vec3<f32>(.29,.32,.25);
-  base=mix(arid,temperate,smoothstep(.28,.72,humidity));base=mix(cool,base,smoothstep(.18,.48,temperature));
-  base=mix(base,upland,smoothstep(1.0,4.0,h)*.38);
- }
- // Transitional slopes collect loose weathered rock, while steep faces expose
- // bedrock. Geographic noise breaks the otherwise uniform altitude colors.
- var geology=0.0;
- if(land && rockWeight>0.0){geology=noise3(radial*180.0,frame.counts.z+1777u);}
- let exposedRock=rock*(1.0+.12*geology)+vec3<f32>(.018,.004,-.014)*geology;
- let sediment=mix(base,vec3<f32>(.31,.29,.25),.45);
- base=mix(base,sediment,talus*.48);
- base=mix(base,exposedRock,rockWeight);
+ let humidity=select(.5,clamp(in.surface.y,0.0,1.0),(frame.counts.w&16u)!=0u);
  let coldSnow=select(0.0,1.0-smoothstep(.12,.24,temperature),(frame.counts.w&16u)!=0u);
- // Snow collects on gentler slopes; exposed rock preserves the shape of
- // steep mountain faces instead of painting the whole highland white.
- let snowCover=max(smoothstep(7.0,9.3,h),coldSnow)*(1.0-smoothstep(.03,.32,slope)*.85);
- base=mix(base,snow,snowCover);
+ let snowCover=clamp(max(smoothstep(7.0,9.3,h),coldSnow)*(1.0-smoothstep(.03,.32,slope)*.85),0.0,1.0);
+ let exposedWeight=(1.0-snowCover)*rockSlope;
+ let remaining=1.0-snowCover-exposedWeight;
+ let talusMask=smoothstep(.008,.06,slope)*(1.0-smoothstep(.12,.24,slope));
+ let talusWeight=remaining*talusMask*.75;
+ let groundWeight=max(0.0,remaining-talusWeight);
+ let sandWeight=groundWeight*(1.0-smoothstep(.25,.5,humidity))*(1.0-smoothstep(.02,.12,slope));
+ let soilWeight=max(0.0,groundWeight-sandWeight);
+ var geology=0.0;
+ if(land && exposedWeight+talusWeight>0.0){geology=noise3(radial*180.0,frame.counts.z+1777u);}
+ let rock=vec3<f32>(.34,.34,.32)*(1.0+.12*geology)+vec3<f32>(.018,.004,-.014)*geology;
+ let talus=vec3<f32>(.31,.29,.25)*(1.0+.08*geology);
+ let sand=vec3<f32>(.42,.34,.22);
+ let soil=mix(vec3<f32>(.29,.32,.25),vec3<f32>(.22,.31,.17),smoothstep(.18,.48,temperature));
+ let snow=vec3<f32>(.66,.71,.72);
+ var base=rock*exposedWeight+talus*talusWeight+sand*sandWeight+soil*soilWeight+snow*snowCover;
  if(land){base=mix(base,vec3<f32>(.025,.16,.19),water);}
  // Color the sea from a continuous, seeded broad-bed field. Interpolated
  // patch heights make the same ocean look different as terrain LOD changes.
@@ -192,8 +189,7 @@ fn fs(in:Output)->TerrainPixel {
  }
  // Terrain is predominantly dielectric. Keep the specular response broad and
  // energy bounded; snow and exposed rock have different surface roughness.
- let exposedWeight=rockWeight*(1.0-snowCover);
- let roughness=clamp(mix(mix(.88,.68,exposedWeight),.78,snowCover),.35,1.0);
+ let roughness=clamp(.68*exposedWeight+.90*talusWeight+.84*sandWeight+.92*soilWeight+.78*snowCover,.35,1.0);
  let view=normalize(-in.relative);let diffuse=max(dot(n,light),0.0);
  let ndotv=max(dot(n,view),.001);let halfVector=light+view;
  var specular=0.0;

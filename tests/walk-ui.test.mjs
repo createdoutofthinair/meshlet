@@ -158,3 +158,11 @@ test('planet starts in flight with the flight controls available',async()=>{
  assert.match(page,/<option value="flight" selected>/);assert.doesNotMatch(page,/<option value="orbit"/);
  assert.equal(initialMode,'flight');assert.equal(initialFlightControlsVisible,true);
 });
+
+test('terrain detail control updates selection and rejects invalid targets',()=>{
+ const select=doc.getElementById('terrain-detail');
+ renderer.needsSelection=false;select.value='3';select.dispatchEvent(new Event('change'));
+ assert.equal(renderer.pixelSize,3);assert.equal(renderer.needsSelection,true);
+ renderer.needsSelection=false;select.value='0';select.dispatchEvent(new Event('change'));
+ assert.equal(renderer.pixelSize,3);assert.equal(renderer.needsSelection,false);
+});

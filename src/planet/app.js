@@ -3,7 +3,7 @@ import {SurfaceWalker,WALK_EYE_HEIGHT_KM,directionFromCamera,setCameraDirection,
 import {StatisticsRecorder} from './statistics-recorder.js';
 import {PlanetInspector} from './inspector.js';
 const $=id=>document.getElementById(id);
-const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','flight-controls','flight-settings','flight-speed','flight-speed-value','fly','walk','walk-help','generation-status','seed-form','seed','river-link','random','space','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','render-scale','culling','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','transition-error','transition-status','timing-note'];
+const ids=['view','loading','loading-title','loading-detail','error','error-message','device-status','altitude-overlay','clearance-label','clearance-note','planet-hint','walk-controls','flight-controls','flight-settings','flight-speed','flight-speed-value','fly','walk','walk-help','generation-status','seed-form','seed','river-link','random','space','highlands','find-valleys','find-rivers','mode','altitude','altitude-range','relief','relief-value','valleys','valleys-value','erosion','erosion-value','rivers','regional','biomes','ocean','sun-follow','quality','terrain-detail','render-scale','culling','fps','frame-ms','patches','depth','meshlets','triangles','selection-ms','compute-label','compute-ms','render-ms','transition-error','transition-status','timing-note'];
 const el=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const MIN_ALT=.03,MAX_ALT=30000;
 const fmt=n=>Math.round(n).toLocaleString('en-US');
@@ -224,6 +224,7 @@ el.biomes.addEventListener('change',()=>{if(renderer)renderer.biomes=el.biomes.c
 el.ocean.addEventListener('change',()=>{if(!renderer)return;renderer.ocean=el.ocean.checked;rebuildTerrain('Updating the surface');});
 el['sun-follow'].addEventListener('change',()=>{if(renderer)renderer.followSun=el['sun-follow'].checked;});
 el.quality.addEventListener('change',()=>{if(renderer){renderer.budget=Number(el.quality.value);renderer.needsSelection=true;}});
+el['terrain-detail'].addEventListener('change',()=>{if(renderer){const value=Number(el['terrain-detail'].value);if(Number.isFinite(value)&&value>=2&&value<=10){renderer.pixelSize=value;renderer.needsSelection=true;}}});
 el['render-scale'].addEventListener('change',()=>{if(renderer){renderer.resolution=Number(el['render-scale'].value);renderer.needsSelection=true;}});
 el.culling.addEventListener('change',()=>{if(renderer)renderer.culling=el.culling.checked;});
 // Tab panels stay mounted so live settings and keyboard focus are preserved.

@@ -11,7 +11,7 @@ const cases=[
 ];
 for(const scenario of cases)for(const moving of [false,true])for(const compact of [false,true]){
  const cameraAt=i=>planetCamera({...scenario,longitude:.8+(moving?i*.00001:0),latitude:.4,heading:.45},1280,720);
- const options={budget:384,maxDepth:20,pixelSize:6,includeHidden:true};
+ const options={budget:384,maxDepth:scenario.mode==='walk'?22:20,pixelSize:6,includeHidden:true};
  let previous=null;
  for(let i=0;i<10;i++)previous=selectPatches(cameraAt(i),options);
  const durations=[];let unchanged=0;
