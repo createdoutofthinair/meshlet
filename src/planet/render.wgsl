@@ -160,10 +160,35 @@ fn fs(in:Output)->TerrainPixel {
   let mediumFilter=1.0-smoothstep(.001,.004,footprint);
   let variation=medium*.075*mediumFilter;
   base=max(vec3<f32>(0.0),base*(1.0+variation)+vec3<f32>(.012,.005,-.008)*medium*mediumFilter);
+  // Fine mineral variation fades out before its projected footprint aliases.
+  // Both bands use the same high/low world coordinates across patch edges.
+  if(footprint<.00015){
+   let grain=localNoise(in.detailHigh,in.detailLow,detailDelta,8388608.0,frame.counts.z+1721u);
+   let grainFilter=1.0-smoothstep(.00004,.00015,footprint);
+   let exposed=smoothstep(.006,.12,slope)*(1.0-snowCover);
+   base*=1.0+grain*mix(.035,.065,exposed)*grainFilter;
+  }
  }
- let diffuse=max(dot(n,light),0.0);let fill=.22+.10*max(n.y,0.0);
- var color=base*(fill+diffuse*.95)*(1.0-in.cavity*(1.0-oceanFlatness)*.30);
- let view=normalize(-in.relative);let rim=pow(1.0-clamp(dot(radial,view),0.0,1.0),4.0)*.055;
+ // Terrain is predominantly dielectric. Keep the specular response broad and
+ // energy bounded; snow and exposed rock have different surface roughness.
+ let rockWeight=smoothstep(.006,.12,slope)*(1.0-snowCover);
+ let roughness=clamp(mix(mix(.88,.68,rockWeight),.78,snowCover),.35,1.0);
+ let view=normalize(-in.relative);let diffuse=max(dot(n,light),0.0);
+ let ndotv=max(dot(n,view),.001);let halfVector=light+view;
+ var specular=0.0;
+ if(diffuse>0.0 && dot(halfVector,halfVector)>.000001){
+  let halfDir=normalize(halfVector);let ndoth=max(dot(n,halfDir),0.0);
+  let vdoth=max(dot(view,halfDir),0.0);let a=roughness*roughness;let a2=a*a;
+  let denominator=ndoth*ndoth*(a2-1.0)+1.0;
+  let distribution=a2/(3.14159265*denominator*denominator);
+  let k=(roughness+1.0)*(roughness+1.0)*.125;
+  let geometry=(ndotv/(ndotv*(1.0-k)+k))*(diffuse/(diffuse*(1.0-k)+k));
+  let fresnel=.04+.96*pow(1.0-vdoth,5.0);
+  specular=distribution*geometry*fresnel/(4.0*ndotv);
+ }
+ let sky=.22+.10*max(dot(n,radial),0.0);
+ let occlusion=1.0-in.cavity*(1.0-oceanFlatness)*.30;
+ var color=(base*(sky+diffuse*.91)+vec3<f32>(specular))*occlusion;let rim=pow(1.0-clamp(dot(radial,view),0.0,1.0),4.0)*.055;
  color+=vec3<f32>(.10,.38,.58)*rim;
  // Compress highlights before display encoding so bright snow keeps
  // shading detail instead of clipping against the canvas's white limit.
