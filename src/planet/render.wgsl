@@ -106,23 +106,26 @@ fn fs(in:Output)->TerrainPixel {
  }
  let water=smoothstep(.1,.6,max(waterField.x,waterField.y));
  let oceanFlatness=seaCoverage*select(0.0,1.0,frame.settings.z>.5);
- var east=cross(vec3<f32>(0.0,1.0,0.0),radial);if(length(east)<.000001){east=cross(vec3<f32>(1.0,0.0,0.0),radial);}
- east=normalize(east);let north=normalize(cross(radial,east));
- let broadNormal=normalize(radial-east*in.surface.z-north*in.surface.w);
- let filteredNormal=normalize(mix(in.normal,broadNormal,smoothstep(.004,.25,pixelKm)));
+ let broadWeight=smoothstep(.004,.25,pixelKm);var filteredNormal:vec3<f32>;
+ if(broadWeight>0.0){
+  var east=cross(vec3<f32>(0.0,1.0,0.0),radial);if(dot(east,east)<.000000000001){east=cross(vec3<f32>(1.0,0.0,0.0),radial);}
+  east=normalize(east);let north=normalize(cross(radial,east));
+  let broadNormal=normalize(radial-east*in.surface.z-north*in.surface.w);
+  filteredNormal=normalize(mix(in.normal,broadNormal,broadWeight));
+ }else{filteredNormal=normalize(in.normal);}
  var n=normalize(mix(normalize(mix(filteredNormal,radial,water*.8)),radial,oceanFlatness));let slope=1.0-clamp(dot(n,radial),0.0,1.0);
  let deep=vec3<f32>(0.012,0.055,0.092);let ocean=vec3<f32>(0.025,0.17,0.23);
  let lowland=vec3<f32>(0.25,0.31,0.20);let upland=vec3<f32>(0.30,0.28,0.22);
  let rock=vec3<f32>(0.34,0.34,0.32);let snow=vec3<f32>(0.66,0.71,0.72);
+ let temperature=clamp(1.0-abs(radial.y)*1.1-max(0.0,h)*.075,0.0,1.0);
  var base=mix(lowland,upland,smoothstep(.4,2.2,h));
  if((frame.counts.w&16u)!=0u){
-  let humidity=clamp(in.surface.y,0.0,1.0);let temperature=clamp(1.0-abs(radial.y)*1.1-max(0.0,h)*.075,0.0,1.0);
+  let humidity=clamp(in.surface.y,0.0,1.0);
   let arid=vec3<f32>(.42,.34,.22);let temperate=vec3<f32>(.22,.31,.17);let cool=vec3<f32>(.29,.32,.25);
   base=mix(arid,temperate,smoothstep(.28,.72,humidity));base=mix(cool,base,smoothstep(.18,.48,temperature));
   base=mix(base,upland,smoothstep(1.0,4.0,h)*.38);
  }
  base=mix(base,rock,smoothstep(.006,.12,slope));
- let temperature=clamp(1.0-abs(radial.y)*1.1-max(0.0,h)*.075,0.0,1.0);
  let coldSnow=select(0.0,1.0-smoothstep(.12,.24,temperature),(frame.counts.w&16u)!=0u);
  // Snow collects on gentler slopes; exposed rock preserves the shape of
  // steep mountain faces instead of painting the whole highland white.
