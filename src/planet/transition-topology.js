@@ -11,6 +11,11 @@ function stitched([x,y],mask){
  return [x,y];
 }
 function clip(polygon,a,b){
+ // Inputs are already free of adjacent duplicates. Fully contained polygons
+ // survive clipping unchanged, so avoid allocating and filtering a copy.
+ let inside=true;
+ for(const point of polygon)if(cross(a,b,point)<-EPS){inside=false;break;}
+ if(inside)return polygon;
  const out=[];
  for(let i=0;i<polygon.length;i++){
   const p=polygon[i],q=polygon[(i+1)%polygon.length],dp=cross(a,b,p),dq=cross(a,b,q);
