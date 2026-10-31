@@ -126,8 +126,13 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
  }
  // Distance haze uses the same sky and sun as the background. Restrict it
  // to low altitudes so the orbital view retains its terrain contrast.
- let aerial=(1.0-exp(-max(0.0,sceneDistance-4000.0)/70000.0))*exp(-altitude/18000.0)*.72*params.atmosphere.x;
- let hazeAlpha=clamp(aerial,0.0,.85)*(1.0-alpha);
+ var hazeAlpha=0.0;
+ // Nearby geometry has exactly zero aerial haze. Avoid evaluating both
+ // exponentials for it, as well as for fully opaque clouds or disabled haze.
+ if(sceneDistance>4000.0 && alpha<1.0 && params.atmosphere.x>0.0){
+  let aerial=(1.0-exp(-max(0.0,sceneDistance-4000.0)/70000.0))*exp(-altitude/18000.0)*.72*params.atmosphere.x;
+  hazeAlpha=clamp(aerial,0.0,.85)*(1.0-alpha);
+ }
  var hazeDisplay=vec3<f32>(0.0);
  if(hazeAlpha>0.0){
   let sky=atmosphereSky(ray,sun,vec3<f32>(0,1,0),origin.y);
