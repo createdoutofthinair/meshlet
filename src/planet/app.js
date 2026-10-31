@@ -17,6 +17,7 @@ function seedNumber(value){
 }
 let renderer,walker,previous=0,frames=[],cpuFrames=[],ready=false,findBusy=false,walkEpoch=0,walkLanding=false;
 const inspector=new PlanetInspector(()=>renderer),statistics=new StatisticsRecorder();
+let comparisonView=null;
 function downloadStats(data){const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download='planet-performance.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function stopStats(){if(!statistics.startedUtc)return;const report=statistics.stop(performance.now());downloadStats(report);$('stats-start').disabled=false;$('stats-stop').disabled=true;$('stats-status').textContent=`Saved ${report.samples.length} samples${report.truncated?' · recording limit reached':''}.`;}
 const keys=new Set(),touchWalk=new Set(),touchFlight=new Set(),orbitHint=el['planet-hint'].innerHTML;
@@ -172,6 +173,29 @@ async function start(){
   setAltitude(renderer.cameraState.altitude);setMode('flight');requestAnimationFrame(frame);
  }catch(error){fail(error.message);}
 }
+$('view-save').addEventListener('click',()=>{
+ if(!renderer)return;
+ comparisonView={generation:renderer.generation,seed:renderer.seed,camera:{...renderer.cameraState}};
+ $('view-restore').disabled=false;$('view-status').textContent='View saved for this terrain generation.';
+});
+$('view-restore').addEventListener('click',async()=>{
+ if(!renderer||!comparisonView)return;
+ if(comparisonView.generation!==renderer.generation||comparisonView.seed!==renderer.seed){
+  $('view-status').textContent='Terrain has changed. Save a new view for a valid comparison.';return;
+ }
+ const saved=comparisonView.camera;
+ // Invalidate pending movement and probes before moving the camera. Walking
+ // re-enters through the normal landing path rather than trusting stale mesh.
+ setMode('flight');Object.assign(renderer.cameraState,saved,{mode:'flight'});
+ renderer.lastProbeKey='';renderer.lastSelection=-Infinity;renderer.needsSelection=true;
+ if(saved.mode==='walk'){
+  await enterWalk();
+  if(renderer.cameraState.mode!=='walk'){$('view-status').textContent='Could not restore the walking view; terrain is not ready.';return;}
+ }else{
+  renderer.cameraState.mode=saved.mode;el.mode.value=saved.mode;updateFlightAltitude(renderer.cameraState);
+ }
+ $('view-status').textContent='View restored. Allow terrain and LOD transitions to settle before recording.';
+});
 $('stats-start').addEventListener('click',()=>{if(!renderer)return;statistics.start(performance.now(),renderer);$('stats-start').disabled=true;$('stats-stop').disabled=false;$('stats-status').textContent=renderer.timing?'Recording · GPU pass timings available.':'Recording · GPU timestamps unavailable; CPU and frame statistics only.';});
 $('stats-stop').addEventListener('click',stopStats);
 el['seed-form'].addEventListener('submit',e=>{e.preventDefault();setSeed(el.seed.value);});

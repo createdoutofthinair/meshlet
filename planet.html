@@ -107,6 +107,9 @@
    <div class="debug-toggles planet-toggles"><label><input id="culling" type="checkbox" checked><span>GPU meshlet frustum culling</span></label><label><input id="terrain-material-detail" type="checkbox" checked><span>Fine terrain material detail</span></label></div>
    <button id="inspect-open-panel" class="inspector-panel-button" type="button" aria-controls="planet-inspector" aria-expanded="false">OPEN TERRAIN INSPECTOR <span>↗</span></button>
    <p class="metric-note">Walking keeps your selected budget. Finer targets use available patches more aggressively and may increase transition work; a full patch budget can limit detail. The inspector shows LODs and measurement history.</p>
+   <div class="section-title"><span>COMPARISON VIEW</span><span>THIS SESSION</span></div>
+   <div class="planet-actions"><button id="view-save" type="button">SAVE VIEW</button><button id="view-restore" type="button" disabled>RESTORE VIEW</button></div>
+   <p class="metric-note" id="view-status" aria-live="polite">Save a camera position for before-and-after comparisons.</p>
    <div class="section-title"><span>STATISTICS RECORDING</span><span>NO VIDEO</span></div>
    <div class="planet-actions"><button id="stats-start" type="button">START RECORDING</button><button id="stats-stop" type="button" disabled>STOP &amp; DOWNLOAD</button></div>
    <p class="metric-note" id="stats-status" aria-live="polite">Record a flight or walk and download performance samples as JSON.</p>

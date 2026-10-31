@@ -176,3 +176,15 @@ test('fine material detail can be toggled independently of terrain LOD',()=>{
  toggle.checked=true;toggle.dispatchEvent(new Event('change'));
  assert.equal(renderer.terrainMaterialDetail,true);
 });
+
+test('comparison view restores camera and rejects changed terrain generations',async()=>{
+ doc.getElementById('space').click();
+ Object.assign(cameraState,{longitude:.8,latitude:.4,heading:.3,pitch:.2,altitude:1.2,surfaceHeight:.7,mode:'flight'});
+ doc.getElementById('view-save').click();
+ Object.assign(cameraState,{longitude:1.8,latitude:-.4,heading:1,pitch:.9,altitude:3,surfaceHeight:0});
+ doc.getElementById('view-restore').click();await flush();
+ assert.equal(cameraState.longitude,.8);assert.equal(cameraState.latitude,.4);assert.equal(cameraState.altitude,1.2);assert.equal(cameraState.surfaceHeight,.7);
+ assert.match(doc.getElementById('view-status').textContent,/View restored/);
+ renderer.generation++;cameraState.longitude=2;doc.getElementById('view-restore').click();await flush();
+ assert.equal(cameraState.longitude,2);assert.match(doc.getElementById('view-status').textContent,/Terrain has changed/);
+});
