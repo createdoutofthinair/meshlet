@@ -6,19 +6,25 @@ struct Screen{@builtin(position) pos:vec4<f32>};
 }
 // Integer avalanche hashing avoids the correlated bands produced by
 // trigonometric hashes at planet-sized coordinates.
-fn cloudHashCell(cell:vec3<i32>)->f32{
- let i=bitcast<vec3<u32>>(cell);
- var h=(i.x*1597334677u) ^ (i.y*3812015801u) ^ (i.z*2798796415u);
+fn cloudHashMixed(value:u32)->f32{
+ var h=value;
  h=(h ^ (h>>16u))*2246822519u;h=(h ^ (h>>13u))*3266489917u;h=h ^ (h>>16u);
  return f32(h>>8u)*(1.0/16777216.0);
+}
+fn cloudHashCell(cell:vec3<i32>)->f32{
+ let i=bitcast<vec3<u32>>(cell);
+ return cloudHashMixed((i.x*1597334677u) ^ (i.y*3812015801u) ^ (i.z*2798796415u));
 }
 fn cloudHash(p:vec3<f32>)->f32{return cloudHashCell(vec3<i32>(p));}
 fn cloudNoise(p:vec3<f32>)->f32{
  let i=vec3<i32>(floor(p));let f=fract(p);let u=f*f*(3.0-2.0*f);
- // Convert the lattice coordinate once, rather than converting each of the
- // eight corners independently for every procedural noise lookup.
- let a=mix(mix(cloudHashCell(i),cloudHashCell(i+vec3<i32>(1,0,0)),u.x),mix(cloudHashCell(i+vec3<i32>(0,1,0)),cloudHashCell(i+vec3<i32>(1,1,0)),u.x),u.y);
- let b=mix(mix(cloudHashCell(i+vec3<i32>(0,0,1)),cloudHashCell(i+vec3<i32>(1,0,1)),u.x),mix(cloudHashCell(i+vec3<i32>(0,1,1)),cloudHashCell(i+vec3<i32>(1,1,1)),u.x),u.y);
+ // The eight corners reuse just two coordinate products per axis.
+ let cell=bitcast<vec3<u32>>(i);
+ let x0=cell.x*1597334677u;let x1=(cell.x+1u)*1597334677u;
+ let y0=cell.y*3812015801u;let y1=(cell.y+1u)*3812015801u;
+ let z0=cell.z*2798796415u;let z1=(cell.z+1u)*2798796415u;
+ let a=mix(mix(cloudHashMixed(x0^y0^z0),cloudHashMixed(x1^y0^z0),u.x),mix(cloudHashMixed(x0^y1^z0),cloudHashMixed(x1^y1^z0),u.x),u.y);
+ let b=mix(mix(cloudHashMixed(x0^y0^z1),cloudHashMixed(x1^y0^z1),u.x),mix(cloudHashMixed(x0^y1^z1),cloudHashMixed(x1^y1^z1),u.x),u.y);
  return mix(a,b,u.z);
 }
 const PLANET_RADIUS:f32=6371000.0;
