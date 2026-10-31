@@ -31,8 +31,14 @@ function clip(polygon,a,b){
  }
  out.length=write;return out;
 }
-function triangles({mask=0,originX=0,originY=0,scale=1}={}){
+// Internal triangle grids recur across many old/new stitch pairings. Only the
+// coordinates-only path uses this cache; public topology results remain
+// independent and cannot mutate cached triangle data.
+const triangleCache=new Map(),TRIANGLE_CACHE_LIMIT=96;
+function triangles({mask=0,originX=0,originY=0,scale=1}={},useCache=false){
  if(!Number.isInteger(mask)||mask<0||mask>15||![originX,originY,scale].every(Number.isFinite)||scale<=0||scale>1||originX<0||originY<0||originX+16*scale>16+EPS||originY+16*scale>16+EPS)throw new Error('Invalid transition surface mapping');
+ const key=useCache?JSON.stringify([mask,originX,originY,scale]):null;
+ if(useCache&&triangleCache.has(key)){const cached=triangleCache.get(key);triangleCache.delete(key);triangleCache.set(key,cached);return cached;}
  const result=[];
  const point=(x,y)=>{const [u,v]=stitched([x,y],mask);return [(u-originX)/scale,(v-originY)/scale];};
  // The mapped patch window covers only this part of the source grid. Expand
@@ -48,10 +54,11 @@ function triangles({mask=0,originX=0,originY=0,scale=1}={}){
    result.push({points:p,box});
   }
  }
+ if(useCache){triangleCache.set(key,result);if(triangleCache.size>TRIANGLE_CACHE_LIMIT)triangleCache.delete(triangleCache.keys().next().value);}
  return result;
 }
 function buildTopology(from={},to={},coordinatesOnly=false){
- const old=triangles(from),next=triangles(to),coordinates=[],sources=[];
+ const old=triangles(from,coordinatesOnly),next=triangles(to,coordinatesOnly),coordinates=[],sources=[];
  const edges=[[[0,0],[16,0]],[[16,0],[16,16]],[[16,16],[0,16]],[[0,16],[0,0]]];
  // Intersections outside the 16x16 patch are clipped away. Index the target
  // triangle bounds by patch cell so each source triangle only tests local

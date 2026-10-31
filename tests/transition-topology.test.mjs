@@ -65,3 +65,12 @@ test('cached coordinates preserve both endpoint mappings through eviction',async
  assert.deepEqual(transitionCoordinates(from,to),buildTransitionTopology(from,to).coordinates);
  assert.deepEqual(transitionCoordinates({mask:0},{mask:0}),buildTransitionTopology().coordinates);
 });
+
+test('public topology arrays cannot mutate cached internal triangle grids',async()=>{
+ const {transitionCoordinates}=await import('../src/planet/transition-topology.js');
+ const from={mask:11,originX:8,originY:0,scale:.5},first={mask:2},second={mask:7};
+ transitionCoordinates(from,first);
+ const publicMesh=buildTransitionTopology(from,first);
+ publicMesh.fromTriangles[0][0][0]=999;
+ assert.deepEqual(transitionCoordinates(from,second),buildTransitionTopology(from,second).coordinates);
+});
