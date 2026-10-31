@@ -60,6 +60,9 @@ fn worldLake(s:WorldSample)->vec2<f32>{
  let weights=vec4<f32>((1.0-s.blend.x)*(1.0-s.blend.y),s.blend.x*(1.0-s.blend.y),(1.0-s.blend.x)*s.blend.y,s.blend.x*s.blend.y);
  var anchor=NO_NODE;var strongest=0.0;
  for(var k=0u;k<4u;k++){
+  // The smoothstep multiplier is at most one, so this corner cannot beat
+  // the current anchor if its entire interpolation weight is no larger.
+  if(weights[k]<=strongest){continue;}
   let cell=world.cells[s.corners[k]];let height=cell.profile.y;let spill=bitcast<f32>(cell.route.y);
   if(height>0.0 && spill<19.0){
    let basin=max(0.0,spill-height);let w=weights[k]*smoothstep(LAKE_MIN_DEPTH_KM,.18,basin);
@@ -70,6 +73,7 @@ fn worldLake(s:WorldSample)->vec2<f32>{
  let anchorCell=world.cells[anchor];let anchorSpill=bitcast<f32>(anchorCell.route.y);let anchorFloor=anchorCell.process.x;
  var support=0.0;var weightedLevel=0.0;
  for(var k=0u;k<4u;k++){
+  if(weights[k]<=0.0){continue;}
   let cell=world.cells[s.corners[k]];let height=cell.profile.y;let spill=bitcast<f32>(cell.route.y);
   if(height>0.0 && spill<19.0 && abs(spill-anchorSpill)<LAKE_SPILL_TOLERANCE_KM && abs(cell.process.x-anchorFloor)<.0001){
    let basin=max(0.0,spill-height);let w=weights[k]*smoothstep(LAKE_MIN_DEPTH_KM,.18,basin);
