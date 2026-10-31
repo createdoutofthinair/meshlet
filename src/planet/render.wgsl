@@ -113,7 +113,12 @@ fn fs(in:Output)->TerrainPixel {
   let broadNormal=normalize(radial-east*in.surface.z-north*in.surface.w);
   filteredNormal=normalize(mix(in.normal,broadNormal,broadWeight));
  }else{filteredNormal=normalize(in.normal);}
- var n=normalize(mix(normalize(mix(filteredNormal,radial,water*.8)),radial,oceanFlatness));let slope=1.0-clamp(dot(n,radial),0.0,1.0);
+ // Most land pixels are neither water nor coastline. Their filtered normal
+ // is already normalized and does not need two further normalizations.
+ var n=filteredNormal;
+ if(water>0.0){n=normalize(mix(n,radial,water*.8));}
+ if(oceanFlatness>0.0){n=normalize(mix(n,radial,oceanFlatness));}
+ let slope=1.0-clamp(dot(n,radial),0.0,1.0);
  let deep=vec3<f32>(0.012,0.055,0.092);let ocean=vec3<f32>(0.025,0.17,0.23);
  let lowland=vec3<f32>(0.25,0.31,0.20);let upland=vec3<f32>(0.30,0.28,0.22);
  let rock=vec3<f32>(0.34,0.34,0.32);let snow=vec3<f32>(0.66,0.71,0.72);
@@ -134,8 +139,10 @@ fn fs(in:Output)->TerrainPixel {
  if(land){base=mix(base,vec3<f32>(.025,.16,.19),water);}
  // Color the sea from a continuous, seeded broad-bed field. Interpolated
  // patch heights make the same ocean look different as terrain LOD changes.
- let seaColor=mix(deep,ocean,smoothstep(-4.0,0.0,min(coast.y,0.0)));
- base=mix(base,seaColor,seaCoverage);
+ if(seaCoverage>0.0){
+  let seaColor=mix(deep,ocean,smoothstep(-4.0,0.0,min(coast.y,0.0)));
+  base=mix(base,seaColor,seaCoverage);
+ }
  // A single filtered mineral band adds subtle variation without an expensive
  // extra normal-noise evaluation at every close-up pixel.
  if(land && water<.1 && (frame.counts.w&2u)==0u && footprint<.004){
