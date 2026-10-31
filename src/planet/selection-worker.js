@@ -48,5 +48,9 @@ self.onmessage=({data})=>{
  try{if(keys.length)packed=packTransitionTopology(keys.map((key,slot)=>({slot,coordinates:topology.get(key)})));}
  catch(error){if(!error.message.includes('capacity exceeded'))throw error;}
  const transfers=packed?[packed.ranges.buffer,packed.coordinates.buffer]:[];
+ // A complete resident covering has the same ordered nodes in both arrays.
+ // The renderer can reconstruct leaves from visible nodes after cloning,
+ // avoiding a second copy of every patch's geometry metadata.
+ if(data.compactLeaves&&data.options.includeHidden&&result.leaves.length===result.visible.length){result.leaves=null;result.compactLeaves=true;}
  self.postMessage({id:data.id,key:data.key,camera:data.camera,result,relationships,groupPlan,componentPlan,signatures,topology:packed?null:topology,packedTopology:packed?{keys,ranges:packed.ranges,coordinates:packed.coordinates,vertexCount:packed.vertexCount}:null,selectionMs:performance.now()-start},transfers);
 };

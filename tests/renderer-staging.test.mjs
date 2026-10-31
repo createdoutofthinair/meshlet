@@ -329,6 +329,22 @@ test('worker selection does not block frames and ignores stale world generations
  }finally{if(old===undefined)delete globalThis.Worker;else globalThis.Worker=old;}
 });
 
+test('renderer restores a compact worker covering from its visible nodes',async()=>{
+ const old=globalThis.Worker;let worker;
+ globalThis.Worker=class {constructor(){worker=this;}postMessage(message){this.message=message;}terminate(){}};
+ try{
+  const {r}=fakeRenderer();r.frame(1000);await flush();
+  const message=worker.message,{selectPatches}=await import('../src/planet/quadtree.js');
+  assert.equal(message.compactLeaves,true);
+  const result=selectPatches(message.camera,message.options),keys=result.leaves.map(p=>p.key);
+  result.leaves=null;result.compactLeaves=true;
+  worker.onmessage({data:{...message,result,selectionMs:1}});
+  r.frame(1200);await flush();
+  assert.deepEqual(r.coveringLeaves.map(p=>p.key),keys);
+  assert.equal(r.patches.length,keys.length);
+ }finally{if(old===undefined)delete globalThis.Worker;else globalThis.Worker=old;}
+});
+
 test('flight selection waits for meaningful camera movement but continues pending LOD reconciliation',async()=>{
  const {r}=fakeRenderer();r.frame(1000);await flush();
  const {planetCamera}=await import('../src/planet/camera.js');const camera=planetCamera(r.cameraState,960,600);

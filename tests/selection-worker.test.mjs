@@ -64,3 +64,19 @@ test('unchanged resident covering returns a compact response',async()=>{
   assert.notEqual(messages[1].unchanged,true);assert.ok(messages[1].result);
  }finally{delete globalThis.self;}
 });
+
+test('worker can omit duplicated leaves for a complete resident covering',async()=>{
+ const messages=[];globalThis.self={postMessage:value=>messages.push(structuredClone(value))};
+ try{
+  await import('../src/planet/selection-worker.js?compact-leaves-test');
+  const camera=planetCamera({altitude:50,longitude:.8,latitude:.4},960,600);
+  const options={budget:54,pixelSize:14,includeHidden:true};
+  self.onmessage({data:{id:1,key:'test',camera,options,compactLeaves:true}});
+  const result=messages[0].result,expected=selectPatches(camera,options);
+  assert.equal(result.compactLeaves,true);assert.equal(result.leaves,null);
+  assert.deepEqual(result.visible.map(p=>p.key),expected.leaves.map(p=>p.key));
+  result.leaves=result.visible;
+  const next=selectPatches(camera,{...options,previousLeaves:result.leaves,previousSplits:result.splits,unchangedPatches:result.visible});
+  assert.equal(next.unchanged,true);
+ }finally{delete globalThis.self;}
+});

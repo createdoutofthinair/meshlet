@@ -602,6 +602,7 @@ export class PlanetRenderer {
   if(this.stage?.state==='waiting'&&now>=this.stage.nextMeasure){this.stage.state='building';this.transition={...this.transition,waiting:false};}
   if(this.selectionResult){
    const ready=this.selectionResult;this.selectionResult=null;
+   if(ready.result?.compactLeaves){ready.result.leaves=ready.result.visible;delete ready.result.compactLeaves;}
    const current=[this.generation,this.cameraState.mode,this.budget,this.maxDepth,this.pixelSize,camera.width,camera.height].join('/');
    const movement=Math.hypot(...camera.eye.map((x,i)=>x-ready.camera.eye[i]));
    if(!this.stage&&current===ready.key&&movement<=Math.max(.05,ready.camera.clearance*.7)&&dot(camera.forward,ready.camera.forward)>=Math.cos(20*Math.PI/180)){
@@ -624,7 +625,7 @@ export class PlanetRenderer {
     const errors=this.selectionErrorEstimates();
     const errorEstimates=this.workerErrorVersion===errors.version?null:errors.values;
     this.workerErrorVersion=errors.version;
-    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,errorEstimates,snapshotPresent,allowUnchanged:true,previousPatches:snapshotPresent?this.patches:null});
+    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,errorEstimates,snapshotPresent,allowUnchanged:true,compactLeaves:true,previousPatches:snapshotPresent?this.patches:null});
    }
   }
   const stage=this.stage;
