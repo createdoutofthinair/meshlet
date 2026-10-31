@@ -112,10 +112,16 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
  let alpha=1.0-transmission;
  if(depth==0.0){
   let sky=atmosphereSky(ray,sun,vec3<f32>(0,1,0),origin.y);
-  let tangent=max(0.0,-(PLANET_RADIUS+origin.y)*ray.y);
-  let height=max(0.0,planetAltitude(origin+ray*tangent));
-  let halo=exp(-height/40000.0)*smoothstep(5000.0,60000.0,origin.y)*exp(-max(0.0,ray.y)*5.0);
-  let color=sky*transmission+light+vec3<f32>(.06,.18,.42)*halo*atmosphereDaylight(sun.y)*.5*params.atmosphere.z;
+  var haloColor=vec3<f32>(0.0);
+  // The altitude fade, daylight and user strength each have exact zero
+  // regions. Avoid the tangent-distance and exponential work there.
+  if(origin.y>5000.0 && sun.y>-.12 && params.atmosphere.z!=0.0){
+   let tangent=max(0.0,-(PLANET_RADIUS+origin.y)*ray.y);
+   let height=max(0.0,planetAltitude(origin+ray*tangent));
+   let halo=exp(-height/40000.0)*smoothstep(5000.0,60000.0,origin.y)*exp(-max(0.0,ray.y)*5.0);
+   haloColor=vec3<f32>(.06,.18,.42)*halo*atmosphereDaylight(sun.y)*.5*params.atmosphere.z;
+  }
+  let color=sky*transmission+light+haloColor;
   return vec4<f32>(pow(max(color,vec3<f32>(0.0))/(1.0+max(color,vec3<f32>(0.0))*.22),vec3<f32>(1.0/2.2)),1.0);
  }
  // Distance haze uses the same sky and sun as the background. Restrict it
