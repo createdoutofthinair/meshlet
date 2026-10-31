@@ -35,6 +35,9 @@ test('shared topology coordinates produce the same packed result as independent 
  const a=packTransitionTopology(shared),b=packTransitionTopology(copies);
  assert.deepEqual(a.coordinates,b.coordinates);assert.deepEqual(a.ranges,b.ranges);
  assert.equal(a.vertexCount,b.vertexCount);assert.deepEqual(a.slots,b.slots);
+ const cache=new WeakMap();const cached=packTransitionTopology(shared,undefined,cache);
+ assert.ok(cache.has(coordinates));
+ assert.deepEqual(packTransitionTopology(shared,undefined,cache),cached);
 });
 
 test('first and last meshlet ranges delimit each contiguous overlay',()=>{

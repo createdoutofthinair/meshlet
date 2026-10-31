@@ -5,6 +5,9 @@ import {packTransitionTopology} from './transition-upload.js';
 let cachedErrors=new Map();
 let cachedSelection={previousLeaves:null,previousSplits:null,previousPatches:[]};
 let lastSignatures=null;
+// transitionCoordinates returns immutable cached arrays; weak keys allow
+// evicted coordinate arrays and their layouts to be collected together.
+const topologyLayouts=new WeakMap();
 self.onmessage=({data})=>{
  const start=performance.now();
  if(data.errorEstimates!=null)cachedErrors=data.errorEstimates;
@@ -53,7 +56,7 @@ self.onmessage=({data})=>{
  // Temporary indices are remapped to resident GPU slots by the renderer.
  // Transfer packed buffers without detaching the worker's topology cache.
  const keys=[...topology.keys()];let packed=null;
- try{if(keys.length)packed=packTransitionTopology(keys.map((key,slot)=>({slot,coordinates:topology.get(key)})));}
+ try{if(keys.length)packed=packTransitionTopology(keys.map((key,slot)=>({slot,coordinates:topology.get(key)})),undefined,topologyLayouts);}
  catch(error){if(!error.message.includes('capacity exceeded'))throw error;}
  const transfers=packed?[packed.ranges.buffer,packed.coordinates.buffer]:[];
  // A complete resident covering has the same ordered nodes in both arrays.

@@ -5,8 +5,9 @@ export const MORPH_COORD_CAPACITY=2*1024*1024;
 export const MORPH_BUFFER_BYTES=MORPH_COORD_OFFSET+MORPH_COORD_CAPACITY*8;
 
 // Each bucket contains complete triangles. Ranges count vertices, not floats.
-export function packTransitionTopology(records,capacity=MORPH_COORD_CAPACITY){
- const ranges=new Uint32Array(MORPH_CAPACITY*16*2),slots=new Set(),prepared=[],layouts=new WeakMap();let vertexCount=96,totalFloats=0;
+// A caller may provide a cache only when coordinate arrays remain immutable.
+export function packTransitionTopology(records,capacity=MORPH_COORD_CAPACITY,layoutCache=null){
+ const ranges=new Uint32Array(MORPH_CAPACITY*16*2),slots=new Set(),prepared=[],layouts=layoutCache||new WeakMap();let vertexCount=96,totalFloats=0;
  for(const {slot,coordinates} of records){
   if(!Number.isInteger(slot)||slot<0||slot>=MORPH_CAPACITY||slots.has(slot))throw new Error('Invalid topology slot');
   if(coordinates.length%6)throw new Error('Incomplete topology triangle');slots.add(slot);
