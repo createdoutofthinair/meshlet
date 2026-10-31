@@ -10,11 +10,16 @@ test('flight statistics distinguish missing GPU samples and altitude phases',()=
   {frameMs:40,gpuCloudAtmosphereMs:4,camera:{altitudeKm:901}},
   {frameMs:50,gpuCloudAtmosphereMs:null,camera:{}},
  ]});
- assert.deepEqual(result.overall.gpuCloudAtmosphereMs,{count:3,p50:8,p95:12,max:12});
+ assert.deepEqual(result.overall.gpuCloudAtmosphereMs,{count:3,p50:8,p95:12,p99:12,max:12});
  assert.equal(result.phases['surface (<50 km)'].samples,1);
  assert.equal(result.phases['surface (<50 km)'].gpuCloudAtmosphereMs,undefined);
  assert.equal(result.phases['descent (50–900 km)'].samples,2);
  assert.equal(result.phases['orbit (>900 km)'].samples,1);
  assert.equal(result.overall.frameMs.p95,50);
  assert.throws(()=>analyze({}),/samples array/);
+});
+
+test('analysis reports the 99th percentile of valid samples',()=>{
+ const result=analyze({samples:Array.from({length:100},(_,i)=>({frameMs:i+1}))});
+ assert.equal(result.overall.frameMs.p99,99);
 });

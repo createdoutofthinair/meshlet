@@ -29,4 +29,6 @@ A rocky mountain reference scene should retain credible lighting, material and s
 - Plan recorded on `terrain-optimizations`.
 - Initial terrain lighting uses a bounded roughness-dependent dielectric sun response, with different roughness for rock and snow. The procedural color shader has a filtered fine mineral band. These are initial changes, not completion of the lighting or material milestones.
 - Inspector now exposes shading normals, geometric normals, material weights and roughness.
-- The repeatable capture baseline, material system, near-field geometry comparison, geological work, shadows, anti-aliasing evaluation and surface population remain outstanding. Real-device visual and performance validation is required.
+- Initial geographic bedrock variation, transitional talus color and footprint-filtered fine shading normals are implemented. These are procedural approximations; full material layers and geological placement remain to be built.
+- Recordings now include viewport, camera heading and pitch, LOD settings and p99 analysis for comparisons. Fixed-scene captures and repeatable trajectories remain outstanding.
+- Near-field geometry comparison, terrain shadows, anti-aliasing evaluation, material assets and surface population remain outstanding. Real-device visual and performance validation is required.

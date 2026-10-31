@@ -10,7 +10,7 @@ export function summarize(samples){
   const values=samples.map(sample=>sample[key]).filter(Number.isFinite).sort((a,b)=>a-b);
   if(!values.length)continue;
   const at=p=>values[Math.max(0,Math.ceil(values.length*p)-1)];
-  result[key]={count:values.length,p50:at(.5),p95:at(.95),max:values.at(-1)};
+  result[key]={count:values.length,p50:at(.5),p95:at(.95),p99:at(.99),max:values.at(-1)};
  }
  return result;
 }

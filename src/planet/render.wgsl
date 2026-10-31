@@ -136,6 +136,8 @@ fn fs(in:Output)->TerrainPixel {
  let deep=vec3<f32>(0.012,0.055,0.092);let ocean=vec3<f32>(0.025,0.17,0.23);
  let lowland=vec3<f32>(0.25,0.31,0.20);let upland=vec3<f32>(0.30,0.28,0.22);
  let rock=vec3<f32>(0.34,0.34,0.32);let snow=vec3<f32>(0.66,0.71,0.72);
+ let rockWeight=smoothstep(.006,.12,slope);
+ let talus=smoothstep(.025,.09,slope)*(1.0-smoothstep(.16,.32,slope));
  let temperature=clamp(1.0-abs(radial.y)*1.1-max(0.0,h)*.075,0.0,1.0);
  var base=mix(lowland,upland,smoothstep(.4,2.2,h));
  if((frame.counts.w&16u)!=0u){
@@ -144,7 +146,14 @@ fn fs(in:Output)->TerrainPixel {
   base=mix(arid,temperate,smoothstep(.28,.72,humidity));base=mix(cool,base,smoothstep(.18,.48,temperature));
   base=mix(base,upland,smoothstep(1.0,4.0,h)*.38);
  }
- base=mix(base,rock,smoothstep(.006,.12,slope));
+ // Transitional slopes collect loose weathered rock, while steep faces expose
+ // bedrock. Geographic noise breaks the otherwise uniform altitude colors.
+ var geology=0.0;
+ if(land && rockWeight>0.0){geology=noise3(radial*180.0,frame.counts.z+1777u);}
+ let exposedRock=rock*(1.0+.12*geology)+vec3<f32>(.018,.004,-.014)*geology;
+ let sediment=mix(base,vec3<f32>(.31,.29,.25),.45);
+ base=mix(base,sediment,talus*.48);
+ base=mix(base,exposedRock,rockWeight);
  let coldSnow=select(0.0,1.0-smoothstep(.12,.24,temperature),(frame.counts.w&16u)!=0u);
  // Snow collects on gentler slopes; exposed rock preserves the shape of
  // steep mountain faces instead of painting the whole highland white.
@@ -170,16 +179,21 @@ fn fs(in:Output)->TerrainPixel {
   // Fine mineral variation fades out before its projected footprint aliases.
   // Both bands use the same high/low world coordinates across patch edges.
   if(footprint<.00015){
-   let grain=localNoise(in.detailHigh,in.detailLow,detailDelta,8388608.0,frame.counts.z+1721u);
+   let grainData=localNoiseGradient(in.detailHigh,in.detailLow,detailDelta,8388608.0,frame.counts.z+1721u);
+   let grain=grainData.x;
    let grainFilter=1.0-smoothstep(.00004,.00015,footprint);
    let exposed=smoothstep(.006,.12,slope)*(1.0-snowCover);
    base*=1.0+grain*mix(.035,.065,exposed)*grainFilter;
+   // The analytic gradient adds sub-mesh shading without changing the
+   // actual height, so walking and LOD transitions keep the same surface.
+   let tangentGradient=grainData.yzw-n*dot(n,grainData.yzw);
+   n=normalize(n-tangentGradient*mix(.035,.11,exposed)*grainFilter*(1.0-water));
   }
  }
  // Terrain is predominantly dielectric. Keep the specular response broad and
  // energy bounded; snow and exposed rock have different surface roughness.
- let rockWeight=smoothstep(.006,.12,slope)*(1.0-snowCover);
- let roughness=clamp(mix(mix(.88,.68,rockWeight),.78,snowCover),.35,1.0);
+ let exposedWeight=rockWeight*(1.0-snowCover);
+ let roughness=clamp(mix(mix(.88,.68,exposedWeight),.78,snowCover),.35,1.0);
  let view=normalize(-in.relative);let diffuse=max(dot(n,light),0.0);
  let ndotv=max(dot(n,view),.001);let halfVector=light+view;
  var specular=0.0;
@@ -208,7 +222,7 @@ fn fs(in:Output)->TerrainPixel {
  let terrainDebug=(frame.counts.w>>9u)&7u;
  if(terrainDebug==1u){debugColor=n*.5+vec3<f32>(.5);hasColor=true;}
  if(terrainDebug==2u){debugColor=geometricNormal*.5+vec3<f32>(.5);hasColor=true;}
- if(terrainDebug==3u){debugColor=vec3<f32>(rockWeight,snowCover,max(0.0,1.0-rockWeight-snowCover));hasColor=true;}
+ if(terrainDebug==3u){debugColor=vec3<f32>(exposedWeight,snowCover,max(0.0,1.0-exposedWeight-snowCover));hasColor=true;}
  if(terrainDebug==4u){debugColor=vec3<f32>(roughness);hasColor=true;}
  if(hasColor){color=mix(color,debugColor,clamp(frame.hydrology.w,0.0,1.0));}
  if((frame.counts.w&268u)!=0u){
