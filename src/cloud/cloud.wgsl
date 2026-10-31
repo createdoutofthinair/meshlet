@@ -86,10 +86,13 @@ fn cloudDensityAtHeight(p:vec3<f32>,weather:vec2<f32>,detailWeight:f32,height:f3
 }
 fn cloudDensityWithTerms(p:vec3<f32>,detailWeight:f32,height:f32,terms:CloudWeatherTerms)->f32{
  // Low sheet clouds and taller cumulus coexist, with smooth regional changes.
+ // Outside the vertical shell both profiles are exactly zero. Shadow rays
+ // frequently leave it, so avoid their smoothstep and coordinate work.
+ if(height<=0.0 || height>=1.0 || params.sky.w<=0.0){return 0.0;}
  let low=smoothstep(0.0,.055,height)*(1.0-smoothstep(.18,.40,height));
  let tall=smoothstep(0.0,.08,height)*(1.0-smoothstep(.55,1.0,height));
  let profile=mix(low,tall,terms.typeBlend);
- if(profile<=0.0 || params.sky.w<=0.0){return 0.0;}
+ if(profile<=0.0){return 0.0;}
  let global=vec3<f32>(p.x,PLANET_RADIUS+p.y,p.z);
  let rotated=vec3<f32>(global.x*terms.windCos+global.z*terms.windSin,global.y,-global.x*terms.windSin+global.z*terms.windCos);
  let q=rotated*terms.scale+terms.seedOffset;

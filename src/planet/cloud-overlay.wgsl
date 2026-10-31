@@ -9,6 +9,8 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
   let samplePoint=point+ray*((f32(i)-1.5)*span*.25);
   density+=cloudDensityPrepared(samplePoint,0.0,terms)*.25;
  }
+ // Empty orbital samples contribute neither light nor opacity.
+ if(density<=0.0){return vec4<f32>(0.0);}
  let opacity=1.0-exp(-density*max(span,0.0)*.0009);
  let shape=clamp(density,0.0,1.0);
  let up=normalize(vec3<f32>(point.x,PLANET_RADIUS+point.y,point.z));let elevation=dot(up,sun);
