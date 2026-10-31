@@ -31,18 +31,19 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
  let depth=textureLoad(sceneDepth,vec2<i32>(input.pos.xy),0);
  var sceneDistance=1e10;
  if(depth>0.0){sceneDistance=params.up.w*1000.0/(depth*max(.001,dot(worldRay,params.forward.xyz)));}
- var limit=sceneDistance;
- // The sphere is only an occluder for the ocean. At sea level its near
- // intersection is exactly zero; include it to prevent far-side clouds.
- if(params.sun.w>0.5){
-  let ground=sphereInterval(origin.y,ray,0.0);
-  if(ground.y>0.0 && ground.x>=0.0){limit=min(limit,ground.x);}
- }
- if(params.sun.w>0.5 && origin.y<=0.5 && ray.y<0.0){limit=0.0;}
  var transmission=1.0;var light=vec3<f32>(0.0);
  if(params.sky.w>0.001 && params.cloud.x>0.001){
  let outer=sphereInterval(origin.y,ray,8000.0);
  if(outer.y>0.0 && outer.y>outer.x){
+  var limit=sceneDistance;
+  // The analytic ocean sphere is only needed to clip a cloud segment.
+  // At sea level its near intersection is exactly zero; include it to
+  // prevent rays from seeing clouds on the far side of the planet.
+  if(params.sun.w>0.5){
+   let ground=sphereInterval(origin.y,ray,0.0);
+   if(ground.y>0.0 && ground.x>=0.0){limit=min(limit,ground.x);}
+   if(origin.y<=0.5 && ray.y<0.0){limit=0.0;}
+  }
   var start=max(0.0,outer.x);var end=min(outer.y,limit);
   // Terrain or ocean can block the complete outer segment. In that case no
   // inner-shell intersection or cloud sampling is necessary.
