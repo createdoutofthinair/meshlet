@@ -93,9 +93,11 @@ export function coordinateTransitions(previous,next,groups=transitionGroups(prev
   }
  });
  for(const node of [...previous,...next]){
-  const own=[...(owners.get(node.key)||[])];if(!own.length)continue;
-  const keys=[node.key,...(node.edgeKeys||[]),...(node.cornerKeys||[]).flat()].filter(Boolean);
-  for(const key of keys)for(const other of owners.get(key)||[])for(const i of own)join(i,other);
+  const own=owners.get(node.key);if(!own?.size)continue;
+  const connect=key=>{if(!key)return;const adjacent=owners.get(key);if(adjacent)for(const other of adjacent)for(const i of own)join(i,other);};
+  connect(node.key);
+  for(const key of node.edgeKeys||[])connect(key);
+  for(const corner of node.cornerKeys||[])for(const key of corner)connect(key);
  }
  const components=new Map();
  groups.forEach((group,i)=>{
