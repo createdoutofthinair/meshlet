@@ -17,7 +17,9 @@ function pair(fine,coarse){
 }
 export function transitionPairs(previous,next){
  if(!previous.length||!next.length)return [];
- const old=new Map(previous.map(n=>[n.key,n])),fresh=new Map(next.map(n=>[n.key,n])),pairs=[];
+ const old=new Map(),fresh=new Map(),pairs=[];
+ for(const node of previous)old.set(node.key,node);
+ for(const node of next)fresh.set(node.key,node);
  for(const child of next){
   const previousPatch=old.get(child.key);
   if(previousPatch){
