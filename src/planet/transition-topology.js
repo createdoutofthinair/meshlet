@@ -37,7 +37,20 @@ function triangles({mask=0,originX=0,originY=0,scale=1}={}){
 export function buildTransitionTopology(from={},to={}){
  const old=triangles(from),next=triangles(to),coordinates=[],sources=[];
  const edges=[[[0,0],[16,0]],[[16,0],[16,16]],[[16,16],[0,16]],[[0,16],[0,0]]];
- for(let i=0;i<old.length;i++)for(let j=0;j<next.length;j++){
+ // Intersections outside the 16x16 patch are clipped away. Index the target
+ // triangle bounds by patch cell so each source triangle only tests local
+ // candidates; sort indices to preserve the original deterministic order.
+ const cells=Array.from({length:256},()=>[]),marks=new Uint32Array(next.length);
+ const cellRange=box=>[Math.max(0,Math.floor(box[0])),Math.max(0,Math.floor(box[1])),Math.min(15,Math.ceil(box[2])-1),Math.min(15,Math.ceil(box[3])-1)];
+ for(let j=0;j<next.length;j++){
+  const [x0,y0,x1,y1]=cellRange(next[j].box);
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)cells[y*16+x].push(j);
+ }
+ for(let i=0;i<old.length;i++){
+  const [x0,y0,x1,y1]=cellRange(old[i].box),candidates=[];
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)for(const j of cells[y*16+x])if(marks[j]!==i+1){marks[j]=i+1;candidates.push(j);}
+  candidates.sort((a,b)=>a-b);
+  for(const j of candidates){
   const a=old[i],b=next[j];
   if(a.box[0]>=b.box[2]||a.box[2]<=b.box[0]||a.box[1]>=b.box[3]||a.box[3]<=b.box[1])continue;
   let polygon=a.points;
@@ -46,6 +59,7 @@ export function buildTransitionTopology(from={},to={}){
   for(let k=1;k+1<polygon.length;k++){
    const tri=[polygon[0],polygon[k],polygon[k+1]];if(cross(...tri)<=EPS)continue;
    coordinates.push(...tri.flat());sources.push(i,j);
+  }
   }
  }
  return {coordinates:new Float32Array(coordinates),sources:new Uint32Array(sources),fromTriangles:old.map(t=>t.points),toTriangles:next.map(t=>t.points),triangleCount:sources.length/2};

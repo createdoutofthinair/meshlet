@@ -21,6 +21,11 @@ test('common triangulation respects every old/new stitch-mask pair',()=>{
 test('child windows of stitched parents preserve endpoint triangle boundaries',()=>{
  for(let mask=0;mask<16;mask++)for(let q=0;q<4;q++)verify({mask,originX:(q%2)*8,originY:(q>>1)*8,scale:.5},{mask:(mask+5)%16});
 });
+test('spatial candidate lookup preserves skipped-level and fractional windows',()=>{
+ for(const scale of [.25,.125,.37])for(const mask of [0,3,9,15]){
+  verify({mask,originX:16*(1-scale),originY:0,scale},{mask:(mask+5)%16});
+ }
+});
 test('invalid surface mappings are rejected',()=>{
  for(const mapping of [{scale:0},{scale:NaN},{originX:16,scale:.5},{mask:16}])assert.throws(()=>buildTransitionTopology(mapping),/mapping/);
 });
