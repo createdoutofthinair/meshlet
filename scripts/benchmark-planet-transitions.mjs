@@ -48,3 +48,16 @@ for(let i=0;i<runs;i++){
 }
 durations.sort((a,b)=>a-b);
 console.log(`synthetic descent worker: p50=${percentile(.5)} ms p95=${percentile(.95)} ms unchanged=${unchanged}/${runs}`);
+
+// Include the actual structured-copy and transferable-buffer operations for
+// a changing complete covering. Node timings exclude browser thread scheduling
+// and should not be interpreted as measured frame times.
+const cloneRequest={id:1,key:'clone-benchmark',camera,options:{...options,previousSplits:before.splits},previousPatches:before.visible,snapshotPresent:true,deriveLeaves:true,compactLeaves:true,allowUnchanged:true};
+const inputTimes=[],outputTimes=[];
+self.postMessage=(message,transfers)=>{const start=performance.now();response=structuredClone(message,{transfer:transfers||[]});outputTimes.push(performance.now()-start);};
+for(let i=0;i<runs;i++){
+ const start=performance.now(),input=structuredClone(cloneRequest);inputTimes.push(performance.now()-start);self.onmessage({data:input});
+}
+for(const [label,times] of [['request copy',inputTimes],['response copy and transfer',outputTimes]]){
+ times.sort((a,b)=>a-b);console.log(`${label}: p50=${times[Math.ceil(times.length*.5)-1].toFixed(3)} ms p95=${times[Math.ceil(times.length*.95)-1].toFixed(3)} ms`);
+}
