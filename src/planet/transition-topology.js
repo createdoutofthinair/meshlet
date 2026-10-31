@@ -86,7 +86,11 @@ function buildTopology(from={},to={},coordinatesOnly=false){
   }
   let polygon=a.points;
   for(let e=0;e<3&&polygon.length;e++)polygon=clip(polygon,b.points[e],b.points[(e+1)%3]);
-  for(const [p,q] of edges)if(polygon.length)polygon=clip(polygon,p,q);
+  // Clipping against another triangle cannot move a point outside the
+  // source triangle, so wholly contained sources need no patch-edge clips.
+  if(a.box[0]<0||a.box[1]<0||a.box[2]>16||a.box[3]>16){
+   for(const [p,q] of edges)if(polygon.length)polygon=clip(polygon,p,q);
+  }
   for(let k=1;k+1<polygon.length;k++){
    const a=polygon[0],b=polygon[k],c=polygon[k+1];if(cross(a,b,c)<=EPS)continue;
    coordinates.push(a[0],a[1],b[0],b[1],c[0],c[1]);if(!coordinatesOnly)sources.push(i,j);
