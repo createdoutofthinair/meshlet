@@ -48,7 +48,7 @@ fn regionalIncision(s:WorldSample,profile:vec4<f32>,direction:vec3<f32>,high:vec
  let nested=primary*.075+secondary*(.2+.8*primary)*.026+fine*(.15+.85*secondary)*.006+close*(.15+.85*fine)*.003;
  return nested*terrainMask*frame.settings.w*frame.hydrology.x;
 }
-fn surfaceBaseWithWorld(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32,includeRegional:bool,s:WorldSample)->SurfaceData {
+fn surfaceBaseWithWorld(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32,includeRegional:bool,s:WorldSample,cachedLake:vec2<f32>,hasCachedLake:bool)->SurfaceData {
  let terrainInfo=terrainBase(direction,seed);
  var shape=terrainShapeFromBaseDetail(terrainInfo,seed,frame.settings.w,direction,high,low,delta,true);
  // Keep sea-level classification identical to the original world field. The
@@ -76,7 +76,7 @@ fn surfaceBaseWithWorld(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:v
  var ground=baseline;
  var lake=0.0;
  if(frame.hydrology.y>.5 && frame.hydrology.x>0.0 && baseline>.0){
-  let basin=worldLake(s);
+  var basin=cachedLake;if(!hasCachedLake){basin=worldLake(s);}
   let level=basin.y;
   // Determine the shoreline from broad terrain rather than tiny relief
   // octaves. This avoids turning one basin into hundreds of speckled pools.
@@ -92,14 +92,14 @@ fn surfaceBaseWithWorld(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:v
  return SurfaceData(ground,lake,humidity);
 }
 fn surfaceBase(direction:vec3<f32>,high:vec3<f32>,low:vec3<f32>,delta:vec3<f32>,seed:u32,includeRegional:bool)->SurfaceData {
- return surfaceBaseWithWorld(direction,high,low,delta,seed,includeRegional,worldSample(direction));
+ return surfaceBaseWithWorld(direction,high,low,delta,seed,includeRegional,worldSample(direction),vec2<f32>(0.0),false);
 }
 // Water coverage is evaluated at a fixed direction in the seeded world.
 // The lake result does not depend on the render patch, LOD, or region cache.
 fn worldSurfaceWater(direction:vec3<f32>,footprintKm:f32)->vec2<f32>{
  if(frame.hydrology.y<=.5 || frame.hydrology.x<=0.0){return vec2<f32>(0.0);}
  let sample=worldSample(direction);let basin=worldLake(sample);var lake=0.0;var river=0.0;
- if(basin.x>0.0){lake=surfaceBaseWithWorld(direction,direction,vec3<f32>(0.0),vec3<f32>(0.0),frame.counts.z,false,sample).lake;}
+ if(basin.x>0.0){lake=surfaceBaseWithWorld(direction,direction,vec3<f32>(0.0),vec3<f32>(0.0),frame.counts.z,false,sample,basin,true).lake;}
  // At this footprint the widest river's area coverage is at most .1,
  // below the water color threshold. Smaller footprints are filtered.
  if(footprintKm<MAX_RIVER_HALF_WIDTH_KM*20.0 && hasRivers(sample)){river=riverAtFiltered(direction,sample,footprintKm).mask;}
