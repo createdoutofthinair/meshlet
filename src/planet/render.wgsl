@@ -178,11 +178,17 @@ fn fs(in:Output)->TerrainPixel {
   let visibleHeight=select(in.height,max(in.height,0.0),frame.settings.z>.5);
   let elevation=visibleHeight/frame.settings.x;
   let detailDelta=(in.detailOffset-in.detailHigh*elevation)/(1.0+elevation);
-  let medium=localNoise(in.detailHigh,in.detailLow,detailDelta,1048576.0,frame.counts.z+1709u);
+  let mediumData=localNoiseGradient(in.detailHigh,in.detailLow,detailDelta,1048576.0,frame.counts.z+1709u);
+  let medium=mediumData.x;
   let mediumFilter=1.0-smoothstep(.001,.004,footprint);
   let variation=medium*.075*mediumFilter;
   materialRoughnessVariation=medium*.045*mediumFilter*(1.0-snowCover);
   base=max(vec3<f32>(0.0),base*(1.0+variation)+vec3<f32>(.012,.005,-.008)*medium*mediumFilter);
+  // Matching mid-scale normals add structure between geometry and grain.
+  // The field is geographic and does not alter the collision surface.
+  let mediumGradient=mediumData.yzw-n*dot(n,mediumData.yzw);
+  let mediumBump=mix(.018,.055,exposedWeight)*mediumFilter*(1.0-snowCover)*(1.0-water);
+  n=normalize(n-mediumGradient*mediumBump);
   // Fine mineral variation fades out before its projected footprint aliases.
   // Both bands use the same high/low world coordinates across patch edges.
   if(footprint<.00015){
@@ -245,6 +251,7 @@ fn fs(in:Output)->TerrainPixel {
  if(terrainDebug==3u){debugColor=vec3<f32>(exposedWeight,snowCover,max(0.0,1.0-exposedWeight-snowCover));hasColor=true;}
  if(terrainDebug==4u){debugColor=vec3<f32>(roughness);hasColor=true;}
  if(terrainDebug==5u){debugColor=vec3<f32>(diffuse,sky,specular);hasColor=true;}
+ if(terrainDebug==6u){debugColor=vec3<f32>(talusWeight,sandWeight,soilWeight);hasColor=true;}
  if(hasColor){color=mix(color,debugColor,clamp(frame.hydrology.w,0.0,1.0));}
  if((frame.counts.w&268u)!=0u){
   let edge=vec3<f32>(1.0)-smoothstep(vec3<f32>(.55),vec3<f32>(1.7),in.bary/max(fwidth(in.bary),vec3<f32>(.00001)));
