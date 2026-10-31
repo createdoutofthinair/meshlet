@@ -41,7 +41,9 @@ fn orbitalCloud(point:vec3<f32>,span:f32,ray:vec3<f32>,sun:vec3<f32>,terms:Cloud
   // The analytic ocean sphere is only needed to clip a cloud segment.
   // At sea level its near intersection is exactly zero; include it to
   // prevent rays from seeing clouds on the far side of the planet.
-  if(params.sun.w>0.5 && sceneDistance>cloudStart){
+  // An upward ray starting at or above sea level cannot hit the ocean
+  // sphere ahead of the camera.
+  if(params.sun.w>0.5 && sceneDistance>cloudStart && (ray.y<0.0 || origin.y<0.0)){
    let ground=sphereInterval(origin.y,ray,0.0);
    if(ground.y>0.0 && ground.x>=0.0){limit=min(limit,ground.x);}
    if(origin.y<=0.5 && ray.y<0.0){limit=0.0;}
