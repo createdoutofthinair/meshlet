@@ -28,6 +28,15 @@ test('capacity and invalid topology are rejected before upload',()=>{
  assert.throws(()=>packTransitionTopology([{slot:0,coordinates:new Float32Array([0,0,NaN,0,0,1])}]),/coordinates/);
 });
 
+test('shared topology coordinates produce the same packed result as independent copies',()=>{
+ const coordinates=buildTransitionTopology({mask:3,originX:8,originY:0,scale:.5},{mask:6}).coordinates;
+ const shared=[{slot:3,coordinates},{slot:11,coordinates},{slot:17,coordinates}];
+ const copies=shared.map(record=>({...record,coordinates:record.coordinates.slice()}));
+ const a=packTransitionTopology(shared),b=packTransitionTopology(copies);
+ assert.deepEqual(a.coordinates,b.coordinates);assert.deepEqual(a.ranges,b.ranges);
+ assert.equal(a.vertexCount,b.vertexCount);assert.deepEqual(a.slots,b.slots);
+});
+
 test('first and last meshlet ranges delimit each contiguous overlay',()=>{
  const records=[
   {slot:11,coordinates:new Float32Array()},
