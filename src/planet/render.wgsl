@@ -34,7 +34,10 @@ fn debugHash(value:u32)->u32{
 fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->Output {
  let entry=visible[instance];let slot=entry>>4u;let meshlet=entry&15u;let tile=patches[slot];
  let overlay=morphs.patches[slot].slots.w!=0u && (morphs.patches[slot].slots.z&16u)!=0u;
- let range=morphs.ranges[slot*16u+meshlet];
+ // Regular patches never use transition ranges. Avoid a storage-buffer read
+ // for each of their vertex invocations.
+ var range=vec2<u32>(0u);
+ if(overlay){range=morphs.ranges[slot*16u+meshlet];}
  if((overlay && vertex>=range.y)||(!overlay && vertex>=96u)){
   var empty:Output;empty.position=vec4<f32>(2.0,2.0,2.0,1.0);return empty;
  }
