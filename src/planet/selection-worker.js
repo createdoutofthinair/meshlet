@@ -7,7 +7,7 @@ let cachedSelection={previousLeaves:null,previousSplits:null,previousPatches:[]}
 self.onmessage=({data})=>{
  const start=performance.now();
  if(data.errorEstimates!=null)cachedErrors=data.errorEstimates;
- if(data.snapshotPresent===true)cachedSelection={previousLeaves:data.options.previousLeaves,previousSplits:data.options.previousSplits,previousPatches:data.previousPatches,signatures:null};
+ if(data.snapshotPresent===true)cachedSelection={previousLeaves:data.deriveLeaves?data.previousPatches:data.options.previousLeaves,previousSplits:data.options.previousSplits,previousPatches:data.previousPatches,signatures:null};
  const snapshot=data.snapshotPresent===true||data.snapshotPresent===false?cachedSelection:{previousLeaves:data.options.previousLeaves,previousSplits:data.options.previousSplits,previousPatches:data.previousPatches};
  const result=selectPatches(data.camera,{...data.options,previousLeaves:snapshot.previousLeaves,previousSplits:snapshot.previousSplits,errorEstimates:data.errorEstimates??data.options.errorEstimates??cachedErrors,unchangedPatches:data.allowUnchanged?snapshot.previousPatches:null});
  if(result.unchanged){

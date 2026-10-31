@@ -80,3 +80,18 @@ test('worker can omit duplicated leaves for a complete resident covering',async(
   assert.equal(next.unchanged,true);
  }finally{delete globalThis.self;}
 });
+
+test('worker can derive covering leaves from a complete patch snapshot',async()=>{
+ const messages=[];globalThis.self={postMessage:value=>messages.push(structuredClone(value))};
+ try{
+  await import('../src/planet/selection-worker.js?derived-leaves-test');
+  const options={budget:54,pixelSize:14,includeHidden:true};
+  const oldCamera=planetCamera({altitude:14000,longitude:.8,latitude:.4},960,600);
+  const camera=planetCamera({altitude:50,longitude:2.2,latitude:-.2},960,600);
+  const previous=selectPatches(oldCamera,options);
+  self.onmessage({data:{id:1,key:'test',camera,options:{...options,previousSplits:previous.splits},previousPatches:previous.visible,snapshotPresent:true,deriveLeaves:true}});
+  const expected=selectPatches(camera,{...options,previousLeaves:previous.leaves,previousSplits:previous.splits});
+  assert.deepEqual(messages[0].result.leaves.map(p=>p.key),expected.leaves.map(p=>p.key));
+  assert.deepEqual(messages[0].result.visible,expected.visible);
+ }finally{delete globalThis.self;}
+});

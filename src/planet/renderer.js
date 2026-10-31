@@ -621,11 +621,17 @@ export class PlanetRenderer {
     const cached=this.workerSelectionSnapshot;
     const snapshotPresent=!cached||cached.patches!==this.patches||cached.leaves!==this.coveringLeaves||cached.splits!==this.previousSplits;
     const options={budget:Math.min(CAPACITY/2,Math.max(6,this.budget)),includeHidden:true,maxDepth:this.cameraState.mode==='walk'?22:this.maxDepth,pixelSize:this.pixelSize};
-    if(snapshotPresent){options.previousSplits=this.previousSplits;options.previousLeaves=this.coveringLeaves;this.workerSelectionSnapshot={patches:this.patches,leaves:this.coveringLeaves,splits:this.previousSplits};}
+    let deriveLeaves=false;
+    if(snapshotPresent){
+     options.previousSplits=this.previousSplits;
+     deriveLeaves=!!this.coveringLeaves&&this.patches.length===this.coveringLeaves.length&&this.patches.every((p,i)=>p.key===this.coveringLeaves[i].key);
+     if(!deriveLeaves)options.previousLeaves=this.coveringLeaves;
+     this.workerSelectionSnapshot={patches:this.patches,leaves:this.coveringLeaves,splits:this.previousSplits};
+    }
     const errors=this.selectionErrorEstimates();
     const errorEstimates=this.workerErrorVersion===errors.version?null:errors.values;
     this.workerErrorVersion=errors.version;
-    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,errorEstimates,snapshotPresent,allowUnchanged:true,compactLeaves:true,previousPatches:snapshotPresent?this.patches:null});
+    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,errorEstimates,snapshotPresent,deriveLeaves,allowUnchanged:true,compactLeaves:true,previousPatches:snapshotPresent?this.patches:null});
    }
   }
   const stage=this.stage;
