@@ -34,7 +34,7 @@ function clip(polygon,a,b){
 // Internal triangle grids recur across many old/new stitch pairings. Only the
 // coordinates-only path uses this cache; public topology results remain
 // independent and cannot mutate cached triangle data.
-const triangleCache=new Map(),TRIANGLE_CACHE_LIMIT=96;
+const triangleCache=new Map(),triangleSpatialCache=new WeakMap(),TRIANGLE_CACHE_LIMIT=96;
 function triangles({mask=0,originX=0,originY=0,scale=1}={},useCache=false){
  if(!Number.isInteger(mask)||mask<0||mask>15||![originX,originY,scale].every(Number.isFinite)||scale<=0||scale>1||originX<0||originY<0||originX+16*scale>16+EPS||originY+16*scale>16+EPS)throw new Error('Invalid transition surface mapping');
  const key=useCache?JSON.stringify([mask,originX,originY,scale]):null;
@@ -63,11 +63,18 @@ function buildTopology(from={},to={},coordinatesOnly=false){
  // Intersections outside the 16x16 patch are clipped away. Index the target
  // triangle bounds by patch cell so each source triangle only tests local
  // candidates; sort indices to preserve the original deterministic order.
- const cells=Array.from({length:256},()=>[]),marks=new Uint32Array(next.length);
+ let cells=coordinatesOnly?triangleSpatialCache.get(next):null;
+ const marks=new Uint32Array(next.length);
  const cellRange=box=>[Math.max(0,Math.floor(box[0])),Math.max(0,Math.floor(box[1])),Math.min(15,Math.ceil(box[2])-1),Math.min(15,Math.ceil(box[3])-1)];
- for(let j=0;j<next.length;j++){
-  const [x0,y0,x1,y1]=cellRange(next[j].box);
-  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)cells[y*16+x].push(j);
+ if(!cells){
+  cells=Array.from({length:256},()=>[]);
+  for(let j=0;j<next.length;j++){
+   const [x0,y0,x1,y1]=cellRange(next[j].box);
+   for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)cells[y*16+x].push(j);
+  }
+  // The grid is owned by the immutable cached target triangles and can be
+  // collected as soon as those triangles leave the bounded triangle cache.
+  if(coordinatesOnly)triangleSpatialCache.set(next,cells);
  }
  for(let i=0;i<old.length;i++){
   const [x0,y0,x1,y1]=cellRange(old[i].box);let candidates;
