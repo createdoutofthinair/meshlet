@@ -12,10 +12,10 @@ export function packTransitionTopology(records,capacity=MORPH_COORD_CAPACITY){
   if(coordinates.length%6)throw new Error('Incomplete topology triangle');slots.add(slot);
   const buckets=Array.from({length:16},()=>[]);
   for(let i=0;i<coordinates.length;i+=6){
-   const tri=Array.from(coordinates.slice(i,i+6));
-   if(tri.some(v=>!Number.isFinite(v)||v<0||v>16))throw new Error('Invalid topology coordinates');
-   const x=Math.min(3,Math.floor((tri[0]+tri[2]+tri[4])/12)),y=Math.min(3,Math.floor((tri[1]+tri[3]+tri[5])/12));
-   buckets[y*4+x].push(...tri);
+   for(let j=0;j<6;j++){const v=coordinates[i+j];if(!Number.isFinite(v)||v<0||v>16)throw new Error('Invalid topology coordinates');}
+   const x=Math.min(3,Math.floor((coordinates[i]+coordinates[i+2]+coordinates[i+4])/12));
+   const y=Math.min(3,Math.floor((coordinates[i+1]+coordinates[i+3]+coordinates[i+5])/12));
+   buckets[y*4+x].push(coordinates[i],coordinates[i+1],coordinates[i+2],coordinates[i+3],coordinates[i+4],coordinates[i+5]);
   }
   buckets.forEach((bucket,i)=>{
    if((data.length+bucket.length)/2>capacity)throw new Error('Transition topology capacity exceeded');
