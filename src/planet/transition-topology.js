@@ -45,8 +45,16 @@ function triangles({mask=0,originX=0,originY=0,scale=1}={},useCache=false){
  // by one cell for collapsed edge vertices and boundary-touching triangles.
  const x0=Math.max(0,Math.floor(originX)-1),y0=Math.max(0,Math.floor(originY)-1);
  const x1=Math.min(15,Math.ceil(originX+16*scale)+1),y1=Math.min(15,Math.ceil(originY+16*scale)+1);
+ // Worker-only triangle grids are immutable, so adjacent cells can share
+ // their mapped corners instead of recreating each corner four times. Public
+ // topology results retain independent triangle arrays for callers to edit.
+ let grid=null;
+ if(useCache){
+  grid=new Array(17*17);
+  for(let y=y0;y<=y1+1;y++)for(let x=x0;x<=x1+1;x++)grid[y*17+x]=point(x,y);
+ }
  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
-  const p0=point(x,y),p1=point(x+1,y),p2=point(x,y+1),p3=point(x+1,y+1);
+  const p0=grid?grid[y*17+x]:point(x,y),p1=grid?grid[y*17+x+1]:point(x+1,y),p2=grid?grid[(y+1)*17+x]:point(x,y+1),p3=grid?grid[(y+1)*17+x+1]:point(x+1,y+1);
   for(const p of [[p0,p1,p2],[p1,p3,p2]]){
    if(cross(...p)<=EPS)continue;
    const box=[Math.min(p[0][0],p[1][0],p[2][0]),Math.min(p[0][1],p[1][1],p[2][1]),Math.max(p[0][0],p[1][0],p[2][0]),Math.max(p[0][1],p[1][1],p[2][1])];
