@@ -370,12 +370,15 @@ test('worker-packed topology is remapped to resident GPU slots without repacking
  const {r}=fakeRenderer();const {packTransitionTopology,MORPH_RANGE_OFFSET,MORPH_COORD_OFFSET}=await import('../src/planet/transition-upload.js');
  const records=[{key:'a',slot:7,coordinates:new Float32Array([0,0,1,0,0,1])},{key:'b',slot:23,coordinates:new Float32Array([8,8,9,8,8,9])}];
  const packed=packTransitionTopology(records.map((v,slot)=>({...v,slot})),undefined,null,records.length);
+ const writes=[],write=r.device.queue.writeBuffer;r.device.queue.writeBuffer=(target,offset,data)=>{writes.push({target,offset,size:data.byteLength});write(target,offset,data);};
  r.uploadTransitionTopology(records.map(({key,slot})=>({key,slot})),{keys:['a','b'],...packed});
+ assert.deepEqual(writes[0],{target:r.morphBuffer,offset:MORPH_RANGE_OFFSET+7*128,size:17*128});
  const ranges=new Uint32Array(r.morphBuffer.data,MORPH_RANGE_OFFSET,1024*32);
  assert.deepEqual([...ranges.slice(7*32,8*32)],[...packed.ranges.slice(0,32)]);
  assert.deepEqual([...ranges.slice(23*32,24*32)],[...packed.ranges.slice(32,64)]);
  assert.deepEqual([...new Float32Array(r.morphBuffer.data,MORPH_COORD_OFFSET,packed.coordinates.length)],[...packed.coordinates]);
  assert.throws(()=>r.uploadTransitionTopology([{key:'missing',slot:7}],{keys:['a'],...packed}),/Invalid prepared topology/);
+ assert.throws(()=>r.uploadTransitionTopology([{key:'a',slot:1024}],{keys:['a'],...packed}),/Invalid topology slot/);
 });
 
 test('stable frames avoid redundant active-slot uploads and rebuild after reset',async()=>{

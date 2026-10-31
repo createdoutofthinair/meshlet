@@ -172,18 +172,28 @@ export class PlanetRenderer {
   run('markRiverPresence');run('buildRiverPaths',0,this.worldCount*17);pass.end();d.queue.submit([encoder.finish()]);this.hydrologySeed=seed;this.terrainFieldRevision++;this.terrainPointCache=null;
  }
  uploadTransitionTopology(records,prepacked=null){
-  let packed;
+  let packed,firstSlot=1024,lastSlot=-1;
+  for(const {slot} of records){
+   if(!Number.isInteger(slot)||slot<0||slot>=1024)throw new Error('Invalid topology slot');
+   firstSlot=Math.min(firstSlot,slot);lastSlot=Math.max(lastSlot,slot);
+  }
   if(prepacked){
    if(prepacked.ranges.length!==prepacked.keys.length*32)throw new Error('Invalid prepared topology ranges');
-   const ranges=new Uint32Array(1024*16*2),slots=new Set(),ids=new Map(prepacked.keys.map((key,index)=>[key,index]));
+   const ranges=new Uint32Array(Math.max(0,lastSlot-firstSlot+1)*32),slots=new Set(),ids=new Map(prepacked.keys.map((key,index)=>[key,index]));
+   if(ids.size!==prepacked.keys.length)throw new Error('Invalid prepared topology keys');
    for(const record of records){
     const index=ids.get(record.key);if(index===undefined||slots.has(record.slot))throw new Error('Invalid prepared topology');
-    ranges.set(prepacked.ranges.subarray(index*32,index*32+32),record.slot*32);slots.add(record.slot);
+    ranges.set(prepacked.ranges.subarray(index*32,index*32+32),(record.slot-firstSlot)*32);slots.add(record.slot);
    }
    if(slots.size!==ids.size)throw new Error('Prepared topology does not match selection');
    packed={ranges,slots,coordinates:prepacked.coordinates,vertexCount:prepacked.vertexCount};
   }else packed=packTransitionTopology(records);
-  this.device.queue.writeBuffer(this.morphBuffer,MORPH_RANGE_OFFSET,packed.ranges);
+  // Only slots marked as overlays in morph metadata read their ranges. Old
+  // inactive ranges can remain untouched, avoiding a full 128 KiB upload.
+  if(lastSlot>=firstSlot){
+   const ranges=prepacked?packed.ranges:packed.ranges.subarray(firstSlot*32,(lastSlot+1)*32);
+   this.device.queue.writeBuffer(this.morphBuffer,MORPH_RANGE_OFFSET+firstSlot*128,ranges);
+  }
   if(packed.coordinates.length)this.device.queue.writeBuffer(this.morphBuffer,MORPH_COORD_OFFSET,packed.coordinates);
   this.topologySlots=packed.slots;this.morphVertexCount=packed.vertexCount;
  }
