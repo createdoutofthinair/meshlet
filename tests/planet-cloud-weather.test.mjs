@@ -11,4 +11,5 @@ test('planet cloud shader uses precomputed wind and weather axis uniforms',async
  assert.ok(shader.includes('let axis=params.shape.yzw;'));
  assert.ok(shader.includes('params.sky.y,params.cloud.w,.00028/max(.5,params.shape.x)'));
  assert.ok(!shader.includes('sin(seed*.07)'));
+ assert.ok(shader.includes('min(2.0,atmosphereMiePhase(mu))*density*params.atmosphere.y;'),'planet atmosphere keeps the Mie-strength control');
 });

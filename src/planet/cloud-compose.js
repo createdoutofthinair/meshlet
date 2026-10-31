@@ -17,6 +17,6 @@ export function planetCloudSource(atmosphere,cloud,fragment){
    coarse=firstCoarse*.7+cloudNoise(q*.78+vec3<f32>(3.0,9.0,17.0))*.3;`)
   .replace('let lower=threshold;','let lower=threshold-.04*(1.0-detailWeight);')
   .replace('let upperThreshold=threshold+.23;','let upperThreshold=threshold+.23+.16*(1.0-detailWeight);');
- const tuned=atmosphere.replace('let warm=vec3<f32>(1.0,.30,.075)*(twilight*.28+day*.035)*min(2.0,atmosphereMiePhase(mu))*density;', 'let warm=vec3<f32>(1.0,.30,.075)*(twilight*.28+day*.035)*min(2.0,atmosphereMiePhase(mu))*density*params.atmosphere.y;').replace('return skyLight*density+warm+sun;', 'return skyLight*density*params.atmosphere.x+warm+sun;');
+ const tuned=atmosphere.replace('let warmContribution=vec3<f32>(1.0,.30,.075)*(twilight*.28+day*.035)*min(2.0,atmosphereMiePhase(mu))*density;', 'let warmContribution=vec3<f32>(1.0,.30,.075)*(twilight*.28+day*.035)*min(2.0,atmosphereMiePhase(mu))*density*params.atmosphere.y;').replace('return skyLight*density+warm+sun;', 'return skyLight*density*params.atmosphere.x+warm+sun;');
  return tuned+'\n'+prefix+'\n'+fragment;
 }

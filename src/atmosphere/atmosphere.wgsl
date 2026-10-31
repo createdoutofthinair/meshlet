@@ -14,7 +14,12 @@ fn atmosphereSky(direction:vec3<f32>,sunDirection:vec3<f32>,upDirection:vec3<f32
  let sunElevation=dot(sunDirection,upDirection);let day=atmosphereDaylight(sunElevation);let twilight=atmosphereTwilight(sunElevation);
  let horizon=pow(1.0-up,2.0);let rayleigh=atmosphereRayleighPhase(mu);
  let base=mix(vec3<f32>(.13,.27,.45),vec3<f32>(.48,.58,.64),horizon);
- let warm=vec3<f32>(1.0,.30,.075)*(twilight*.28+day*.035)*min(2.0,atmosphereMiePhase(mu))*density;
+ var warm=vec3<f32>(0.0);
+ // With no daylight or twilight the Mie contribution is exactly zero.
+ if(day>0.0 || twilight>0.0){
+  let warmContribution=vec3<f32>(1.0,.30,.075)*(twilight*.28+day*.035)*min(2.0,atmosphereMiePhase(mu))*density;
+  warm=warmContribution;
+ }
  let dip=sqrt(2.0*max(0.0,altitude)/6371000.0);let discVisible=smoothstep(-.015,.015,sunElevation+dip);
  var sun=vec3<f32>(0.0);
  // Below the horizon, or in the opposite half of the sky, the solar disc
