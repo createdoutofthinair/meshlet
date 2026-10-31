@@ -15,12 +15,18 @@ self.onmessage=({data})=>{
  }
  const signatures=transitionSignatures(result.visible),previous=snapshot.previousPatches||[];
  // Most stable complete coverings return above. Only calculate signatures for
- // the old snapshot when the slower topology comparison can actually use them.
- if(data.allowUnchanged&&data.options.includeHidden&&previous.length>0&&result.visible.length===previous.length&&result.leaves.length===previous.length&&!snapshot.signatures)
-  snapshot.signatures=transitionSignatures(previous);
+ // the old snapshot when every new key is present. Equal patch counts alone
+ // are common at the budget limit even when the covering has changed.
+ const sameSize=data.allowUnchanged&&data.options.includeHidden&&previous.length>0&&result.visible.length===previous.length&&result.leaves.length===previous.length;
+ let sameKeys=false;
+ if(sameSize){
+  snapshot.keys??=new Set(previous.map(node=>node.key));
+  sameKeys=snapshot.keys.size===previous.length&&result.visible.every(node=>snapshot.keys.has(node.key));
+  if(sameKeys&&!snapshot.signatures)snapshot.signatures=transitionSignatures(previous);
+ }
  // A complete unchanged covering tree needs neither slot allocation nor a
  // replacement tree sent back through structured cloning.
- if(data.allowUnchanged&&data.options.includeHidden&&previous.length>0&&result.visible.length===previous.length&&result.leaves.length===previous.length&&
+ if(sameKeys&&
   snapshot.signatures&&result.visible.every(node=>snapshot.signatures.get(node.key)===signatures.get(node.key))){
   self.postMessage({id:data.id,key:data.key,camera:data.camera,unchanged:true,leafCount:result.leaves.length,deepest:result.deepest,selectionMs:performance.now()-start});return;
  }
