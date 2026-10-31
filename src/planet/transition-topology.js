@@ -23,11 +23,12 @@ function clip(polygon,a,b){
 function triangles({mask=0,originX=0,originY=0,scale=1}={}){
  if(!Number.isInteger(mask)||mask<0||mask>15||![originX,originY,scale].every(Number.isFinite)||scale<=0||scale>1||originX<0||originY<0||originX+16*scale>16+EPS||originY+16*scale>16+EPS)throw new Error('Invalid transition surface mapping');
  const result=[];
+ const point=(x,y)=>{const [u,v]=stitched([x,y],mask);return [(u-originX)/scale,(v-originY)/scale];};
  for(let y=0;y<16;y++)for(let x=0;x<16;x++){
-  const points=[[x,y],[x+1,y],[x,y+1],[x+1,y+1]].map(p=>stitched(p,mask)).map(([u,v])=>[(u-originX)/scale,(v-originY)/scale]);
-  for(const ids of [[0,1,2],[1,3,2]]){
-   const p=ids.map(i=>points[i]);if(cross(...p)<=EPS)continue;
-   const box=[Math.min(...p.map(v=>v[0])),Math.min(...p.map(v=>v[1])),Math.max(...p.map(v=>v[0])),Math.max(...p.map(v=>v[1]))];
+  const p0=point(x,y),p1=point(x+1,y),p2=point(x,y+1),p3=point(x+1,y+1);
+  for(const p of [[p0,p1,p2],[p1,p3,p2]]){
+   if(cross(...p)<=EPS)continue;
+   const box=[Math.min(p[0][0],p[1][0],p[2][0]),Math.min(p[0][1],p[1][1],p[2][1]),Math.max(p[0][0],p[1][0],p[2][0]),Math.max(p[0][1],p[1][1],p[2][1])];
    if(box[2]<0||box[3]<0||box[0]>16||box[1]>16)continue;
    result.push({points:p,box});
   }
