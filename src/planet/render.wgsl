@@ -184,13 +184,20 @@ fn fs(in:Output)->TerrainPixel {
    let grainData=localNoiseGradient(in.detailHigh,in.detailLow,detailDelta,8388608.0,frame.counts.z+1721u);
    let grain=grainData.x;
    let grainFilter=1.0-smoothstep(.00004,.00015,footprint);
-   let exposed=smoothstep(.006,.12,slope)*(1.0-snowCover);
-   base*=1.0+grain*mix(.035,.065,exposed)*grainFilter;
-   materialOcclusion=1.0-max(0.0,-grain)*.12*grainFilter*(1.0-water);
+   // Rock uses a softly folded mineral pattern; soil and sand retain the
+   // smoother grain field. The analytic derivative follows the same blend.
+   // Smooth the fold at zero so normals stay bounded around the ridge.
+   let fold=sqrt(grain*grain+.01);
+   let rockGrain=1.0-2.0*fold;
+   let materialGrain=mix(grain,rockGrain,exposedWeight);
+   let grainDerivative=mix(1.0,-2.0*grain/fold,exposedWeight);
+   base*=1.0+materialGrain*mix(.035,.065,exposedWeight)*grainFilter;
+   materialOcclusion=1.0-max(0.0,-materialGrain)*.12*grainFilter*(1.0-water);
    // The analytic gradient adds sub-mesh shading without changing the
    // actual height, so walking and LOD transitions keep the same surface.
-   let tangentGradient=grainData.yzw-n*dot(n,grainData.yzw);
-   n=normalize(n-tangentGradient*mix(.035,.11,exposed)*grainFilter*(1.0-water));
+   let gradient=grainData.yzw*grainDerivative;
+   let tangentGradient=gradient-n*dot(n,gradient);
+   n=normalize(n-tangentGradient*mix(.035,.075,exposedWeight)*grainFilter*(1.0-water));
   }
  }
  // Terrain is predominantly dielectric. Keep the specular response broad and

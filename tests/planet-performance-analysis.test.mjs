@@ -23,3 +23,15 @@ test('analysis reports the 99th percentile of valid samples',()=>{
  const result=analyze({samples:Array.from({length:100},(_,i)=>({frameMs:i+1}))});
  assert.equal(result.overall.frameMs.p99,99);
 });
+
+test('separates walking from low flight without treating missing altitude as zero',()=>{
+ const result=analyze({samples:[
+  {frameMs:10,camera:{mode:'walk',altitudeKm:.0017}},
+  {frameMs:20,camera:{mode:'flight',altitudeKm:.049}},
+  {frameMs:30,camera:{mode:'flight',altitudeKm:.05}},
+  {frameMs:40,camera:{mode:'flight'}},
+ ]});
+ assert.equal(result.surfacePhases.walking.samples,1);
+ assert.equal(result.surfacePhases['low flight (<50 m)'].frameMs.p50,20);
+ assert.equal(result.surfacePhases['flight 50 m–1 km'].frameMs.p50,30);
+});
