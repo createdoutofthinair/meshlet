@@ -1,4 +1,4 @@
-import {RADIUS_KM,HEIGHT_LIMIT_KM,PATCH_CELLS,MAX_DEPTH,FACE_BASES,faceCube,faceDirection,directionToFace,makeTile,dot,sub,length} from './planet-math.js';
+import {RADIUS_KM,HEIGHT_LIMIT_KM,PATCH_CELLS,MAX_DEPTH,FACE_BASES,faceCube,faceDirection,directionToFace,makeTile,dot,length} from './planet-math.js';
 
 // Covering leaves include the entire planet. The renderer can request every
 // leaf as a resident patch so transitions never depend on partial visibility.
@@ -191,19 +191,14 @@ function score(node,camera,pixelSize=10,errorEstimates=null) {
  // every front-facing cube face. Limiting this to the face under the camera
  // makes a neighboring face appear kilometers away on high mountains.
  const radial=camera.selection.faceRadial[node.face];
- if(camera.clearance<50&&radial.denom>0){
+ const nearRadial=camera.clearance<50&&radial.denom>0;
+ if(nearRadial||facing.face===node.face){
   const half=node.span/2;
-  const u=Math.max(node.u-half,Math.min(node.u+half,radial.u));
-  const v=Math.max(node.v-half,Math.min(node.v+half,radial.v));
-  const nearest=faceDirection(node.face,u,v).map(x=>x*camera.selection.surfaceRadius);
-  distance=Math.min(distance,length(sub(nearest,camera.eye)));
- }
- else if(facing.face===node.face){
-  const half=node.span/2;
-  const u=Math.max(node.u-half,Math.min(node.u+half,facing.u));
-  const v=Math.max(node.v-half,Math.min(node.v+half,facing.v));
-  const nearest=faceDirection(node.face,u,v).map(x=>x*camera.selection.surfaceRadius);
-  distance=Math.min(distance,length(sub(nearest,camera.eye)));
+  const target=nearRadial?radial:facing;
+  const u=Math.max(node.u-half,Math.min(node.u+half,target.u));
+  const v=Math.max(node.v-half,Math.min(node.v+half,target.v));
+  const nearest=faceDirection(node.face,u,v),surfaceRadius=camera.selection.surfaceRadius;
+  distance=Math.min(distance,Math.hypot(nearest[0]*surfaceRadius-camera.eye[0],nearest[1]*surfaceRadius-camera.eye[1],nearest[2]*surfaceRadius-camera.eye[2]));
  }
  if(facing.face===node.face && Math.abs(facing.u-node.u)<=node.span/2 && Math.abs(facing.v-node.v)<=node.span/2 && camera.clearance<50)distance=Math.min(distance,Math.max(.001,camera.clearance));
  distance=Math.max(.001,distance);
