@@ -117,10 +117,29 @@ export function coordinateTransitions(previous,next,groups=transitionGroups(prev
  return [...components.values()].map(c=>({groups:c.groups,slots:[...c.slots],deferredReasons:[...c.reasons].sort()}));
 }
 
-export function transitionSignatures(nodes){
+export function transitionSignatures(nodes,previous=null){
  const wantedNodes=new Map(nodes.map(p=>[p.key,p]));
+ const previousNodes=previous?new Map(previous.nodes.map(p=>[p.key,p])):null;
+ const equalKeys=(a,b)=>a.length===b.length&&a.every((key,i)=>key===b[i]);
+ const reusable=node=>{
+  if(!previousNodes||!previous.signatures.has(node.key))return false;
+  const old=previousNodes.get(node.key);
+  if(!old||old.normalStitch!==node.normalStitch||!equalKeys(old.edgeKeys,node.edgeKeys)||old.cornerKeys.length!==node.cornerKeys.length)return false;
+  for(let i=0;i<node.cornerKeys.length;i++)if(!equalKeys(old.cornerKeys[i],node.cornerKeys[i]))return false;
+  for(const key of node.edgeKeys){const a=previousNodes.get(key),b=wantedNodes.get(key);if(!!a!==!!b||(a&&a.normalStitch!==b.normalStitch))return false;}
+  for(const corner of node.cornerKeys)for(const key of [node.key,...corner]){
+   const a=previousNodes.get(key),b=wantedNodes.get(key);
+   if(!!a!==!!b)return false;
+   if(a){
+    if(a.normalStitch!==b.normalStitch||!equalKeys(a.edgeKeys,b.edgeKeys))return false;
+    for(const peer of b.edgeKeys)if(previousNodes.has(peer)!==wantedNodes.has(peer))return false;
+   }
+  }
+  return true;
+ };
   // A changed stitch graph may alter geometry even for a retained patch.
  const signatureFor=node=>{
+   if(reusable(node))return previous.signatures.get(node.key);
    let hash=(2166136261^node.normalStitch)>>>0;
    // Math.imul and xor already preserve the same 32-bit pattern; convert to
    // unsigned once at the end rather than for every character of every key.

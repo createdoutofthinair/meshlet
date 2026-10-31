@@ -4,6 +4,7 @@ import {transitionCoordinates} from './transition-topology.js';
 import {packTransitionTopology} from './transition-upload.js';
 let cachedErrors=new Map();
 let cachedSelection={previousLeaves:null,previousSplits:null,previousPatches:[]};
+let lastSignatures=null;
 self.onmessage=({data})=>{
  const start=performance.now();
  if(data.errorEstimates!=null)cachedErrors=data.errorEstimates;
@@ -13,7 +14,8 @@ self.onmessage=({data})=>{
  if(result.unchanged){
   self.postMessage({id:data.id,key:data.key,camera:data.camera,...result,selectionMs:performance.now()-start});return;
  }
- const signatures=transitionSignatures(result.visible),previous=snapshot.previousPatches||[];
+ const signatures=transitionSignatures(result.visible,lastSignatures),previous=snapshot.previousPatches||[];
+ lastSignatures={nodes:result.visible,signatures};
  // Most stable complete coverings return above. Only calculate signatures for
  // the old snapshot when every new key is present. Equal patch counts alone
  // are common at the budget limit even when the covering has changed.

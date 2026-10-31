@@ -9,6 +9,20 @@ test('terrain stitch signatures retain unsigned 32-bit results',()=>{
  assert.equal(transitionSignatures(nodes).get(nodes[0].key),3796864848);
 });
 
+test('cached stitch signatures match a full rebuild as adjacency changes',async()=>{
+ const {planetCamera}=await import('../src/planet/camera.js');
+ const {selectPatches}=await import('../src/planet/quadtree.js');
+ const options={budget:120,pixelSize:10,includeHidden:true};
+ const before=selectPatches(planetCamera({mode:'flight',altitude:50,longitude:.8,latitude:.4},960,600),options);
+ const after=selectPatches(planetCamera({mode:'flight',altitude:25,longitude:.9,latitude:.4},960,600),{...options,previousLeaves:before.leaves});
+ const previous={nodes:before.visible,signatures:transitionSignatures(before.visible)};
+ for(const nodes of [before.visible,after.visible,after.visible.slice(1)])
+  assert.deepEqual(transitionSignatures(nodes,previous),transitionSignatures(nodes));
+ const modified=structuredClone(before.visible);
+ modified[0].normalStitch^=1;modified[0].edgeKeys[0]=null;
+ assert.deepEqual(transitionSignatures(modified,previous),transitionSignatures(modified));
+});
+
 test('transition comparisons pair actual parent and child in both directions',()=>{
  const parent=tile(1,2,1,2,5,2),children=[tile(1,3,2,4,10,1),tile(1,3,3,4,11),tile(1,3,2,5,12),tile(1,3,3,5,13)];
  for(const [old,next] of [[[parent],children],[children,[parent]]]){
