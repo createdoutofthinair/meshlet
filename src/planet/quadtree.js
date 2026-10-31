@@ -18,10 +18,15 @@ function tileAt(leaves,face,u,v,maxDepth,index=null,hint=0) {
  if(index&&hint>0&&hint<=maxDepth){
   const n=2**hint,x=Math.floor(uu*n),y=Math.floor(vv*n);
   const node=index.get(numericTileKey(face,hint,x,y));if(node)return node;
+  // A balanced neighbor is normally one level coarser or finer. Probe those
+  // levels before walking from the root through deep near-surface trees.
+  const lower=hint-1,upper=hint+1,lowerSize=n/2;
+  const coarser=index.get(numericTileKey(face,lower,Math.floor(uu*lowerSize),Math.floor(vv*lowerSize)));if(coarser)return coarser;
+  if(upper<=maxDepth){const finer=index.get(numericTileKey(face,upper,Math.floor(uu*n*2),Math.floor(vv*n*2)));if(finer)return finer;}
  }
  let n=1;
  for(let level=0;level<=maxDepth;level++,n*=2){
-  if(index&&hint>0&&level===hint)continue;
+  if(index&&hint>0&&hint<=maxDepth&&Math.abs(level-hint)<=1)continue;
   const x=Math.floor(uu*n),y=Math.floor(vv*n);
   const node=index?index.get(numericTileKey(face,level,x,y)):leaves.get(`${face}/${level}/${x}/${y}`);if(node)return node;
  }
