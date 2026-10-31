@@ -615,11 +615,17 @@ export class PlanetRenderer {
   if(this.stage?.state==='waiting'&&now>=this.stage.nextMeasure){this.stage.state='building';this.transition={...this.transition,waiting:false};}
   if(this.selectionResult){
    const ready=this.selectionResult;this.selectionResult=null;
-   if(ready.result?.compactLeaves){ready.result.leaves=ready.result.visible;delete ready.result.compactLeaves;}
    const current=[this.generation,this.cameraState.mode,this.budget,this.maxDepth,this.pixelSize,camera.width,camera.height].join('/');
    const movement=Math.hypot(...camera.eye.map((x,i)=>x-ready.camera.eye[i]));
    if(ready.snapshotMissing){this.workerSelectionSnapshot=null;this.workerCoveringResultId=null;this.needsSelection=true;}
-   else if(!this.stage&&current===ready.key&&movement<=Math.max(.05,ready.camera.clearance*.7)&&dot(camera.forward,ready.camera.forward)>=Math.cos(20*Math.PI/180)){
+   else if(!this.stage&&current===ready.key&&movement<=Math.max(.05,ready.camera.clearance*.7)&&dot(camera.forward,ready.camera.forward)>=Math.cos(20*Math.PI/180)&&
+    (!ready.result?.compactPatchDelta||this.workerSelectionSnapshot?.patches===this.patches)){
+    if(ready.result?.compactPatchDelta){
+     ready.result.visible=ready.result.visible.map(node=>typeof node==='number'?this.patches[node]:node);
+     if(ready.result.visible.some(node=>!node))throw new Error('Invalid terrain patch delta');
+     delete ready.result.compactPatchDelta;
+    }
+    if(ready.result?.compactLeaves){ready.result.leaves=ready.result.visible;delete ready.result.compactLeaves;}
     if(ready.unchanged){
      const maxDepth=this.cameraState.mode==='walk'?22:this.maxDepth;
      this.selectionState={eye:[...ready.camera.eye],forward:[...ready.camera.forward],mode:this.cameraState.mode,budget:this.budget,maxDepth,pixelSize:this.pixelSize,width:ready.camera.width,height:ready.camera.height,generation:this.generation};
@@ -648,7 +654,7 @@ export class PlanetRenderer {
     const errors=this.selectionErrorEstimates();
     const errorEstimates=this.workerErrorVersion===errors.version?null:errors.values;
     this.workerErrorVersion=errors.version;
-    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,errorEstimates,snapshotPresent,snapshotReuseId,deriveLeaves,allowUnchanged:true,compactLeaves:true,previousPatches:snapshotPresent&&snapshotReuseId==null?this.patches:null});
+    this.selectionRequest={id};this.selectionWorker.postMessage({id,key,camera,options,errorEstimates,snapshotPresent,snapshotReuseId,deriveLeaves,allowUnchanged:true,compactLeaves:true,compactPatchDelta:true,previousPatches:snapshotPresent&&snapshotReuseId==null?this.patches:null});
    }
   }
   const stage=this.stage;

@@ -364,6 +364,26 @@ test('renderer reuses a committed worker snapshot and retries if it was evicted'
  }finally{if(old===undefined)delete globalThis.Worker;else globalThis.Worker=old;}
 });
 
+test('renderer reconstructs patch deltas and discards them after snapshot changes',async()=>{
+ const old=globalThis.Worker;let worker;
+ globalThis.Worker=class {constructor(){worker=this;}postMessage(message){this.message=message;}terminate(){}};
+ try{
+  const {r}=fakeRenderer();r.frame(1000);await flush();
+  const first=worker.message,{selectPatches}=await import('../src/planet/quadtree.js');
+  const {transitionSignatures}=await import('../src/planet/patch-transition.js');
+  const result=selectPatches(first.camera,first.options);result.leaves=null;result.compactLeaves=true;
+  worker.onmessage({data:{...first,result,selectionMs:1}});r.frame(1200);await flush();
+  const keys=r.patches.map(p=>p.key);r.reconcileSelection=true;r.needsSelection=true;r.lastSelection=0;r.frame(1400);await flush();
+  const request=worker.message,delta={visible:keys.map((_,i)=>i),leaves:null,compactLeaves:true,compactPatchDelta:true,splits:r.previousSplits,deepest:r.stats.deepest};
+  worker.onmessage({data:{...request,result:delta,signatures:transitionSignatures(r.patches),selectionMs:1}});
+  r.frame(1600);await flush();assert.deepEqual(r.patches.map(p=>p.key),keys);assert.equal(r.stats.selectionMs>=1,true);
+  r.reconcileSelection=true;r.needsSelection=true;r.lastSelection=0;r.frame(1800);await flush();
+  const stale=worker.message;r.workerSelectionSnapshot={...r.workerSelectionSnapshot,patches:[]};
+  worker.onmessage({data:{...stale,result:{...delta,visible:keys.map((_,i)=>i),compactPatchDelta:true,compactLeaves:true,leaves:null},selectionMs:1}});
+  r.frame(2000);await flush();assert.deepEqual(r.patches.map(p=>p.key),keys);assert.ok(worker.message.id>stale.id);
+ }finally{if(old===undefined)delete globalThis.Worker;else globalThis.Worker=old;}
+});
+
 test('flight selection waits for meaningful camera movement but continues pending LOD reconciliation',async()=>{
  const {r}=fakeRenderer();r.frame(1000);await flush();
  const {planetCamera}=await import('../src/planet/camera.js');const camera=planetCamera(r.cameraState,960,600);

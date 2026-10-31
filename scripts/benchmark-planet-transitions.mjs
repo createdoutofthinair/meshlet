@@ -53,8 +53,8 @@ console.log(`synthetic descent worker: p50=${percentile(.5)} ms p95=${percentile
 // a changing complete covering. Node timings exclude browser thread scheduling
 // and should not be interpreted as measured frame times.
 const cloneRequest={id:1,key:'clone-benchmark',camera,options:{...options,previousSplits:before.splits},previousPatches:before.visible,snapshotPresent:true,deriveLeaves:true,compactLeaves:true,allowUnchanged:true};
-const inputTimes=[],outputTimes=[];
-self.postMessage=(message,transfers)=>{const start=performance.now();response=structuredClone(message,{transfer:transfers||[]});outputTimes.push(performance.now()-start);};
+const inputTimes=[],outputTimes=[],fullSelectionTimes=[];
+self.postMessage=(message,transfers)=>{fullSelectionTimes.push(message.selectionMs);const start=performance.now();response=structuredClone(message,{transfer:transfers||[]});outputTimes.push(performance.now()-start);};
 for(let i=0;i<runs;i++){
  const start=performance.now(),input=structuredClone(cloneRequest);inputTimes.push(performance.now()-start);self.onmessage({data:input});
 }
@@ -66,3 +66,17 @@ const reuseTimes=[];
 for(let i=0;i<runs;i++){const start=performance.now();structuredClone(reuseRequest);reuseTimes.push(performance.now()-start);}
 reuseTimes.sort((a,b)=>a-b);
 console.log(`reused snapshot request copy: p50=${reuseTimes[Math.ceil(reuseTimes.length*.5)-1].toFixed(3)} ms p95=${reuseTimes[Math.ceil(reuseTimes.length*.95)-1].toFixed(3)} ms`);
+outputTimes.length=0;
+const deltaTimes=[],deltaSelectionTimes=[];let reusedPatches=0;
+self.postMessage=(message,transfers)=>{
+ deltaSelectionTimes.push(message.selectionMs);
+ const start=performance.now(),copy=structuredClone(message,{transfer:transfers||[]});
+ if(copy.result?.compactPatchDelta){reusedPatches=copy.result.visible.filter(node=>typeof node==='number').length;copy.result.visible=copy.result.visible.map(node=>typeof node==='number'?before.visible[node]:node);}
+ deltaTimes.push(performance.now()-start);
+};
+for(let i=0;i<runs;i++)self.onmessage({data:structuredClone({...cloneRequest,compactPatchDelta:true})});
+deltaTimes.sort((a,b)=>a-b);
+console.log(`delta response copy and reconstruction: p50=${deltaTimes[Math.ceil(deltaTimes.length*.5)-1].toFixed(3)} ms p95=${deltaTimes[Math.ceil(deltaTimes.length*.95)-1].toFixed(3)} ms reused=${reusedPatches}/${before.visible.length}`);
+for(const [label,times] of [['full response worker',fullSelectionTimes],['delta response worker',deltaSelectionTimes]]){
+ times.sort((a,b)=>a-b);console.log(`${label}: p50=${times[Math.ceil(times.length*.5)-1].toFixed(3)} ms p95=${times[Math.ceil(times.length*.95)-1].toFixed(3)} ms`);
+}

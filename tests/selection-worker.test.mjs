@@ -120,3 +120,25 @@ test('a committed worker result can be reused as a snapshot without cloning patc
   assert.equal(messages[3].snapshotMissing,true);
  }finally{delete globalThis.self;}
 });
+
+test('worker patch deltas reconstruct the same changed covering and transition plans',async()=>{
+ const messages=[];globalThis.self={postMessage:value=>messages.push(structuredClone(value))};
+ try{
+  await import('../src/planet/selection-worker.js?patch-delta-test');
+  const options={budget:120,pixelSize:6,includeHidden:true};
+  const firstCamera=planetCamera({mode:'walk',altitude:.0017,longitude:.8,latitude:.4,pitch:.2},960,600);
+  const nextCamera=planetCamera({mode:'walk',altitude:.0017,longitude:.801,latitude:.4,pitch:.2},960,600);
+  const previous=selectPatches(firstCamera,options);
+  const input={key:'test',camera:nextCamera,options:{...options,previousSplits:previous.splits},previousPatches:previous.visible,snapshotPresent:true,deriveLeaves:true,compactLeaves:true};
+  self.onmessage({data:{...input,id:1,compactPatchDelta:true}});
+  const delta=messages[0];assert.equal(delta.result.compactPatchDelta,true);
+  assert.ok(delta.result.visible.some(node=>typeof node==='number'));
+  delta.result.visible=delta.result.visible.map(node=>typeof node==='number'?previous.visible[node]:node);
+  delete delta.result.compactPatchDelta;
+  await import('../src/planet/selection-worker.js?full-patch-delta-test');
+  self.onmessage({data:{...input,id:2}});
+  const full=messages[1];assert.deepEqual(delta.result,full.result);
+  assert.deepEqual(delta.relationships,full.relationships);assert.deepEqual(delta.componentPlan,full.componentPlan);
+  assert.deepEqual(delta.signatures,full.signatures);assert.deepEqual(delta.packedTopology,full.packedTopology);
+ }finally{delete globalThis.self;}
+});

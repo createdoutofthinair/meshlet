@@ -9,6 +9,13 @@ let offeredSelection=null;
 // transitionCoordinates returns immutable cached arrays; weak keys allow
 // evicted coordinate arrays and their layouts to be collected together.
 const topologyLayouts=new WeakMap();
+const equalArray=(a,b)=>a?.length===b?.length&&a.every((value,i)=>value===b[i]);
+function samePatch(a,b){
+ return a.key===b.key&&a.face===b.face&&a.level===b.level&&a.x===b.x&&a.y===b.y&&
+  a.span===b.span&&a.u===b.u&&a.v===b.v&&a.stitch===b.stitch&&a.normalStitch===b.normalStitch&&
+  equalArray(a.direction,b.direction)&&equalArray(a.coarseKeys,b.coarseKeys)&&equalArray(a.edgeKeys,b.edgeKeys)&&
+  a.cornerKeys.length===b.cornerKeys.length&&a.cornerKeys.every((corner,i)=>equalArray(corner,b.cornerKeys[i]));
+}
 self.onmessage=({data})=>{
  const start=performance.now();
  if(data.errorEstimates!=null)cachedErrors=data.errorEstimates;
@@ -73,5 +80,11 @@ self.onmessage=({data})=>{
  // The renderer can reconstruct leaves from visible nodes after cloning,
  // avoiding a second copy of every patch's geometry metadata.
  if(compactCover){result.leaves=null;result.compactLeaves=true;}
- self.postMessage({id:data.id,key:data.key,camera:data.camera,result,relationships,groupPlan,componentPlan,signatures,topology:packed?null:topology,packedTopology:packed?{keys,ranges:packed.ranges,coordinates:packed.coordinates,vertexCount:packed.vertexCount}:null,selectionMs:performance.now()-start},transfers);
+ let outputResult=result;
+ if(data.compactPatchDelta&&compactCover&&previous.length){
+  const indices=new Map();for(let i=0;i<previous.length;i++)indices.set(previous[i].key,i);
+  const visible=result.visible.map(node=>{const index=indices.get(node.key);return index!==undefined&&samePatch(node,previous[index])?index:node;});
+  outputResult={...result,visible,compactPatchDelta:true};
+ }
+ self.postMessage({id:data.id,key:data.key,camera:data.camera,result:outputResult,relationships,groupPlan,componentPlan,signatures,topology:packed?null:topology,packedTopology:packed?{keys,ranges:packed.ranges,coordinates:packed.coordinates,vertexCount:packed.vertexCount}:null,selectionMs:performance.now()-start},transfers);
 };
