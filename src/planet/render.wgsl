@@ -33,7 +33,8 @@ fn debugHash(value:u32)->u32{
 @vertex
 fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->Output {
  let entry=visible[instance];let slot=entry>>4u;let meshlet=entry&15u;let tile=patches[slot];
- let overlay=morphs.patches[slot].slots.w!=0u && (morphs.patches[slot].slots.z&16u)!=0u;
+ let morph=morphs.patches[slot];
+ let overlay=morph.slots.w!=0u && (morph.slots.z&16u)!=0u;
  // Regular patches never use transition ranges. Avoid a storage-buffer read
  // for each of their vertex invocations.
  var range=vec2<u32>(0u);
@@ -46,22 +47,22 @@ fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->
  let cellOrigin=vec2<u32>((meshlet%4u)*4u+cell%4u,(meshlet/4u)*4u+cell/4u);
  let triBase=(corner/3u)*3u;
  var a=vec2<f32>(cellOrigin+offsets[triBase]);var b=vec2<f32>(cellOrigin+offsets[triBase+1u]);var c=vec2<f32>(cellOrigin+offsets[triBase+2u]);
- let stitch=tile.details.z;var coord=stitchCoord(cellOrigin+offsets[corner],stitch);
+ let stitch=tile.details.z;let coord=stitchCoord(cellOrigin+offsets[corner],stitch);
  var q=vec2<f32>(coord);
  if(overlay){
-  q=morphs.coordinates[range.x+vertex];coord=vec2<u32>(round(q));
+  q=morphs.coordinates[range.x+vertex];
   // Triangle corners are needed only for patch/meshlet edge overlays.
   if((frame.counts.w&264u)!=0u){
    let first=range.x+vertex-vertex%3u;
    a=morphs.coordinates[first];b=morphs.coordinates[first+1u];c=morphs.coordinates[first+2u];
   }
  }
- var vert=vertices[slot*GRID_COUNT+(coord.y+2u)*GRID+coord.x+2u];
+ var vert:PlanetVertex;
  var relative:vec3<f32>;
- if(morphs.patches[slot].slots.w!=0u){
-  let mask=select(stitch,morphs.patches[slot].slots.z&15u,overlay);
-  let displayed=displayedVertex(slot,q,mask);vert=displayed.vertex;relative=displayed.relative;
- }else{relative=tile.relative.xyz+vert.position.xyz;}
+ if(morph.slots.w!=0u){
+  let mask=select(stitch,morph.slots.z&15u,overlay);
+  let displayed=displayedVertex(slot,q,mask,morph);vert=displayed.vertex;relative=displayed.relative;
+ }else{vert=vertices[slot*GRID_COUNT+(coord.y+2u)*GRID+coord.x+2u];relative=tile.relative.xyz+vert.position.xyz;}
  let local=vert.position.xyz+(relative-(tile.relative.xyz+vert.position.xyz));
  var mask=0u;
  if((frame.counts.w & 8u)!=0u){if(onPatchEdge(b,c)){mask|=1u;}if(onPatchEdge(c,a)){mask|=2u;}if(onPatchEdge(a,b)){mask|=4u;}}

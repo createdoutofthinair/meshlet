@@ -24,8 +24,8 @@ fn displayedSample(slot:u32,q:vec2<f32>)->vec3<f32>{
 // Rendering needs both attributes and positions from the same endpoint
 // triangles. Return both to avoid sampling each endpoint twice.
 struct DisplayedVertex {vertex:PlanetVertex,relative:vec3<f32>};
-fn displayedVertex(slot:u32,q:vec2<f32>,mask:u32)->DisplayedVertex{
- let m=morphs.patches[slot];var fine=sampleSurfaceVertex(slot,q,mask);
+fn displayedVertex(slot:u32,q:vec2<f32>,mask:u32,m:PatchMorph)->DisplayedVertex{
+ var fine=sampleSurfaceVertex(slot,q,mask);
  let fineRelative=patches[slot].relative.xyz+fine.position.xyz;
  if(m.mapping.w>=1.0){return DisplayedVertex(fine,fineRelative);}
  let coarse=sampleSurfaceVertex(m.slots.x,m.mapping.xy+q*m.mapping.z,m.slots.y);
