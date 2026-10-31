@@ -126,13 +126,13 @@ export function transitionSignatures(nodes){
    // unsigned once at the end rather than for every character of every key.
    const mixKey=key=>{for(let i=0;i<key.length;i++)hash=Math.imul(hash^key.charCodeAt(i),16777619);};
    for(const key of node.edgeKeys){
-    const other=wantedNodes.get(key);if(!other){hash=Math.imul(hash^0xff,16777619)>>>0;continue;}
-    mixKey(key);hash=Math.imul(hash^other.normalStitch,16777619)>>>0;
+    const other=wantedNodes.get(key);if(!other){hash=Math.imul(hash^0xff,16777619);continue;}
+    mixKey(key);hash=Math.imul(hash^other.normalStitch,16777619);
    }
    for(const corner of node.cornerKeys){
-    const owners=new Set([node.key,...corner]);hash=Math.imul(hash^0x7f,16777619)>>>0;
+    const owners=new Set([node.key,...corner]);hash=Math.imul(hash^0x7f,16777619);
     for(const key of [...owners].sort()){
-     const other=wantedNodes.get(key);if(!other)continue;mixKey(key);hash=Math.imul(hash^other.normalStitch,16777619)>>>0;
+     const other=wantedNodes.get(key);if(!other)continue;mixKey(key);hash=Math.imul(hash^other.normalStitch,16777619);
      for(const peer of other.edgeKeys)if(owners.has(peer)&&wantedNodes.has(peer))mixKey(peer);
     }
    }
