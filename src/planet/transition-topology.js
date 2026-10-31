@@ -58,8 +58,8 @@ export function buildTransitionTopology(from={},to={}){
   for(let e=0;e<3&&polygon.length;e++)polygon=clip(polygon,b.points[e],b.points[(e+1)%3]);
   for(const [p,q] of edges)if(polygon.length)polygon=clip(polygon,p,q);
   for(let k=1;k+1<polygon.length;k++){
-   const tri=[polygon[0],polygon[k],polygon[k+1]];if(cross(...tri)<=EPS)continue;
-   coordinates.push(...tri.flat());sources.push(i,j);
+   const a=polygon[0],b=polygon[k],c=polygon[k+1];if(cross(a,b,c)<=EPS)continue;
+   coordinates.push(a[0],a[1],b[0],b[1],c[0],c[1]);sources.push(i,j);
   }
   }
  }
