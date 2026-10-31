@@ -91,8 +91,14 @@ fn fs(in:Output)->TerrainPixel {
  let separateSea=!land && (frame.counts.w&32u)!=0u;
  // Filter the geographic sea boundary over its pixel footprint. This only
  // antialiases the edge; it does not move the seeded shoreline with LOD.
- let coastWidth=max(.00001,fwidth(coast.x)*.55);let seaCoverage=1.0-smoothstep(-coastWidth,coastWidth,coast.x);
- let pixelKm=max(length(dpdx(in.direction)),length(dpdy(in.direction)))*6371.0;var waterField=vec2<f32>(0.0);
+ let coastWidth=max(.00001,fwidth(coast.x)*.55);
+ let pixelKm=max(length(dpdx(in.direction)),length(dpdy(in.direction)))*6371.0;
+ let footprint=max(length(dpdx(in.relative)),length(dpdy(in.relative)));
+ // The analytic ocean pass will replace these fragments. Discard after the
+ // derivatives needed by the remaining terrain, before material shading.
+ if(separateSea){discard;}
+ let seaCoverage=1.0-smoothstep(-coastWidth,coastWidth,coast.x);
+ var waterField=vec2<f32>(0.0);
  if(frame.hydrology.y>.5 && frame.hydrology.x>0.0 && land){
   // Query the seeded world at the fragment's location, not a water mask
   // interpolated from whichever terrain patch or LOD happens to cover it.
@@ -129,7 +135,6 @@ fn fs(in:Output)->TerrainPixel {
  base=mix(base,seaColor,seaCoverage);
  // A single filtered mineral band adds subtle variation without an expensive
  // extra normal-noise evaluation at every close-up pixel.
- let footprint=max(length(dpdx(in.relative)),length(dpdy(in.relative)));
  if(land && water<.1 && (frame.counts.w&2u)==0u && footprint<.004){
   let visibleHeight=select(in.height,max(in.height,0.0),frame.settings.z>.5);
   let elevation=visibleHeight/frame.settings.x;
@@ -161,6 +166,5 @@ fn fs(in:Output)->TerrainPixel {
  // The second target retains the fragment depth and flags geographic lake
  // pixels by sign. The independent water pass uses it to locate each basin.
  let lakePixel=land && waterField.x>.5 && (frame.counts.w&32u)!=0u;
- if(separateSea){discard;}
  return TerrainPixel(vec4<f32>(color,1.0),select(in.position.z,-in.position.z,lakePixel));
 }
