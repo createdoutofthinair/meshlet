@@ -89,8 +89,11 @@ fn cloudDensityWithTerms(p:vec3<f32>,detailWeight:f32,height:f32,terms:CloudWeat
  // Outside the vertical shell both profiles are exactly zero. Shadow rays
  // frequently leave it, so avoid their smoothstep and coordinate work.
  if(height<=0.0 || height>=1.0 || params.sky.w<=0.0){return 0.0;}
- let low=smoothstep(0.0,.055,height)*(1.0-smoothstep(.18,.40,height));
- let tall=smoothstep(0.0,.08,height)*(1.0-smoothstep(.55,1.0,height));
+ // At either end of the weather-type blend one profile contributes exactly
+ // zero. The blend is fixed for the ray, so skip that profile's smoothsteps.
+ var low=0.0;var tall=0.0;
+ if(terms.typeBlend<1.0){low=smoothstep(0.0,.055,height)*(1.0-smoothstep(.18,.40,height));}
+ if(terms.typeBlend>0.0){tall=smoothstep(0.0,.08,height)*(1.0-smoothstep(.55,1.0,height));}
  let profile=mix(low,tall,terms.typeBlend);
  if(profile<=0.0){return 0.0;}
  let global=vec3<f32>(p.x,PLANET_RADIUS+p.y,p.z);
