@@ -31,8 +31,8 @@ const PLANET_RADIUS:f32=6371000.0;
 // Local tangent coordinates keep the camera near the origin; rationalized
 // radial altitude avoids subtracting nearly equal planet-sized floats.
 fn planetAltitude(p:vec3<f32>)->f32{
- let y=PLANET_RADIUS+p.y;let r=sqrt(y*y+dot(p.xz,p.xz));
- return p.y+dot(p.xz,p.xz)/max(1.0,r+y);
+ let y=PLANET_RADIUS+p.y;let horizontalSquared=dot(p.xz,p.xz);let r=sqrt(y*y+horizontalSquared);
+ return p.y+horizontalSquared/max(1.0,r+y);
 }
 // Intersection with a sphere specified by height above the planet surface.
 // The quadratic constant uses height differences to preserve f32 precision.

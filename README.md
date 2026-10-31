@@ -34,6 +34,8 @@ New terrain patches are prepared while the existing mesh remains visible. A GPU 
 
 Open **Terrain inspector** from the view or control panel. Its movable window keeps a rolling 60-second graph of frame and CPU time, asynchronous GPU timings, the latest LOD difference, active patches or visible meshlets. Frame history includes both the average and peak within each quarter-second sample; GPU values are sampled separately and may be unavailable on some adapters. Pause or clear the graph, or export its current history as JSON. The LOD graph marks the 0.5-pixel target and clips its display above 64 pixels; the numeric measurement and export retain the recorded value.
 
+For statistics recordings, run `npm run analyze:planet -- planet-performance.json` (add more filenames to inspect multiple recordings). The report groups timings by altitude and gives sample counts, median, 95th percentile and maximum; missing GPU timings are omitted rather than counted as zero. Compare recordings made with similar settings, hardware and flight paths. Selection timings can repeat between selection events and CPU submit time does not include all CPU work.
+
 Choose a color overlay for quadtree levels, patch identity or meshlet identity, adjust its strength, and independently show patch boundaries, meshlet boundaries or triangle wireframe. Lines follow the actual projected terrain triangles; patch and meshlet colors are categorical and can repeat. The level histogram counts active selected patches rather than pixels or GPU-visible meshlets. The inspector can be closed without disabling overlays. Overlays visualize the terrain mesh over water and may affect GPU timings, so turn them off for a clean performance comparison.
 
 ## River Lab
